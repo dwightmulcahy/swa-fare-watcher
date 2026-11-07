@@ -31,9 +31,22 @@ A small multi-user web app that searches Southwest fares once a day for each use
 
 ## How it works
 
-One container runs the web app, a single background worker and a daily scheduler. At `SWA_DAILY_AT` every eligible user is queued; the worker processes one user at a time in one Chromium browser (headed inside a private Xvfb display, which Southwest blocks less often), with a random 8–20 s pause between page loads. A flight matches when it passes the stops, duration and time filters **and** either cash ≤ max cash, or points ≤ max points with ¢/pt ≥ the minimum. ¢/pt = (cash fare − points taxes) ÷ points × 100. Each user gets one email per run listing only flights that are new or cheaper than last alerted. If all of a user's searches fail, they get an email asking them to upload a fresh session.
+One container runs the web app, a single background worker and a daily scheduler. At `SWA_DAILY_AT` every eligible user is queued; the worker processes one user at a time in one browser, with a random 8–20 s pause between page loads. A flight matches when it passes the stops, duration and time filters **and** either cash ≤ max cash, or points ≤ max points with ¢/pt ≥ the minimum. ¢/pt = (cash fare − points taxes) ÷ points × 100. Each user gets one email per run listing only flights that are new or cheaper than last alerted. If all of a user's searches fail, they get an email asking them to upload a fresh session.
 
-State lives in `/data`: `app.db` (SQLite), `secret.key` (encrypts Southwest sessions; back it up with the DB) and `debug/` (screenshots and raw JSON of failed searches).
+### Looking like a person, not a bot
+
+Southwest's bot detection looks at the browser fingerprint and at how the page is used. The watcher:
+
+- **Runs real Google Chrome** (amd64 image; arm64 falls back to Chromium, as Chrome has no Linux arm64 build), **headed** in a private Xvfb display, never headless.
+- **Hides automation:** launches without `--enable-automation` and with `AutomationControlled` disabled, so `navigator.webdriver` is `false` natively (no injected script that could itself be detected).
+- **Keeps a consistent fingerprint per user:** a persistent Chrome profile in `/data/profiles/<user id>` (Southwest's device cookies, cache and storage survive between runs, so it's the same "returning device" and less likely to trigger verification), a fixed real window size per user, real `en-US` language and the container's time zone (`TZ`, or `SWA_TIMEZONE`).
+- **Behaves like a visitor** (`app/human.py`): lands on the home page first and looks around; after each result page loads, moves the mouse along curved, eased paths with tremor and occasional overshoot, scrolls with uneven wheel notches, and dwells a few seconds. Clicks land at a random point inside the target after a short hover, with a realistic press duration. Typing uses varied (log-normal) key gaps, slower at word boundaries, occasional hesitations, and neighbouring-key typos fixed with Backspace (off for passwords). All input goes through real trusted mouse/keyboard events.
+
+`python -m app selftest` launches the browser exactly as searches do and checks the result: Chrome in use, `navigator.webdriver` false, no "Headless" in the user agent, all events trusted, and text typed with typos ends up exact. CI runs it inside the built image.
+
+None of this guarantees Southwest won't block requests; it lowers the odds. Fewer searches per day help more than anything.
+
+State lives in `/data`: `app.db` (SQLite), `secret.key` (encrypts Southwest sessions; back it up with the DB), `profiles/` (one Chrome profile per user; removed when the user clears their Southwest session or is deleted) and `debug/` (screenshots and raw JSON of failed searches).
 
 ## Run with Docker
 
@@ -75,7 +88,10 @@ Only `southwest.com` cookies are kept. Sessions are encrypted with a key derived
 | `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |
 | `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
 | `SWA_SEARCH_DELAY` | `8,20` | Random pause range between searches (seconds) |
-| `SWA_HEADLESS` | `false` | `true` runs Chromium headless (no Xvfb; more likely blocked) |
+| `SWA_HEADLESS` | `false` | `true` runs the browser headless (no Xvfb; more likely blocked) |
+| `SWA_BROWSER_CHANNEL` | `auto` | `auto` = Google Chrome if installed, else Chromium; or `chrome`, `chromium`, `msedge` |
+| `SWA_HUMANIZE` | `true` | Home-page warm-up and mouse/scroll/dwell behaviour around searches |
+| `SWA_TIMEZONE` | container `TZ` | Browser time zone; match where the server's IP is |
 | `SESSION_DAYS` | `14` | Web sign-in lifetime |
 
 ## Run without Docker

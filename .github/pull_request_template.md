@@ -9,7 +9,7 @@
 - [ ] `ruff check . --select F` and `pyflakes` pass
 - [ ] `pytest -q`
 - [ ] Compose validation passes
-- [ ] Docker image + Chromium smoke passes
+- [ ] Docker image + browser smoke passes
 
 ## Impact
 

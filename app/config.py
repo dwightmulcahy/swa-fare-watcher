@@ -29,7 +29,10 @@ class Settings:
         self.admin_username = _env("ADMIN_USERNAME", "admin")
         self.admin_password = _env("ADMIN_PASSWORD")
         self.headless = _bool("SWA_HEADLESS", False)
-        self.browser_channel = _env("SWA_BROWSER_CHANNEL")
+        # auto = Google Chrome if installed, else Playwright's bundled Chromium
+        self.browser_channel = _env("SWA_BROWSER_CHANNEL", "auto")
+        self.browser_timezone = _env("SWA_TIMEZONE")  # default: the container's TZ
+        self.humanize = _bool("SWA_HUMANIZE", True)
         lo, hi = (float(x) for x in _env("SWA_SEARCH_DELAY", "8,20").split(","))
         self.search_delay = (lo, hi)
         self.max_dates_per_watch = int(_env("MAX_DATES_PER_WATCH", "31"))

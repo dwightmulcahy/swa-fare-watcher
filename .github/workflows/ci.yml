@@ -49,7 +49,7 @@ jobs:
       - run: python -m pytest -q
 
   docker-smoke:
-    name: Docker image + Chromium smoke
+    name: Docker image + browser smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -83,8 +83,11 @@ jobs:
           base="http://localhost:${PORT}"
           curl -fsS -c jar -b jar -o /dev/null -w '%{http_code}\n' -d 'username=admin&password=ci-admin-password' "$base/login" | grep -q 303
           curl -fsS -c jar -b jar "$base/admin" | grep -q '<h1>Users</h1>'
-      - name: Launch Chromium inside the container
-        run: timeout 120 docker exec app python -m app selftest
+      - name: Real Chrome, hidden automation and human input inside the container
+        run: |
+          set -o pipefail
+          timeout 180 docker exec app python -m app selftest | tee selftest.txt
+          grep -q '^browser: chrome ' selftest.txt   # amd64 image must use Google Chrome, not Chromium
       - name: Scan image for fixable high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

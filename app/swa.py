@@ -1,11 +1,13 @@
 """Southwest search, parsing, filtering and cash-vs-points scoring."""
 import datetime as dt
+import hashlib
 import json
 import os
 import select
 import shutil
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlencode
 
 from .config import settings
@@ -175,14 +177,45 @@ def normalize_state(raw: str) -> dict:
 
 
 # ---------- browser ----------
+HOME_URL = "https://www.southwest.com/"
+# Common real desktop window sizes; each user always gets the same one (stable fingerprint).
+WINDOW_SIZES = [(1366, 768), (1440, 900), (1536, 864), (1600, 900), (1680, 1050), (1920, 1080), (1280, 800)]
+SCREEN = (1920, 1080)
+LAUNCH_ARGS = [
+    "--disable-blink-features=AutomationControlled",  # navigator.webdriver stays false, like a real browser
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--password-store=basic",
+    "--lang=en-US",
+    "--disk-cache-size=67108864",
+]
+# Playwright adds these by default; real Chrome never runs with them.
+IGNORE_DEFAULT_ARGS = ["--enable-automation", "--disable-component-extensions-with-background-pages"]
+
+
+def window_size_for(key):
+    if key is None:
+        return WINDOW_SIZES[0]
+    h = int(hashlib.sha256(f"window:{key}".encode()).hexdigest(), 16)
+    return WINDOW_SIZES[h % len(WINDOW_SIZES)]
+
+
+def profile_dir(key):
+    return settings.data_dir / "profiles" / str(key)
+
+
+def wipe_profile(key):
+    shutil.rmtree(profile_dir(key), ignore_errors=True)
+
+
 def start_xvfb(timeout=10):
-    """Start a private virtual display so Chromium can run headed without a desktop.
+    """Start a private virtual display so Chrome can run headed without a desktop.
     Returns (process, ':N')."""
     if not shutil.which("Xvfb"):
         raise RuntimeError("Xvfb not installed: install it or set SWA_HEADLESS=true")
     r, w = os.pipe()
     proc = subprocess.Popen(
-        ["Xvfb", "-displayfd", str(w), "-screen", "0", "1366x900x24", "-nolisten", "tcp"],
+        ["Xvfb", "-displayfd", str(w), "-screen", "0", f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp"],
         pass_fds=(w,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(w)
     try:
@@ -197,33 +230,76 @@ def start_xvfb(timeout=10):
 
 
 class BrowserSearcher:
-    """One Chromium context per user run; loads and returns that user's Southwest session."""
-
-    def __init__(self, state=None):
-        self.state = state
-        self._pw = self._browser = self._ctx = self.page = None
+    """One persistent browser profile per user. The profile keeps Southwest's device cookies,
+    cache and local storage between runs, so the site sees the same returning browser."""
 
     _xvfb = None
+
+    def __init__(self, state=None, profile_key=None, human=None):
+        self.state = state
+        self.profile_key = profile_key
+        self.humanize = settings.humanize if human is None else human
+        self._pw = self._ctx = self.page = self.human = None
+        self._tmp_profile = None
+        self._warmed = False
+        self.channel = None
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
 
-        kw = {"headless": settings.headless}
-        if settings.browser_channel:
-            kw["channel"] = settings.browser_channel
+        from .human import Human
+
+        width, height = window_size_for(self.profile_key)
+        env = {**os.environ, "LANG": "en_US.UTF-8"}
         if not settings.headless and not os.environ.get("DISPLAY") and sys.platform.startswith("linux"):
             self._xvfb, display = start_xvfb()
-            kw["env"] = {**os.environ, "DISPLAY": display}
+            env["DISPLAY"] = display
+        if self.profile_key is None:
+            self._tmp_profile = tempfile.mkdtemp(prefix="swa-profile-")
+            user_dir = self._tmp_profile
+        else:
+            user_dir = profile_dir(self.profile_key)
+            user_dir.mkdir(parents=True, exist_ok=True)
+        kw = dict(
+            user_data_dir=str(user_dir), headless=settings.headless, env=env,
+            args=[*LAUNCH_ARGS, f"--window-size={width},{height}", "--window-position=0,0"],
+            ignore_default_args=IGNORE_DEFAULT_ARGS,
+            no_viewport=True,  # page size comes from the real window, so inner/outer/screen sizes agree
+            locale="en-US",
+        )
+        if settings.browser_timezone:
+            kw["timezone_id"] = settings.browser_timezone
         try:
             self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch(**kw)
-            self._ctx = self._browser.new_context(
-                storage_state=self.state, viewport={"width": 1366, "height": 900}, locale="en-US")
-            self.page = self._ctx.new_page()
+            self._ctx = self._launch(kw)
+            if self.state and self.state.get("cookies"):
+                self._ctx.add_cookies(self.state["cookies"])
+            self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+            self.page.set_default_timeout(30_000)
+            self.human = Human(self.page)
         except BaseException:
             self.__exit__(None, None, None)
             raise
         return self
+
+    def _launch(self, kw):
+        want = settings.browser_channel
+        if want in ("auto", "chrome"):
+            try:
+                ctx = self._pw.chromium.launch_persistent_context(channel="chrome", **kw)
+                self.channel = "chrome"
+                return ctx
+            except Exception as e:
+                if want == "chrome":
+                    raise
+                print(f"[browser] Google Chrome unavailable ({str(e).splitlines()[0][:120]}); "
+                      "using bundled Chromium", file=sys.stderr)
+        elif want and want != "chromium":
+            ctx = self._pw.chromium.launch_persistent_context(channel=want, **kw)
+            self.channel = want
+            return ctx
+        self.channel = "chromium"
+        return self._pw.chromium.launch_persistent_context(**kw)
 
     def __exit__(self, *exc):
         try:
@@ -231,11 +307,10 @@ class BrowserSearcher:
                 self.state = self._ctx.storage_state()
         except Exception:
             pass
-        for closer in (self._ctx, self._browser):
-            try:
-                closer and closer.close()
-            except Exception:
-                pass
+        try:
+            self._ctx and self._ctx.close()
+        except Exception:
+            pass
         if self._pw:
             self._pw.stop()
         if self._xvfb:
@@ -244,6 +319,19 @@ class BrowserSearcher:
                 self._xvfb.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._xvfb.kill()
+        if self._tmp_profile:
+            shutil.rmtree(self._tmp_profile, ignore_errors=True)
+
+    def warm_up(self):
+        """Arrive at the home page and look around before the first search, like a visitor would."""
+        self._warmed = True
+        if not self.humanize:
+            return
+        try:
+            self.page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60_000)
+            self.human.read(self.human.rng.uniform(3, 7))
+        except Exception as e:
+            print(f"[warn] warm-up visit failed ({e.__class__.__name__})", file=sys.stderr)
 
     def search(self, origin, dest, date, adults, fare_type):
         q = {
@@ -253,16 +341,25 @@ class BrowserSearcher:
             "passengerType": "ADULT", "returnDate": "", "tripType": "oneway", "reset": "true",
         }
         tag = f"{origin}-{dest}-{date}-{fare_type}"
+        if not self._warmed:
+            self.warm_up()
+        referer = self.page.url if self.page.url.startswith("https://www.southwest.com") else None
         try:
             with self.page.expect_response(
                 lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=60_000
             ) as info:
-                self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded")
+                self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded",
+                               referer=referer)
             payload = info.value.json()
         except Exception as e:
             print(f"[warn] {tag}: no fare data ({e.__class__.__name__})", file=sys.stderr)
             self._dump(tag)
             return None
+        if self.humanize:
+            try:
+                self.human.read()  # look over the results before moving on
+            except Exception:
+                pass
         flights = parse_flights(payload)
         if flights is None:
             print(f"[warn] {tag}: unrecognized response shape", file=sys.stderr)
@@ -282,9 +379,52 @@ class BrowserSearcher:
             pass
 
 
-def selftest():
-    """Launch Chromium exactly as searches do (headed in Xvfb unless SWA_HEADLESS) and exit."""
-    with BrowserSearcher() as b:
-        b.page.set_content("<title>ok</title>")
-        assert b.page.title() == "ok"
+SELFTEST_PAGE = """<!doctype html><title>selftest</title>
+<body style="margin:0;height:2400px;font-family:sans-serif">
+<input id="q" style="position:absolute;left:300px;top:260px;width:320px;height:36px">
+<button id="go" style="position:absolute;left:300px;top:340px;width:140px;height:40px">Go</button>
+<script>
+window.ev = {moves: 0, trustedClicks: 0, keys: 0, untrusted: 0, wheels: 0};
+addEventListener('mousemove', e => { ev.moves++; if (!e.isTrusted) ev.untrusted++; });
+addEventListener('wheel', e => { ev.wheels++; });
+addEventListener('keydown', e => { ev.keys++; if (!e.isTrusted) ev.untrusted++; });
+document.getElementById('go').addEventListener('click', e => { if (e.isTrusted) ev.trustedClicks++; });
+</script>"""
+
+
+def selftest(verbose=True):
+    """Launch the browser exactly as searches do, then exercise human input on a local page.
+    Fails if automation is visible (navigator.webdriver) or the input isn't trusted/accurate."""
+    import random
+
+    from .human import Human
+
+    with BrowserSearcher(human=True) as b:
+        p = b.page
+        p.set_content(SELFTEST_PAGE)
+        h = Human(p, rng=random.Random(7), typo_rate=0.25, speed=0.2)
+        text = "Dallas Love Field, 2026"
+        h.type(p.locator("#q"), text)
+        h.click(p.locator("#go"))
+        h.scroll(300)
+        info = p.evaluate("""() => ({value: document.getElementById('q').value, ev: window.ev,
+            webdriver: navigator.webdriver, ua: navigator.userAgent, lang: navigator.language,
+            inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight],
+            screen: [screen.width, screen.height], tz: Intl.DateTimeFormat().resolvedOptions().timeZone})""")
+        problems = []
+        if info["value"] != text:
+            problems.append(f"typed {info['value']!r}, expected {text!r}")
+        if info["webdriver"]:
+            problems.append("navigator.webdriver is true")
+        if "Headless" in info["ua"]:
+            problems.append("user agent says Headless")
+        ev = info["ev"]
+        if ev["trustedClicks"] != 1 or ev["untrusted"] or ev["moves"] < 10 or ev["keys"] < len(text):
+            problems.append(f"unexpected input events {ev}")
+        if verbose:
+            print(f"browser: {b.channel}  ua: {info['ua']}")
+            print(f"window: inner {info['inner']} outer {info['outer']} screen {info['screen']}  "
+                  f"lang {info['lang']}  tz {info['tz']}  events {ev}")
+        if problems:
+            raise SystemExit("selftest FAILED: " + "; ".join(problems))
     print("selftest ok")

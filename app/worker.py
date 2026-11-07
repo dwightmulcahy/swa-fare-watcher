@@ -110,7 +110,7 @@ class Worker:
         hits, attempts, failures = [], 0, 0
         limited = False
 
-        with self.searcher_factory(state) as searcher:
+        with self.searcher_factory(state, profile_key=user_id) as searcher:
             for w in watches:
                 run_id = None
                 with db.tx() as con:

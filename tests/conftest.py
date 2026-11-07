@@ -26,8 +26,9 @@ class FakeSearcher:
     calls = []
     fail = False
 
-    def __init__(self, state=None):
+    def __init__(self, state=None, profile_key=None):
         self.state = state
+        self.profile_key = profile_key
 
     def __enter__(self):
         return self

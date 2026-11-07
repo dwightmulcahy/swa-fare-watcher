@@ -476,6 +476,7 @@ def create_app(worker=None, start_worker=True):
         with db.tx() as con:
             con.execute("UPDATE users SET swa_state=NULL, swa_state_updated=NULL, swa_status=NULL WHERE id=?",
                         (u["id"],))
+        swa.wipe_profile(u["id"])  # also forget the browser's own Southwest cookies
         raise Redirect("/settings?ok=Southwest+session+removed")
 
     # ---------- admin ----------
@@ -610,6 +611,7 @@ def create_app(worker=None, start_worker=True):
             raise Redirect("/admin?err=You+can't+delete+yourself")
         with db.tx() as con:
             con.execute("DELETE FROM users WHERE id=?", (uid,))
+        swa.wipe_profile(uid)
         raise Redirect(f"/admin?ok=Deleted+{t['username']}")
 
     @app.post("/admin/run-all")

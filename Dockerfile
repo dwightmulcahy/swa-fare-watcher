@@ -11,16 +11,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     TZ=UTC
 
+ARG TARGETARCH
 WORKDIR /app
 COPY requirements.txt ./
-# Chromium + its OS libraries, and Xvfb so the browser runs headed (far less likely to be blocked).
-# The app starts its own Xvfb display per run. pip is removed afterwards: the runtime
-# doesn't need it, and its vendored packages trip the vulnerability scan.
+# Browser + its OS libraries, and Xvfb so it runs headed (far less likely to be blocked).
+# amd64 gets real Google Chrome (the app prefers it); Chrome has no Linux arm64 build, so
+# arm64 uses Playwright's Chromium. The app starts its own Xvfb display per run.
+# pip is removed afterwards: the runtime doesn't need it, and its vendored packages trip
+# the vulnerability scan.
 RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends xvfb tzdata \
  && pip install -r requirements.txt \
  && playwright install --with-deps chromium \
+ && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "amd64" ]; then playwright install --with-deps chrome; fi \
+ && apt-get install -y --no-install-recommends fonts-liberation fonts-noto-color-emoji \
  && { pip uninstall -y setuptools wheel || true; } \
  && pip uninstall -y pip \
  && rm -rf /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip* /root/.cache \
