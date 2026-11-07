@@ -74,6 +74,39 @@ Each user uploads their own signed-in session under **Settings → Southwest ses
 
 Only `southwest.com` cookies are kept. Sessions are encrypted with a key derived from `SECRET_KEY` (or `/data/secret.key`). Refreshed cookies are saved after each successful run. Without a session, searches run signed out (prices still show, but points prices are not account-specific).
 
+## Test automated sign-in on your machine
+
+`python -m app login-test` signs in to southwest.com with your credentials using exactly what the app uses: real Chrome with the hardened launch settings, a persistent profile, and human-like mouse, typing and reading behaviour. Run it on your own computer to see whether Southwest lets an automated sign-in through.
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+playwright install chrome        # or: playwright install chromium (Linux arm64)
+cp .env.example .env             # set SWA_USERNAME and SWA_PASSWORD (or omit SWA_PASSWORD to be prompted)
+python -m app login-test
+```
+
+A Chrome window opens and you can watch it:
+
+1. Opens southwest.com and looks around for a few seconds.
+2. Clicks **Log in**, types your username (with the occasional corrected typo) and password (no typos), and submits with the form's own button.
+3. Reports one of: `SUCCESS`, `ALREADY_SIGNED_IN` (the saved profile still has a session), `MFA_REQUIRED`, `BAD_CREDENTIALS`, `BLOCKED`, `NOT_FOUND` or `TIMEOUT`. The exit code is 0, 2, 3, 4 or 5 respectively.
+
+- **Verification code:** if Southwest asks for one, the script prompts for it in the terminal and types it in. If Southwest first asks *how* to send the code, pick in the window and press Enter in the terminal.
+- **On success** it saves `storage_state.json`, which you can upload in the app under **Settings → Southwest session**.
+- **Every step is recorded** in `data/login-test/<timestamp>/`: numbered screenshots, `steps.log`, and `network.log` (Southwest request paths and status codes only; no bodies, query strings or credentials). If it fails, those files show exactly where.
+- **The profile persists** in `data/profiles/login-test`, so a second run is a returning device and may skip the verification code. `--fresh` starts over as a new device.
+
+| Option | Effect |
+|---|---|
+| `--fresh` | Empty profile (new device) |
+| `--server` | Hidden virtual display like the container (Linux, needs `xvfb`) |
+| `--keep-open` | Leave the window open at the end |
+| `--no-assist` / `--no-prompt` | Never pause for help / never ask for a code (unattended behaviour) |
+| `--save-state FILE` | Where to save the session on success |
+
+Don't run it over and over if it fails: repeated failed sign-ins can lock the account. Element detection uses several strategies per field (accessible labels and roles first, then CSS) because Southwest's markup isn't documented; it's tested against a local fake airline site (`tests/fake_swa/`) for success, saved-profile, verification-code, wrong-password and blocked flows.
+
 ## Configuration
 
 | Variable | Default | Purpose |

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fake Airline | Book flights</title>
+<style>
+ body{font-family:sans-serif;margin:0} header{display:flex;justify-content:space-between;padding:14px 24px;background:#223}
+ header a,header button{color:#fff;background:none;border:0;font-size:15px} main{padding:24px;min-height:1600px}
+ #modal{display:none;position:fixed;inset:80px 30% auto;background:#fff;border:1px solid #999;padding:24px}
+ #modal.open{display:block} label{display:block;margin:10px 0} input{display:block;width:260px;padding:6px}
+</style></head>
+<body>
+<header><a href="#">Fake Airline</a><nav id="nav"><button id="login-btn" type="button">Log in</button></nav></header>
+<main>
+ <h1>Low fares. Earn 50,000 points with our card.</h1>
+ <section><label>Promo code <input id="promo" name="promoCode"></label></section>
+ <p>Book now and enter code at checkout.</p>
+</main>
+<div id="modal" role="dialog" aria-label="Log in">
+ <form id="f">
+  <label for="u">Account number or username</label><input id="u" name="username" autocomplete="username">
+  <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password">
+  <button type="submit">Log in</button>
+  <p id="err" role="alert"></p>
+ </form>
+ <form id="mfa" hidden>
+  <p>We sent a verification code to your email. Enter the code below.</p>
+  <label for="c">Verification code</label><input id="c" autocomplete="one-time-code" inputmode="numeric">
+  <button type="submit">Verify</button>
+ </form>
+</div>
+<script>
+const mode = new URLSearchParams(location.search).get('mode') || 'ok';
+const events = window.events = {untrusted: 0, keys: 0, moves: 0};
+addEventListener('keydown', e => { events.keys++; if (!e.isTrusted) events.untrusted++; });
+addEventListener('mousemove', e => { events.moves++; if (!e.isTrusted) events.untrusted++; });
+if (localStorage.getItem('signedIn')) signedIn(localStorage.getItem('signedIn'));
+function signedIn(name) {
+  document.getElementById('modal').classList.remove('open');
+  document.getElementById('nav').innerHTML = '<span style="color:#fff">Hi, ' + name + '</span> <a href="#" id="logout">Log out</a>';
+}
+document.getElementById('login-btn').addEventListener('click', e => {
+  if (!e.isTrusted) return;  // like real bot protection: synthetic clicks do nothing
+  document.getElementById('modal').classList.add('open');
+});
+document.getElementById('f').addEventListener('submit', e => {
+  e.preventDefault();
+  setTimeout(() => {
+    const u = document.getElementById('u').value, p = document.getElementById('p').value;
+    if (mode === 'block') { document.body.innerHTML = '<h1>Access Denied</h1>'; document.title = 'Access Denied'; return; }
+    if (u !== 'dwight123' || p !== 'S3cret!pass') {
+      document.getElementById('err').textContent = 'The username/account number and password you entered do not match our records.';
+      return;
+    }
+    if (mode === 'mfa') { document.getElementById('f').hidden = true; document.getElementById('mfa').hidden = false; return; }
+    localStorage.setItem('signedIn', 'Dwight'); signedIn('Dwight');
+  }, 600);
+});
+document.getElementById('mfa').addEventListener('submit', e => {
+  e.preventDefault();
+  if (document.getElementById('c').value === '123456') { localStorage.setItem('signedIn', 'Dwight'); signedIn('Dwight'); }
+});
+</script>
+</body></html>

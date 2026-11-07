@@ -1,32 +1,134 @@
 """CLI.
 
   python -m app serve [--host 0.0.0.0] [--port 8080]   run web app + worker + daily scheduler
-  python -m app selftest                               launch Chromium and exit (CI smoke)
-  python -m app swa-login [storage_state.json]         desktop helper: sign in to Southwest,
-                                                       save the session file to upload in Settings
+  python -m app selftest                               launch the browser as searches do and exit (CI smoke)
+  python -m app login-test [options]                   try an automated Southwest sign-in with your
+                                                       credentials, using the app's browser + human input
+  python -m app swa-login [storage_state.json]         sign in to Southwest yourself; save the session
+                                                       file to upload in Settings
 """
 import argparse
+import datetime as dt
+import getpass
 import os
 import sys
+from pathlib import Path
+
+
+def load_dotenv(path=".env"):
+    """Minimal .env reader: KEY=VALUE lines; real environment variables win."""
+    p = Path(path)
+    if not p.is_file():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+            v = v[1:-1]
+        os.environ.setdefault(k.strip(), v)
+
+
+def _visible_display():
+    return not sys.platform.startswith("linux") or bool(os.environ.get("DISPLAY"))
 
 
 def swa_login(out):
-    from playwright.sync_api import sync_playwright
+    from .swa import BrowserSearcher, HOME_URL
 
-    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    if not _visible_display():
         sys.exit("swa-login needs a desktop with a visible browser.")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        ctx = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en-US")
-        page = ctx.new_page()
-        page.goto("https://www.southwest.com/")
+    with BrowserSearcher(profile_key="manual-login", human=False) as b:
+        b.page.goto(HOME_URL)
         input("Log in to Rapid Rewards in the browser window, then press Enter here... ")
-        ctx.storage_state(path=out)
-        browser.close()
+    Path(out).write_text(__import__("json").dumps(b.state, indent=2))
     print(f"Saved {out}. Upload it under Settings → Southwest session.")
 
 
+def login_test(a):
+    """Standalone automated sign-in test. Exit code: 0 signed in, 2 needs verification code,
+    3 wrong credentials, 4 blocked, 5 couldn't find the form / timed out."""
+    if a.server:
+        os.environ.pop("DISPLAY", None)  # behave like the container: private Xvfb display
+    from .config import settings
+    from .swa import BrowserSearcher, wipe_profile
+    from .swa_login import Recorder, login, watch_network
+
+    username = a.username or os.environ.get("SWA_USERNAME") or input("Rapid Rewards number or username: ").strip()
+    password = os.environ.get("SWA_PASSWORD") or getpass.getpass("Southwest password: ")
+    if not username or not password:
+        sys.exit("Need SWA_USERNAME and SWA_PASSWORD (in .env or the environment).")
+
+    interactive = sys.stdin.isatty() and not a.no_prompt
+    watching = interactive and _visible_display() and not settings.headless
+
+    def code_provider():
+        if not interactive:
+            return None
+        return input("Enter the verification code Southwest sent you (blank to stop): ").strip() or None
+
+    def manual_assist(msg):
+        if not watching:
+            return False
+        input(msg + " ")
+        return True
+
+    profile = a.profile
+    if a.fresh:
+        wipe_profile(profile)
+    out_dir = settings.data_dir / "login-test" / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    print(f"Profile: {settings.data_dir / 'profiles' / profile}  (persists between runs; --fresh to reset)")
+    print(f"Screenshots and logs: {out_dir}")
+    print(f"Mode: {'visible window' if _visible_display() else 'hidden virtual display (server mode)'}"
+          f"{'' if settings.humanize else ', humanize OFF'}")
+
+    result, state = None, None
+    with BrowserSearcher(profile_key=profile) as b:
+        rec = Recorder(b.page, out_dir)
+        rec.log(f"Browser: {b.channel}  "
+                f"UA: {b.page.evaluate('navigator.userAgent')}  "
+                f"webdriver: {b.page.evaluate('navigator.webdriver')}")
+        watch_network(b.page, rec)
+        try:
+            result = login(b.page, b.human, username, password, rec, code_provider=code_provider,
+                           home_url=a.home_url, manual_assist=manual_assist if not a.no_assist else None)
+        except Exception as e:
+            from .swa_login import LoginResult
+            rec.shot("exception")
+            result = LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}")
+            rec.log(f"Error: {result.detail}")
+        if a.keep_open and watching:
+            input("Browser left open. Press Enter to close... ")
+    state = b.state
+
+    print()
+    print(f"RESULT: {result.status.upper()}  {result.detail}")
+    if result.name:
+        print(f"Signed in as: {result.name}")
+    if result.ok and state:
+        Path(a.save_state).write_text(__import__("json").dumps(state, indent=2))
+        os.chmod(a.save_state, 0o600)
+        print(f"Session saved to {a.save_state}: upload it in the app under Settings → Southwest session.")
+    hints = {
+        "mfa_required": "Southwest asked for a verification code. Run again in a terminal to type it in; "
+                        "the saved profile should make later sign-ins skip it.",
+        "bad_credentials": "Check SWA_USERNAME / SWA_PASSWORD. Don't retry repeatedly: the account can lock.",
+        "blocked": "Southwest's bot protection stopped it. Look at the screenshots and network.log.",
+        "not_found": "The login form didn't match what the script looks for. Send me the screenshots.",
+        "timeout": "No recognisable result. The last screenshot shows where it stopped.",
+        "error": "Unexpected error; see steps.log and the last screenshot.",
+    }
+    if result.status in hints:
+        print(hints[result.status])
+    print(f"Details: {out_dir}")
+    return result.exit_code
+
+
 def main():
+    load_dotenv()
     ap = argparse.ArgumentParser(prog="python -m app")
     sub = ap.add_subparsers(dest="cmd")
     s = sub.add_parser("serve")
@@ -35,6 +137,16 @@ def main():
     sub.add_parser("selftest")
     lg = sub.add_parser("swa-login")
     lg.add_argument("out", nargs="?", default="storage_state.json")
+    lt = sub.add_parser("login-test", help="try an automated Southwest sign-in")
+    lt.add_argument("--username", help="default: SWA_USERNAME")
+    lt.add_argument("--profile", default="login-test", help="browser profile name under data/profiles/")
+    lt.add_argument("--fresh", action="store_true", help="start from an empty profile (new 'device')")
+    lt.add_argument("--server", action="store_true", help="run in a hidden virtual display like the container")
+    lt.add_argument("--save-state", default="storage_state.json", help="where to save the session on success")
+    lt.add_argument("--keep-open", action="store_true", help="leave the window open at the end")
+    lt.add_argument("--no-assist", action="store_true", help="never pause for you to help in the window")
+    lt.add_argument("--no-prompt", action="store_true", help="never ask for input (fail on verification code)")
+    lt.add_argument("--home-url", default=None, help=argparse.SUPPRESS)  # tests point this at a fake site
     a = ap.parse_args()
 
     if a.cmd == "selftest":
@@ -42,6 +154,11 @@ def main():
         return selftest()
     if a.cmd == "swa-login":
         return swa_login(a.out)
+    if a.cmd == "login-test":
+        if a.home_url is None:
+            from .swa_login import HOME_URL
+            a.home_url = HOME_URL
+        sys.exit(login_test(a))
 
     import uvicorn
 
