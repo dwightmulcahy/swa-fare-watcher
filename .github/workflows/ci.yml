@@ -98,3 +98,8 @@ jobs:
       - name: Container logs
         if: failure()
         run: docker logs app
+      - name: Locate Python packages in image
+        if: failure()
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c \
+            'find / -xdev \( -name "*.dist-info" -o -name "*.egg-info" -o -name "*.whl" \) 2>/dev/null | grep -v "/site-packages/[a-z_]*-[0-9].*dist-info$" | head -50; ls /usr/local/lib/python3.13/site-packages'

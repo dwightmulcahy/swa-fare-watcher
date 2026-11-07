@@ -14,12 +14,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt ./
 # Chromium + its OS libraries, and Xvfb so the browser runs headed (far less likely to be blocked).
-# The app starts its own Xvfb display per run.
+# The app starts its own Xvfb display per run. pip is removed afterwards: the runtime
+# doesn't need it, and its vendored packages trip the vulnerability scan.
 RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends xvfb tzdata \
  && pip install -r requirements.txt \
  && playwright install --with-deps chromium \
+ && { pip uninstall -y setuptools wheel || true; } \
+ && pip uninstall -y pip \
+ && rm -rf /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip* /root/.cache \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1000 --create-home --home-dir /home/app app \
  && mkdir -p /data && chown app /data
