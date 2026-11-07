@@ -1,61 +1,79 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Fake Airline | Book flights</title>
 <style>
- body{font-family:sans-serif;margin:0} header{display:flex;justify-content:space-between;padding:14px 24px;background:#223}
- header a,header button{color:#fff;background:none;border:0;font-size:15px} main{padding:24px;min-height:1600px}
- #modal{display:none;position:fixed;inset:80px 30% auto;background:#fff;border:1px solid #999;padding:24px}
- #modal.open{display:block} label{display:block;margin:10px 0} input{display:block;width:260px;padding:6px}
+ body{font-family:sans-serif;margin:0;color:#223} header{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;border-bottom:1px solid #ccc}
+ #acct{display:flex;gap:16px;align-items:center} #acct button{background:#fc3;border:0;padding:8px 16px;font-weight:bold}
+ main{padding:24px} .filler{height:1400px;color:#777}
+ #pop{display:none;position:absolute;right:40px;top:60px;width:420px;background:#fff;border:1px solid #33a;padding:20px}
+ #pop.open{display:block} .row{display:flex;justify-content:space-between;margin-top:12px}
+ input[type=text],input[type=password],input:not([type]){display:block;width:380px;padding:8px;margin-top:4px}
+ #login-submit{background:#fc3;border:0;padding:10px 18px;font-weight:bold}
 </style></head>
 <body>
-<header><a href="#">Fake Airline</a><nav id="nav"><button id="login-btn" type="button">Log in</button></nav></header>
-<main>
- <h1>Low fares. Earn 50,000 points with our card.</h1>
- <section><label>Promo code <input id="promo" name="promoCode"></label></section>
- <p>Book now and enter code at checkout.</p>
-</main>
-<div id="modal" role="dialog" aria-label="Log in">
+<header>
+ <strong>Fake Airline</strong>
+ <div id="acct"><a href="#" id="points-hint">Log in to view points balance</a><button id="login-btn" type="button">Log in</button><a href="#">Create account</a></div>
+</header>
+<div id="pop" role="dialog" aria-label="Log in dialog">
+ <h2>Log in</h2>
  <form id="f">
-  <label for="u">Account number or username</label><input id="u" name="username" autocomplete="username">
-  <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password">
-  <button type="submit">Log in</button>
+  <div class="row"><label for="u">Account number or username</label><a href="lookup.html" aria-label="Forgot account number or username">Forgot login?</a></div>
+  <input id="u" name="userNameOrAccountNumber">
+  <div class="row"><label for="p">Password</label><a href="lookup.html" aria-label="Forgot password">Forgot password?</a></div>
+  <input id="p" name="password" type="password">
+  <p><label><input type="checkbox" id="rem"> Remember me</label></p>
+  <p>Not a member? <a href="#">Enroll Now</a> <button id="login-submit" type="submit">Log in</button></p>
   <p id="err" role="alert"></p>
  </form>
  <form id="mfa" hidden>
-  <p>We sent a verification code to your email. Enter the code below.</p>
+  <p>We sent a verification code to your email.</p>
   <label for="c">Verification code</label><input id="c" autocomplete="one-time-code" inputmode="numeric">
   <button type="submit">Verify</button>
  </form>
 </div>
+<main>
+ <h1>Low fares. Earn 50,000 points with our card.</h1>
+ <label>Promo code <input id="promo" name="promoCode"></label>
+ <p>Book now and enter code at checkout. Bags fly free on select fares. Earn points on every flight and redeem
+ them for any seat, any time, with no blackout dates. Check in online up to 24 hours before departure.</p>
+ <div class="filler">Travel deals, destinations, travel advisories, help center, careers, investor relations,
+ accessibility, privacy policy, terms and conditions, site map, contact us, gift cards, travel agents, groups,
+ vacation packages, hotels, rental cars, cruises, rapid rewards credit card offers and partner promotions.</div>
+</main>
 <script>
 const mode = new URLSearchParams(location.search).get('mode') || 'ok';
-const events = window.events = {untrusted: 0, keys: 0, moves: 0};
+const events = window.events = {untrusted: 0, keys: 0, moves: 0, wheelsUp: 0, wheelsDown: 0};
 addEventListener('keydown', e => { events.keys++; if (!e.isTrusted) events.untrusted++; });
 addEventListener('mousemove', e => { events.moves++; if (!e.isTrusted) events.untrusted++; });
-if (localStorage.getItem('signedIn')) signedIn(localStorage.getItem('signedIn'));
-function signedIn(name) {
-  document.getElementById('modal').classList.remove('open');
-  document.getElementById('nav').innerHTML = '<span style="color:#fff">Hi, ' + name + '</span> <a href="#" id="logout">Log out</a>';
+addEventListener('wheel', e => { if (e.deltaY < 0) events.wheelsUp++; else events.wheelsDown++; });
+function signedIn() {
+  // like Southwest: the header swaps "Log in" for the member's name and points; no "Log out" text
+  document.getElementById('pop').classList.remove('open');
+  document.getElementById('acct').innerHTML = '<a href="#">Dwight</a><span>12,345 pts</span><a href="#">My Account</a>';
 }
+if (localStorage.getItem('signedIn')) signedIn();
 document.getElementById('login-btn').addEventListener('click', e => {
-  if (!e.isTrusted) return;  // like real bot protection: synthetic clicks do nothing
-  document.getElementById('modal').classList.add('open');
+  if (!e.isTrusted) return;  // synthetic clicks do nothing
+  document.getElementById('pop').classList.add('open');
 });
 document.getElementById('f').addEventListener('submit', e => {
   e.preventDefault();
+  const u = document.getElementById('u').value, p = document.getElementById('p').value;
+  if (!u) { document.getElementById('err').textContent = 'Enter your account number or username.'; return; }
   setTimeout(() => {
-    const u = document.getElementById('u').value, p = document.getElementById('p').value;
     if (mode === 'block') { document.body.innerHTML = '<h1>Access Denied</h1>'; document.title = 'Access Denied'; return; }
     if (u !== 'dwight123' || p !== 'S3cret!pass') {
-      document.getElementById('err').textContent = 'The username/account number and password you entered do not match our records.';
+      document.getElementById('err').textContent = 'The username/account number and password combination you entered is invalid.';
       return;
     }
+    window.rememberMe = document.getElementById('rem').checked;
     if (mode === 'mfa') { document.getElementById('f').hidden = true; document.getElementById('mfa').hidden = false; return; }
-    localStorage.setItem('signedIn', 'Dwight'); signedIn('Dwight');
-  }, 600);
+    localStorage.setItem('signedIn', '1'); signedIn();
+  }, 800);
 });
 document.getElementById('mfa').addEventListener('submit', e => {
   e.preventDefault();
-  if (document.getElementById('c').value === '123456') { localStorage.setItem('signedIn', 'Dwight'); signedIn('Dwight'); }
+  if (document.getElementById('c').value === '123456') { localStorage.setItem('signedIn', '1'); signedIn(); }
 });
 </script>
 </body></html>

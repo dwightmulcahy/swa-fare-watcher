@@ -52,15 +52,20 @@ def run(site, tmp_path, mode, username="dwight123", password="S3cret!pass", code
         res = login(b.page, b.human, username, password, rec, code_provider=lambda: code,
                     home_url=f"{site}?mode={mode}")
         events = b.page.evaluate("window.events || null")
+        events = {**(events or {}), "rememberMe": b.page.evaluate("window.rememberMe")}
     return res, events, rec
 
 
 def test_signs_in_with_human_input(site, tmp_path):
     res, events, rec = run(site, tmp_path, "ok")
     assert res.status == "success" and res.name == "Dwight", res
+    assert res.detail == "header shows account instead of Log in"  # no "Log out"/"Hi," on the page
+    assert events.get("trap") is None, "followed the 'Forgot login?' link"
     assert events["untrusted"] == 0 and events["keys"] >= len("dwight123S3cret!pass")
+    # only scrolls back up as far as it read down (the old bug scrolled up at the top of the page)
+    assert events["wheelsUp"] <= events["wheelsDown"] + 2, events
     shots = sorted(p.name for p in rec.dir.glob("*.png"))
-    assert shots[0].endswith("home.png") and shots[-1].endswith("success.png")
+    assert shots[0].endswith("home.png") and shots[-1].endswith("signed-in.png")
 
 
 def test_second_run_reuses_profile(site, tmp_path):
@@ -75,8 +80,9 @@ def test_second_run_reuses_profile(site, tmp_path):
 
 
 def test_verification_code_flow(site, tmp_path):
-    res, _, _ = run(site, tmp_path, "mfa")
+    res, events, _ = run(site, tmp_path, "mfa")
     assert res.status == "success", res
+    assert events["rememberMe"] is True
 
 
 def test_verification_code_unavailable(site, tmp_path):
@@ -86,7 +92,7 @@ def test_verification_code_unavailable(site, tmp_path):
 
 def test_wrong_password(site, tmp_path):
     res, _, _ = run(site, tmp_path, "ok", password="wrong-password")
-    assert res.status == "bad_credentials" and "do not match" in res.detail
+    assert res.status == "bad_credentials" and "invalid" in res.detail
 
 
 def test_blocked(site, tmp_path):

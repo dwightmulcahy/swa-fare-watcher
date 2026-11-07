@@ -133,7 +133,7 @@ class Human:
             raise RuntimeError("element has no box")
         if box["y"] < 0 or box["y"] + box["height"] > self.h:
             self.scroll_into_view(locator)
-            box = locator.bounding_box()
+            box = locator.bounding_box() or box
         return box
 
     def hover(self, locator):
@@ -194,18 +194,29 @@ class Human:
             if self.rng.random() < 0.15:
                 self.pause(0.3, 0.9)
 
+    def _scroll_y(self):
+        try:
+            return self.page.evaluate("() => window.scrollY")
+        except Exception:
+            return None
+
     def scroll_into_view(self, locator):
-        for _ in range(12):
+        """Wheel-scroll until the element is on screen. Only scrolls when it's actually off-screen,
+        and stops when the page stops moving (top/bottom reached, or a fixed header element)."""
+        for _ in range(8):
             box = locator.bounding_box()
             if box is None:
                 break
-            if box["y"] < self.h * 0.1:
-                self.scroll(-(self.h * 0.4))
-            elif box["y"] + box["height"] > self.h * 0.85:
-                self.scroll(min(box["y"] - self.h * 0.4, self.h * 0.8))
-            else:
+            if box["y"] >= 0 and box["y"] + box["height"] <= self.h:
                 return
+            before = self._scroll_y()
+            if box["y"] < 0:
+                self.scroll(max(box["y"] - self.h * 0.3, -self.h * 0.8))
+            else:
+                self.scroll(min(box["y"] + box["height"] - self.h * 0.6, self.h * 0.8))
             self.pause(0.15, 0.4)
+            if before is not None and self._scroll_y() == before:
+                break
         locator.scroll_into_view_if_needed()
 
     def wander(self, moves=None):
