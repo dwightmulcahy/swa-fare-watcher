@@ -1,0 +1,95 @@
+name: Reusable Docker publish
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Docker Hub image, e.g. dwightmulcahy/app
+        required: true
+        type: string
+      dockerfile:
+        description: Dockerfile path
+        required: false
+        default: Dockerfile
+        type: string
+      context:
+        required: false
+        default: .
+        type: string
+      build_args:
+        description: Newline-separated Docker build arguments
+        required: false
+        default: ''
+        type: string
+      tag:
+        required: true
+        type: string
+      is_latest:
+        description: Legacy switch for all floating tags; prefer independent publish flags
+        required: false
+        default: false
+        type: boolean
+      publish_major:
+        description: Publish major alias only when this is the newest release in its major line
+        required: false
+        default: false
+        type: boolean
+      publish_minor:
+        description: Publish minor alias only when this is the newest release in its minor line
+        required: false
+        default: false
+        type: boolean
+      publish_latest:
+        description: Publish latest alias only when this is the newest stable release overall
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: metadata
+        with:
+          images: ${{ inputs.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }},enable=${{ inputs.is_latest || inputs.publish_minor }}
+            type=semver,pattern={{major}},value=${{ inputs.tag }},enable=${{ inputs.is_latest || inputs.publish_major }}
+            type=raw,value=latest,enable=${{ inputs.is_latest || inputs.publish_latest }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        id: build
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: ${{ inputs.build_args }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: index.docker.io/${{ inputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}

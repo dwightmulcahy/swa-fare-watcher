@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]          # branches only; tags are handled by release.yml
+  pull_request:
+  workflow_call:              # reused by release.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  IMAGE: app:ci
+
+jobs:
+  compose:
+    name: Validate Compose files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: cp .env.example .env
+      - run: docker compose -f compose.yaml config --quiet
+      - run: docker compose -f compose.qnap.yaml config --quiet
+
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Ruff and Pyflakes
+        run: |
+          ruff check . --select F
+          pyflakes swa_watch.py scripts tests
+      - run: python -m pytest -q
+
+  docker-smoke:
+    name: Docker image + Chromium smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Launch Chromium in hardened container
+        run: |
+          docker run --rm \
+            --read-only --tmpfs /tmp --tmpfs /data:uid=1000 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --pids-limit 512 --memory 1g --shm-size 512m \
+            "$IMAGE" --selftest
+      - name: First start seeds config into /data
+        run: |
+          set +e
+          out=$(docker run --rm --read-only --tmpfs /tmp --tmpfs /data:uid=1000 "$IMAGE" --dry-run 2>&1)
+          echo "$out"
+          grep -q "Created /data/config.yaml" <<<"$out"
+      - name: Scan image for fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH

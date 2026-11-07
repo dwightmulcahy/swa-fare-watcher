@@ -1,0 +1,49 @@
+name: Reusable Python quality gate
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        required: false
+        default: '3.12'
+      install-command:
+        type: string
+        required: false
+        default: 'python -m pip install -r requirements-dev.txt'
+      lint-command:
+        type: string
+        required: false
+        default: 'python -m ruff check .'
+      test-command:
+        type: string
+        required: false
+        default: 'python -m pytest -q'
+      runner:
+        type: string
+        required: false
+        default: ubuntu-latest
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install dependencies
+        shell: bash
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: bash -euo pipefail -c "$INSTALL_COMMAND"
+      - name: Lint
+        shell: bash
+        env:
+          LINT_COMMAND: ${{ inputs.lint-command }}
+        run: bash -euo pipefail -c "$LINT_COMMAND"
+      - name: Test
+        shell: bash
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash -euo pipefail -c "$TEST_COMMAND"

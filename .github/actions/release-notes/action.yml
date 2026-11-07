@@ -1,0 +1,31 @@
+name: Conventional release notes
+description: Generate standardized release notes from Git history
+inputs:
+  tag:
+    required: true
+    description: Existing release tag
+  project-name:
+    required: true
+    description: Display name
+  image:
+    required: false
+    default: ''
+    description: Optional Docker image name
+  output:
+    required: false
+    default: release-notes.md
+    description: Output file
+runs:
+  using: composite
+  steps:
+    - name: Generate release notes
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+        PROJECT_NAME: ${{ inputs.project-name }}
+        IMAGE_NAME: ${{ inputs.image }}
+        OUTPUT_PATH: ${{ inputs.output }}
+      run: |
+        python3 "$GITHUB_ACTION_PATH/generate.py" \
+          --tag "$RELEASE_TAG" --project-name "$PROJECT_NAME" \
+          --image "$IMAGE_NAME" --output "$OUTPUT_PATH"

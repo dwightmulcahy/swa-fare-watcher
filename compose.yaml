@@ -1,0 +1,26 @@
+services:
+  watcher:
+    build:
+      context: .
+    image: ${IMAGE:-swa-fare-watcher:local}
+    env_file:
+      - path: .env
+        required: false
+    command: ["--daily-at", "${SWA_DAILY_AT:-07:20}"]
+    volumes:
+      - ${DATA_DIR:-./data}:/data      # config.yaml, storage_state.json, fares.db, debug/
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 1g
+    shm_size: 512m
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

@@ -1,0 +1,51 @@
+name: Shared Docker build and publish
+description: Centralized Buildx publishing step for projects with custom prepublish gates
+inputs:
+  context:
+    description: Docker build context
+    default: .
+  file:
+    description: Dockerfile path
+    default: Dockerfile
+  platforms:
+    description: Target architectures
+    default: linux/amd64,linux/arm64
+  tags:
+    description: Image tags
+    required: true
+  labels:
+    description: OCI labels
+    default: ''
+  build-args:
+    description: Build arguments
+    default: ''
+  push:
+    description: Publish image
+    default: 'true'
+  provenance:
+    description: Build provenance
+    default: mode=max
+  sbom:
+    description: SBOM generation
+    default: 'true'
+outputs:
+  digest:
+    description: Published image digest
+    value: ${{ steps.build.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - id: build
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file }}
+        platforms: ${{ inputs.platforms }}
+        push: ${{ inputs.push }}
+        tags: ${{ inputs.tags }}
+        labels: ${{ inputs.labels }}
+        build-args: ${{ inputs.build-args }}
+        provenance: ${{ inputs.provenance }}
+        sbom: ${{ inputs.sbom }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

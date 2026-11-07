@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never abort a half-published release
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      is_latest: ${{ steps.meta.outputs.is_latest }}
+      publish_major: ${{ steps.meta.outputs.publish_major }}
+      publish_minor: ${{ steps.meta.outputs.publish_minor }}
+      # Docker Hub when DOCKERHUB_USERNAME (variable) + DOCKERHUB_TOKEN (secret) are set, else ghcr.io
+      registry: ${{ steps.registry.outputs.registry }}
+      image: ${{ steps.registry.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Tagged commit must be reachable from origin/main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1
+          fi
+      - id: registry
+        name: Choose image registry
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO }}
+          DOCKERHUB_TOKEN_SET: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        run: bash scripts/choose_registry.sh
+      - id: meta
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          [[ "$GITHUB_REF_NAME" == *-* ]] && pre=true || pre=false
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+          latest_version="$({
+            git tag --list |
+              sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' |
+              sort -V |
+              tail -n 1
+          })"
+          stable_versions="$(git tag --list | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+)$/\1/p')"
+          major="${version%%.*}"
+          minor="${version%.*}"
+          highest_major="$(printf '%s\n' "$stable_versions" | awk -F. -v m="$major" '$1==m' | sort -V | tail -n 1)"
+          highest_minor="$(printf '%s\n' "$stable_versions" | awk -F. -v m="$major" -v n="${minor#*.}" '$1==m && $2==n' | sort -V | tail -n 1)"
+          if [[ "$pre" == "false" && "$version" == "$highest_major" ]]; then
+            echo "publish_major=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_major=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$pre" == "false" && "$version" == "$highest_minor" ]]; then
+            echo "publish_minor=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_minor=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$pre" == "false" && "$version" == "$latest_version" ]]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  validate:
+    name: Full validation suite
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+
+  docker:
+    name: Publish multi-arch image
+    needs: [verify, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # GHCR push with GITHUB_TOKEN; unused for Docker Hub
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ${{ needs.verify.outputs.registry }}
+          username: ${{ needs.verify.outputs.registry == 'ghcr.io' && github.actor || vars.DOCKERHUB_USERNAME }}
+          password: ${{ needs.verify.outputs.registry == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ needs.verify.outputs.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.verify.outputs.publish_minor == 'true' }}
+            type=semver,pattern={{major}},enable=${{ needs.verify.outputs.publish_major == 'true' }}
+            type=raw,value=latest,enable=${{ needs.verify.outputs.is_latest == 'true' }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ needs.verify.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+            REPOSITORY=${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: GitHub Release
+    needs: [verify, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Generate conventional release notes
+        run: >-
+          python scripts/generate_release_notes.py
+          --tag "${{ github.ref_name }}"
+          --project-name "${{ github.event.repository.name }}"
+          --image "${{ needs.verify.outputs.image }}"
+          --output release-notes.md
+      - name: Create or update release (idempotent on rerun)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRE: ${{ needs.verify.outputs.prerelease }}
+          IS_LATEST: ${{ needs.verify.outputs.is_latest }}
+        run: |
+          set -euo pipefail
+          flags=(--title "$TAG" --notes-file release-notes.md)
+          if [[ "$PRE" == "true" ]]; then
+            flags+=(--prerelease --latest=false)
+          elif [[ "$IS_LATEST" == "true" ]]; then
+            flags+=(--latest)
+          else
+            flags+=(--latest=false)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; refreshing notes and assets"
+            gh release edit "$TAG" "${flags[@]}"
+                      else
+            gh release create "$TAG" --verify-tag "${flags[@]}"
+          fi
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"

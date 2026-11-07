@@ -1,0 +1,45 @@
+name: Reusable Docker smoke gate
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        type: string
+        required: false
+        default: Dockerfile
+      context:
+        type: string
+        required: false
+        default: .
+      image:
+        type: string
+        required: false
+        default: app:ci
+      smoke-command:
+        description: Shell command to test the locally built image
+        type: string
+        required: false
+        default: 'docker image inspect "$CI_IMAGE" >/dev/null'
+      runner:
+        type: string
+        required: false
+        default: ubuntu-latest
+permissions:
+  contents: read
+jobs:
+  docker-smoke:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build image without publishing
+        shell: bash
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+          CI_IMAGE: ${{ inputs.image }}
+        run: docker build --file "$DOCKERFILE" --tag "$CI_IMAGE" "$CONTEXT"
+      - name: Smoke test image
+        shell: bash
+        env:
+          CI_IMAGE: ${{ inputs.image }}
+          SMOKE_COMMAND: ${{ inputs.smoke-command }}
+        run: bash -euo pipefail -c "$SMOKE_COMMAND"

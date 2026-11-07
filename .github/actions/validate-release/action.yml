@@ -1,0 +1,35 @@
+name: Validate release tag
+description: Verify stable SemVer, branch ancestry and whether tag is latest stable
+inputs:
+  tag:
+    required: true
+    description: Tag to validate
+  branch:
+    required: false
+    default: main
+    description: Branch that must contain tag
+outputs:
+  version:
+    description: Version without leading v
+    value: ${{ steps.validate.outputs.version }}
+  is-latest:
+    description: Whether tag is highest stable SemVer
+    value: ${{ steps.validate.outputs.is_latest }}
+runs:
+  using: composite
+  steps:
+    - name: Verify tag and branch ancestry
+      id: validate
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+        RELEASE_BRANCH: ${{ inputs.branch }}
+      run: |
+        set -euo pipefail
+        [[ "$RELEASE_TAG" =~ ^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::Invalid stable SemVer tag"; exit 1; }
+        git fetch origin "$RELEASE_BRANCH"
+        git merge-base --is-ancestor "$RELEASE_TAG" "origin/$RELEASE_BRANCH" || { echo "::error::Tag not on $RELEASE_BRANCH"; exit 1; }
+        version="${RELEASE_TAG#v}"
+        latest="$(git tag --list | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -1)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        if [[ "$version" == "$latest" ]]; then echo "is_latest=true" >> "$GITHUB_OUTPUT"; else echo "is_latest=false" >> "$GITHUB_OUTPUT"; fi
