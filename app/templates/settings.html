@@ -42,6 +42,58 @@
   </details>
 </section>
 
+{% if auto_login_available %}
+<section class="card" id="auto">
+  <h2>Automatic sign-in <span class="hint">optional</span></h2>
+  <p>When your Southwest session has expired, the watcher can sign in for you with your username and password,
+     typing like a person in its own browser. It only signs in when needed: at most once a day automatically.</p>
+  <dl class="kv">
+    <dt>Status</dt><dd>
+      {% if not creds_username %}Not set up
+      {% elif not user.auto_login %}<span class="pill">Off</span>
+      {% else %}<span class="pill good">On</span>{% endif %}
+      {% if user.auto_login_status %}<span class="small">{{ user.auto_login_status }}</span>
+        <span class="muted small">{{ user.auto_login_at|when }}</span>{% endif %}
+      {% if signin_status %}<br><span class="muted small">Sign-in check {{ signin_status }}…</span>{% endif %}
+    </dd>
+  </dl>
+  <form method="post" action="/settings/auto-login" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="row">
+      <label>Rapid Rewards number or username
+        <input name="swa_username" value="{{ creds_username or '' }}" autocomplete="off" required></label>
+      <label>Southwest password
+        <input name="swa_password" type="password" autocomplete="new-password"
+          placeholder="{{ '•••••••• saved (leave blank to keep)' if creds_username else '' }}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="auto_login" value="1" {{ 'checked' if user.auto_login or not creds_username }}>
+      Sign in automatically when my session expires</label>
+    <div class="callout">
+      <strong>Before you turn this on:</strong> your password is stored encrypted on this server, and anyone with
+      the server's database and key could read it, so use a password you don't use anywhere else.
+      Southwest may treat automated sign-ins as against its terms, and repeated failures can lock your account,
+      so a rejected password turns this off immediately and two other failures in a row turn it off too.
+      If Southwest asks for a verification code, you'll get an email and a banner here; enter the code within
+      {{ code_wait_minutes }} minutes.
+    </div>
+    <div class="buttons left"><button type="submit" class="primary">Save</button></div>
+  </form>
+  {% if creds_username %}
+  <div class="buttons left spaced">
+    <form method="post" action="/settings/auto-login/test" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" {{ 'disabled' if not user.auto_login or signin_status or signin_attempts_today >= 3 }}>Try sign-in now</button>
+    </form>
+    <span class="muted small">{{ 3 - signin_attempts_today if signin_attempts_today < 3 else 0 }} of 3 attempts left today</span>
+    <form method="post" action="/settings/auto-login/remove" class="inline" data-confirm="Remove your saved Southwest username and password?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="link danger-text">Remove saved details</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Account</h2>
   <dl class="kv">

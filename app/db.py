@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS usage(
   searches INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(user_id, day)
 );
+CREATE TABLE IF NOT EXISTS code_requests(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  code TEXT,
+  status TEXT NOT NULL DEFAULT 'waiting'   -- waiting, submitted, used, expired
+);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY,
   watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
@@ -134,10 +142,29 @@ def one(sql, args=()):
     return rows[0] if rows else None
 
 
+# Columns added after the first release; added to existing databases on start.
+MIGRATIONS = {
+    "users": {
+        "swa_creds": "BLOB",                     # encrypted {"username", "password"}
+        "auto_login": "INTEGER NOT NULL DEFAULT 0",
+        "auto_login_status": "TEXT",
+        "auto_login_at": "TEXT",
+        "auto_login_day": "TEXT",                # day of the attempt counter below
+        "auto_login_attempts": "INTEGER NOT NULL DEFAULT 0",
+        "auto_login_failures": "INTEGER NOT NULL DEFAULT 0",   # consecutive
+    },
+}
+
+
 def init():
     con = connect()
     try:
         con.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols.items():
+                if name not in have:
+                    con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
     finally:
         con.close()
 

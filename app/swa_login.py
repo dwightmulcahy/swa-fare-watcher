@@ -281,10 +281,8 @@ def type_checked(human, el, text, secret=False):
     return (got is not None and len(got) == len(text)) if secret else (got is not None and got.strip() == text)
 
 
-def login(page, human, username, password, rec, code_provider=None, home_url=HOME_URL,
-          manual_assist=None, remember_me=True):
-    """Sign in. code_provider() -> str returns a verification code (or None to give up).
-    manual_assist(msg) -> bool lets a watching person fix things in the window and continue."""
+def open_home(page, human, rec, home_url=HOME_URL):
+    """Arrive on the home page and look around. Returns a LoginResult if blocked, else None."""
     rec.log(f"Opening {home_url}")
     page.goto(home_url, wait_until="domcontentloaded", timeout=60_000)
     try:
@@ -297,8 +295,24 @@ def login(page, human, username, password, rec, code_provider=None, home_url=HOM
         return LoginResult("blocked", detail)
     human.read(human.rng.uniform(3, 6))
     rec.shot("home")
+    return None
 
-    if find(page, HEADER_LOGIN) is None and signed_in_signal(page, page_text(page)):
+
+def is_signed_in(page):
+    return find(page, HEADER_LOGIN) is None and signed_in_signal(page, page_text(page)) is not None
+
+
+def login(page, human, username, password, rec, code_provider=None, home_url=HOME_URL,
+          manual_assist=None, remember_me=True, home_opened=False):
+    """Sign in. code_provider() -> str returns a verification code (or None to give up).
+    manual_assist(msg) -> bool lets a watching person fix things in the window and continue.
+    home_opened=True when the caller has already opened and looked at the home page."""
+    if not home_opened:
+        blocked = open_home(page, human, rec, home_url)
+        if blocked:
+            return blocked
+
+    if is_signed_in(page):
         rec.log("Already signed in (saved browser profile)")
         return LoginResult("already_signed_in", "profile still has a session", account_name(page))
 

@@ -22,7 +22,8 @@
     <td class="num">{{ t.n_watches }}{% if t.max_watches is not none %} / {{ t.max_watches }}{% endif %}</td>
     <td class="num">{{ t.today or 0 }}{% if t.max_searches_per_day is not none %} / {{ t.max_searches_per_day }}{% endif %}</td>
     <td class="small">{{ t.expires_at or '—' }}</td>
-    <td class="small">{% if t.swa_state %}{{ t.swa_status or 'Uploaded' }}{% else %}<span class="muted">None</span>{% endif %}</td>
+    <td class="small">{% if t.swa_state %}{{ t.swa_status or 'Uploaded' }}{% else %}<span class="muted">None</span>{% endif %}
+      {% if t.swa_creds %}<br><span class="muted">Auto sign-in {{ 'on' if t.auto_login else 'off' }}</span>{% endif %}</td>
     <td class="small">{{ t.last_login|when }}</td>
     <td class="actions">
       <a href="/admin/users/{{ t.id }}">Edit</a>

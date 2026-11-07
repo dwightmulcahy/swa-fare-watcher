@@ -16,7 +16,7 @@
   <div class="stat"><span class="label">Searches per daily run</span><span class="value">{{ limit(limits.per_day, limits.max_searches) }}</span></div>
   <div class="stat"><span class="label">Searches used today</span><span class="value">{{ limit(limits.today, limits.max_searches) }}</span></div>
   <div class="stat"><span class="label">Southwest session</span>
-    <span class="value small">{% if user.swa_state %}<span class="pill {{ 'good' if user.swa_status == 'OK' else 'warn' if user.swa_status and user.swa_status.startswith('Searches failed') else '' }}">{{ user.swa_status or 'Uploaded' }}</span>{% else %}<a href="/settings">Not set</a>{% endif %}</span></div>
+    <span class="value small">{% if user.auto_login and user.swa_creds and not user.swa_state %}<span class="pill good">Auto sign-in on</span>{% elif user.swa_state %}<span class="pill {{ 'good' if user.swa_status == 'OK' else 'warn' if user.swa_status and user.swa_status.startswith('Searches failed') else '' }}">{{ user.swa_status or 'Uploaded' }}</span>{% else %}<a href="/settings">Not set</a>{% endif %}</span></div>
 </div>
 {% if run_status %}<div class="flash info">Your search is {{ run_status }}. Refresh in a few minutes for results.</div>{% endif %}
 {% if user.expires_at %}<p class="muted small">Your account is active until {{ user.expires_at }}.</p>{% endif %}

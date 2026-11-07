@@ -74,6 +74,23 @@ Each user uploads their own signed-in session under **Settings → Southwest ses
 
 Only `southwest.com` cookies are kept. Sessions are encrypted with a key derived from `SECRET_KEY` (or `/data/secret.key`). Refreshed cookies are saved after each successful run. Without a session, searches run signed out (prices still show, but points prices are not account-specific).
 
+### Automatic sign-in (optional)
+
+Instead of re-uploading a session when it expires, users can save their Rapid Rewards username and password under **Settings → Automatic sign-in**. Before each run the worker opens Southwest's home page in that user's own browser profile (this is also the warm-up visit):
+
+- **Still signed in:** nothing more to do. Thanks to the persistent profile and **Remember me**, this should be the usual case.
+- **Signed out:** it signs in with the same human-like flow as `login-test`, then searches as that user and saves the refreshed session.
+- **Verification code:** the user gets an email and a banner in the app, enters the code on the **Verify** page within `SWA_CODE_WAIT_SECONDS` (10 minutes), and the waiting browser finishes signing in. If no code arrives, it stops cleanly and asks again on the next day's run. Codes are deleted once used.
+
+Guard rails, so automation never locks an account:
+
+- At most **one** automatic attempt per user per day; **Try sign-in now** in Settings allows up to three a day and runs no searches.
+- A **rejected password turns it off immediately** and emails the user; **two other failures in a row** (blocked, page not recognised, timeout) turn it off too.
+- Credentials are encrypted like sessions (key from `SECRET_KEY` / `/data/secret.key`) and never shown back; users should use a password unique to Southwest.
+- `SWA_AUTO_LOGIN=false` turns the feature off for everyone. Each attempt's screenshots and logs are kept under `/data/debug/signin/`.
+
+While a sign-in waits for a code, the worker holds that user's browser open, so other users' runs wait too (at most the code timeout).
+
 ## Test automated sign-in on your machine
 
 `python -m app login-test` signs in to southwest.com with your credentials using exactly what the app uses: real Chrome with the hardened launch settings, a persistent profile, and human-like mouse, typing and reading behaviour. Run it on your own computer to see whether Southwest lets an automated sign-in through.
@@ -125,6 +142,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_BROWSER_CHANNEL` | `auto` | `auto` = Google Chrome if installed, else Chromium; or `chrome`, `chromium`, `msedge` |
 | `SWA_HUMANIZE` | `true` | Home-page warm-up and mouse/scroll/dwell behaviour around searches |
 | `SWA_TIMEZONE` | container `TZ` | Browser time zone; match where the server's IP is |
+| `SWA_AUTO_LOGIN` | `true` | Allow users to turn on automatic sign-in |
+| `SWA_CODE_WAIT_SECONDS` | `600` | How long a sign-in waits for a verification code |
 | `SESSION_DAYS` | `14` | Web sign-in lifetime |
 
 ## Run without Docker

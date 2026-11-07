@@ -33,6 +33,11 @@ class Settings:
         self.browser_channel = _env("SWA_BROWSER_CHANNEL", "auto")
         self.browser_timezone = _env("SWA_TIMEZONE")  # default: the container's TZ
         self.humanize = _bool("SWA_HUMANIZE", True)
+        # Automatic Southwest sign-in with saved credentials (users opt in under Settings)
+        self.auto_login = _bool("SWA_AUTO_LOGIN", True)
+        self.code_wait_seconds = int(_env("SWA_CODE_WAIT_SECONDS", "600"))
+        self.code_poll_seconds = float(_env("SWA_CODE_POLL_SECONDS", "3"))
+        self.home_url = _env("SWA_HOME_URL", "https://www.southwest.com/")  # tests point this at a fake site
         lo, hi = (float(x) for x in _env("SWA_SEARCH_DELAY", "8,20").split(","))
         self.search_delay = (lo, hi)
         self.max_dates_per_watch = int(_env("MAX_DATES_PER_WATCH", "31"))

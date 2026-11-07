@@ -18,8 +18,8 @@ from fastapi.templating import Jinja2Templates
 from . import db, swa
 from .config import settings
 from .mailer import fmt_dur
-from .security import (encrypt_json, hash_password, new_token, temp_password, token_hash,
-                       verify_password)
+from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
+                       token_hash, verify_password)
 from .worker import worker as default_worker
 
 HERE = Path(__file__).parent
@@ -114,7 +114,14 @@ def create_app(worker=None, start_worker=True):
             raise Redirect("/?err=Form+expired.+Try+again.")
         return f
 
+    def pending_code(u):
+        if not u:
+            return None
+        return db.one("SELECT * FROM code_requests WHERE user_id=? AND status='waiting' AND expires_at > ?"
+                      " ORDER BY id DESC LIMIT 1", (u["id"], db.now()))
+
     def render(request, name, user=None, sess=None, status=200, **ctx):
+        ctx.setdefault("code_request", pending_code(user))
         ctx.update(user=user, csrf=sess["csrf"] if sess else "", today_str=db.today(),
                    msg=request.query_params.get("ok"), err=ctx.get("err") or request.query_params.get("err"))
         return templates.TemplateResponse(request, name, ctx, status_code=status)
@@ -429,7 +436,76 @@ def create_app(worker=None, start_worker=True):
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):
         u, s = require(request)
-        return render(request, "settings.html", u, s, limits=limits_for(u))
+        creds = decrypt_json(u["swa_creds"]) or {}
+        attempts = u["auto_login_attempts"] if u["auto_login_day"] == db.today() else 0
+        return render(request, "settings.html", u, s, limits=limits_for(u), creds_username=creds.get("username"),
+                      auto_login_available=settings.auto_login, signin_attempts_today=attempts,
+                      signin_status=app.state.worker.status(u["id"]),
+                      code_wait_minutes=max(1, settings.code_wait_seconds // 60))
+
+    @app.post("/settings/auto-login")
+    async def save_auto_login(request: Request):
+        u, s = require(request)
+        f = await form(request, s)
+        old = decrypt_json(u["swa_creds"]) or {}
+        username = str(f.get("swa_username", "")).strip()
+        password = str(f.get("swa_password", ""))
+        enable = 1 if f.get("auto_login") else 0
+        if not username:
+            raise Redirect("/settings?err=" + quote_plus("Enter your Rapid Rewards number or username.") + "#auto")
+        if not password:
+            if not old.get("password") or old.get("username") != username:
+                raise Redirect("/settings?err=" + quote_plus("Enter your Southwest password.") + "#auto")
+            password = old["password"]
+        changed = old.get("username") != username or old.get("password") != password
+        with db.tx() as con:
+            con.execute("UPDATE users SET swa_creds=?, auto_login=? WHERE id=?",
+                        (encrypt_json({"username": username, "password": password}), enable, u["id"]))
+            if changed or (enable and not u["auto_login"]):
+                con.execute("UPDATE users SET auto_login_failures=0, auto_login_status=? WHERE id=?",
+                            ("Saved; not tried yet" if changed else "Turned on; not tried yet", u["id"]))
+        raise Redirect("/settings?ok=" + quote_plus("Automatic sign-in " + ("on" if enable else "saved but off")) + "#auto")
+
+    @app.post("/settings/auto-login/remove")
+    async def remove_auto_login(request: Request):
+        u, s = require(request)
+        await form(request, s)
+        with db.tx() as con:
+            con.execute("UPDATE users SET swa_creds=NULL, auto_login=0, auto_login_status=NULL, "
+                        "auto_login_failures=0 WHERE id=?", (u["id"],))
+        raise Redirect("/settings?ok=" + quote_plus("Saved Southwest username and password removed") + "#auto")
+
+    @app.post("/settings/auto-login/test")
+    async def test_auto_login(request: Request):
+        u, s = require(request)
+        await form(request, s)
+        if not (settings.auto_login and u["auto_login"] and u["swa_creds"]):
+            raise Redirect("/settings?err=" + quote_plus("Save your details and turn automatic sign-in on first.") + "#auto")
+        attempts = u["auto_login_attempts"] if u["auto_login_day"] == db.today() else 0
+        if attempts >= app.state.worker.MANUAL_ATTEMPTS_PER_DAY:
+            raise Redirect("/settings?err=" + quote_plus("No sign-in attempts left today. Try again tomorrow.") + "#auto")
+        app.state.worker.enqueue_signin(u["id"])
+        raise Redirect("/settings?ok=" + quote_plus("Sign-in check queued. Refresh in a minute or two.") + "#auto")
+
+    @app.get("/verify", response_class=HTMLResponse)
+    def verify_page(request: Request):
+        u, s = require(request)
+        return render(request, "verify.html", u, s)
+
+    @app.post("/verify/{rid}")
+    async def verify_submit(request: Request, rid: int):
+        u, s = require(request)
+        f = await form(request, s)
+        code = re.sub(r"\s+", "", str(f.get("code", "")))
+        req = db.one("SELECT * FROM code_requests WHERE id=? AND user_id=?", (rid, u["id"]))
+        if not req or req["status"] != "waiting" or req["expires_at"] <= db.now():
+            raise Redirect("/verify?err=" + quote_plus("That request has expired. The next sign-in will ask again."))
+        if not re.fullmatch(r"[A-Za-z0-9]{4,10}", code):
+            raise Redirect("/verify?err=" + quote_plus("Enter the code exactly as Southwest sent it."))
+        with db.tx() as con:
+            con.execute("UPDATE code_requests SET code=?, status='submitted' WHERE id=? AND status='waiting'",
+                        (code, rid))
+        raise Redirect("/settings?ok=" + quote_plus("Code sent to the sign-in. Check the status below in a minute.") + "#auto")
 
     @app.post("/settings")
     async def save_settings(request: Request):

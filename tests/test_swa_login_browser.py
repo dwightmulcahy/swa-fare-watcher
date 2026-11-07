@@ -6,6 +6,7 @@ import http.server
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,74 @@ def test_wrong_password(site, tmp_path):
 def test_blocked(site, tmp_path):
     res, _, _ = run(site, tmp_path, "block")
     assert res.status == "blocked"
+
+
+# ---------- the app's automatic sign-in, end to end (worker + real browser + fake site) ----------
+def _user_with_creds(password="S3cret!pass"):
+    from app import db
+    from app.security import encrypt_json, hash_password
+
+    with db.tx() as con:
+        return con.execute(
+            "INSERT INTO users(username, email, pw_hash, must_change_pw, created_at, swa_creds, auto_login)"
+            " VALUES ('u', '', ?, 0, ?, ?, 1)",
+            (hash_password("x" * 10), db.now(), encrypt_json({"username": "dwight123", "password": password}))
+        ).lastrowid
+
+
+def _worker(site, mode, monkeypatch):
+    from app.config import settings
+    from app.worker import Worker
+
+    monkeypatch.setattr(settings, "home_url", f"{site}?mode={mode}")
+    w = Worker(sleep=lambda s: None)
+    return w
+
+
+def test_worker_signs_in_and_reuses_session(site, monkeypatch, sent):
+    from app import db
+    from app.security import decrypt_json
+
+    uid = _user_with_creds()
+    w = _worker(site, "ok", monkeypatch)
+    assert w.run_user(uid, signin_only=True)["signin"] == "success"
+    u = db.one("SELECT * FROM users WHERE id=?", (uid,))
+    assert u["auto_login_status"].startswith("Signed in automatically")
+    assert decrypt_json(u["swa_state"])["cookies"] is not None
+    # next run: the persistent profile is still signed in, so no attempt is used
+    assert w.run_user(uid, signin_only=True)["signin"] == "already_signed_in"
+    assert db.one("SELECT auto_login_attempts FROM users WHERE id=?", (uid,))[0] == 1
+
+
+def test_worker_waits_for_code_from_the_app(site, monkeypatch, sent):
+    from app import db
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "code_wait_seconds", 60)
+    uid = _user_with_creds()
+    w = _worker(site, "mfa", monkeypatch)
+
+    def user_enters_code():
+        for _ in range(600):
+            req = db.one("SELECT * FROM code_requests WHERE user_id=? AND status='waiting'", (uid,))
+            if req:
+                with db.tx() as con:
+                    con.execute("UPDATE code_requests SET code='123456', status='submitted' WHERE id=?", (req["id"],))
+                return
+            time.sleep(0.1)
+
+    t = threading.Thread(target=user_enters_code)
+    t.start()
+    res = w.run_user(uid, signin_only=True)
+    t.join()
+    assert res["signin"] == "success"
+    assert any(subj == "Southwest verification code needed" for _, subj, _ in sent)
+
+
+def test_worker_wrong_password_turns_off(site, monkeypatch, sent):
+    from app import db
+
+    uid = _user_with_creds(password="wrong-password")
+    w = _worker(site, "ok", monkeypatch)
+    assert w.run_user(uid, signin_only=True)["signin"] == "bad_credentials"
+    assert db.one("SELECT auto_login FROM users WHERE id=?", (uid,))[0] == 0

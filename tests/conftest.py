@@ -22,9 +22,25 @@ def payload(*details):
 
 
 class FakeSearcher:
-    """Stands in for the browser. cash/points maps fare_type -> parsed flights (or None = failure)."""
+    """Stands in for the browser. cash/points maps fare_type -> parsed flights (or None = failure).
+    signin: list of statuses ensure_signed_in returns in turn ('mfa' asks the code provider)."""
     calls = []
     fail = False
+    signin = []
+    signin_calls = []
+
+    def ensure_signed_in(self, username, password, allowed, code_provider=None, log=None):
+        from app.swa_login import LoginResult
+        FakeSearcher.signin_calls.append({"username": username, "password": password, "allowed": allowed})
+        status = FakeSearcher.signin.pop(0) if FakeSearcher.signin else "already_signed_in"
+        if status != "already_signed_in" and not allowed:
+            return LoginResult("skipped", "limit")
+        if status == "mfa":
+            code = code_provider()
+            return LoginResult("success" if code == "123456" else "mfa_required", f"code={code}")
+        if status == "success":
+            self.state = {"cookies": [{"name": "fresh"}]}
+        return LoginResult(status, status)
 
     def __init__(self, state=None, profile_key=None):
         self.state = state
@@ -57,6 +73,10 @@ def tmp_data(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "_secret", "test-secret")
     FakeSearcher.calls = []
     FakeSearcher.fail = False
+    FakeSearcher.signin = []
+    FakeSearcher.signin_calls = []
+    monkeypatch.setattr(settings, "code_wait_seconds", 3)
+    monkeypatch.setattr(settings, "code_poll_seconds", 0.05)
     db.init()
     yield tmp_path
 

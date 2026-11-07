@@ -328,10 +328,39 @@ class BrowserSearcher:
         if not self.humanize:
             return
         try:
-            self.page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60_000)
+            self.page.goto(settings.home_url, wait_until="domcontentloaded", timeout=60_000)
             self.human.read(self.human.rng.uniform(3, 7))
         except Exception as e:
             print(f"[warn] warm-up visit failed ({e.__class__.__name__})", file=sys.stderr)
+
+    def ensure_signed_in(self, username, password, allowed, code_provider=None, log=None):
+        """Open the home page (this doubles as the warm-up). If the session has lapsed and an
+        attempt is allowed, sign in with the saved credentials. Returns a swa_login.LoginResult,
+        or one with status 'skipped' when signed out but no attempt was allowed."""
+        from . import swa_login
+
+        self._warmed = True
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        rec = swa_login.Recorder(self.page, settings.debug_dir / "signin" / f"{self.profile_key}-{stamp}",
+                                 log=log or (lambda m: print(f"[signin {self.profile_key}] {m}", file=sys.stderr)))
+        swa_login.watch_network(self.page, rec)
+        try:
+            blocked = swa_login.open_home(self.page, self.human, rec, settings.home_url)
+            if blocked:
+                return blocked
+            if swa_login.is_signed_in(self.page):
+                rec.log("Session still valid")
+                return swa_login.LoginResult("already_signed_in", "session still valid",
+                                             swa_login.account_name(self.page))
+            if not allowed:
+                rec.log("Signed out, but no sign-in attempt allowed now")
+                return swa_login.LoginResult("skipped", "signed out; attempt limit reached")
+            return swa_login.login(self.page, self.human, username, password, rec,
+                                   code_provider=code_provider, home_url=settings.home_url,
+                                   home_opened=True)
+        except Exception as e:
+            rec.shot("exception")
+            return swa_login.LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}")
 
     def search(self, origin, dest, date, adults, fare_type):
         q = {

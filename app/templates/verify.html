@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Verification code{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Southwest verification code</h1>
+  {% if code_request %}
+  <p>Southwest sent a code (by text or email) while the fare watcher was signing in to your account.
+     Enter it here before <strong>{{ code_request.expires_at|when }}</strong>; the sign-in is waiting for it.</p>
+  <form method="post" action="/verify/{{ code_request.id }}" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Code <input name="code" class="code-input" inputmode="numeric" autocomplete="one-time-code"
+      maxlength="10" required autofocus></label>
+    <button type="submit" class="primary">Send code</button>
+  </form>
+  <p class="muted small">Didn't get one, or it expired? Nothing to do: the next sign-in will ask again.</p>
+  {% else %}
+  <p>No sign-in is waiting for a code right now.</p>
+  <p class="muted small">If a code request expired, the next automatic sign-in will ask again.</p>
+  <p class="buttons left"><a class="button" href="/settings#auto">Back to Settings</a></p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -101,6 +101,11 @@ section > table.list.compact, .card table.list.compact { background: var(--surfa
 .flash.ok { background: var(--good-soft); color: var(--good); }
 .flash.err { background: var(--bad-soft); color: var(--bad); }
 .flash.info { background: var(--accent-soft); color: var(--accent); }
+.flash.warn { background: var(--warn-soft); color: var(--warn); }
+.flash.warn a { color: inherit; font-weight: 700; text-decoration: underline; }
+.code-input { font: 600 1.6rem ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .3em; text-align: center; max-width: 14rem; }
+.callout { background: var(--warn-soft); color: var(--ink); border-radius: 8px; padding: .75rem 1rem; font-size: .9rem; }
+.callout strong { color: var(--warn); }
 
 /* forms */
 label { display: block; font-weight: 550; font-size: .92rem; }
@@ -155,6 +160,7 @@ button.link:hover { text-decoration: underline; }
 .buttons.left { justify-content: flex-start; }
 form.inline { display: inline; margin: 0; }
 .danger-zone { margin-top: 1rem; }
+.spaced { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--line); }
 
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.25rem; margin: .5rem 0 1rem; }
 dl.kv dt { color: var(--muted); }

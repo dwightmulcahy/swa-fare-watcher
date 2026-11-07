@@ -27,6 +27,10 @@
     {% endif %}
   </header>
   <main>
+    {% if code_request and request.url.path != '/verify' %}
+    <div class="flash warn" role="alert"><strong>Southwest sent you a verification code.</strong>
+      The fare watcher is waiting for it to finish signing in. <a href="/verify">Enter the code</a></div>
+    {% endif %}
     {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
     {% if err %}<div class="flash err" role="alert">{{ err }}</div>{% endif %}
     {% block content %}{% endblock %}
