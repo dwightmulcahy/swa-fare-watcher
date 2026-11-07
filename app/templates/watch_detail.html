@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ w.name }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/">Watches</a> / {{ w.name }}</p>
+<div class="head">
+  <div>
+    <h1>{{ w.name }} {% if not w.active %}<span class="pill">Paused</span>{% endif %}</h1>
+    <p class="route big">{{ w.origin }} → {{ w.destination }} <span class="muted">· {{ w.adults }} adult{{ '' if w.adults == 1 else 's' }}</span></p>
+  </div>
+  <div class="buttons">
+    <a class="button" href="/watches/{{ w.id }}/edit">Edit</a>
+    <form method="post" action="/watches/{{ w.id }}/run" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="primary" {{ 'disabled' if run_status or not w.active }}>{{ 'Search ' ~ run_status if run_status else 'Search now' }}</button></form>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat"><span class="label">Upcoming dates searched</span><span class="value">{{ dates|length }}</span>
+    <span class="muted small">{{ dates|length * 2 }} searches per run</span></div>
+  <div class="stat"><span class="label">Filters</span><span class="value small">
+    {% if w.max_stops == 0 %}Nonstop{% elif w.max_stops is not none %}≤ {{ w.max_stops }} stop{{ '' if w.max_stops == 1 else 's' }}{% else %}Any stops{% endif %}
+    {% if w.max_duration_min %} · ≤ {{ w.max_duration_min|dur }}{% endif %}
+    {% if w.depart_after or w.depart_before %} · departs {{ w.depart_after or '00:00' }}–{{ w.depart_before or '23:59' }}{% endif %}</span></div>
+  <div class="stat"><span class="label">Price target</span><span class="value small">
+    {% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %} · ≥ {{ w.min_cpp }}¢/pt</span></div>
+  <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
+</div>
+
+<h2>Latest fares</h2>
+{% if not fares %}
+<p class="muted">No results yet. Results appear after the daily run{% if w.active %}, or use <em>Search now</em>{% endif %}.</p>
+{% else %}
+<p class="muted small">Highlighted rows match your filters. Most recent result for each date.</p>
+<div class="table-wrap">
+<table class="list fares">
+  <thead><tr><th>Date</th><th>Flights</th><th>Depart–Arrive</th><th class="num">Stops</th><th class="num">Duration</th>
+    <th class="num">Cash</th><th class="num">Points</th><th class="num">¢/pt</th><th>Use</th></tr></thead>
+  <tbody>
+  {% for f in fares %}
+  <tr class="{{ 'match' if f.matched }}">
+    <td><a href="{{ book(f.date) }}" target="_blank" rel="noopener">{{ f.date }}</a></td>
+    <td class="small">{{ f.flights }}</td>
+    <td>{{ f.depart }}–{{ f.arrive }}</td>
+    <td class="num">{{ f.stops }}</td>
+    <td class="num">{{ f.duration|dur }}</td>
+    <td class="num">{{ f.cash|money }}</td>
+    <td class="num">{{ f.points|pts }}{% if f.points_taxes %}<span class="muted small"> + ${{ '%.2f'|format(f.points_taxes) }}</span>{% endif %}</td>
+    <td class="num">{{ '%.2f'|format(f.cpp) if f.cpp else '—' }}</td>
+    <td>{% if f.matched %}<span class="pill {{ 'good' if recommend(f) == 'Points' else '' }}">{{ recommend(f) }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">Last checked {{ last|when }}. Dates link to Southwest's booking page.</p>
+{% endif %}
+
+<div class="cols">
+  <section>
+    <h2>Price history</h2>
+    {% if trend %}
+    <table class="list compact">
+      <thead><tr><th>Day</th><th class="num">Best matching cash</th><th class="num">Best matching points</th><th class="num">Lowest cash (any)</th></tr></thead>
+      <tbody>{% for t in trend %}<tr><td>{{ t.day }}</td><td class="num">{{ t.cash|money }}</td><td class="num">{{ t.points|pts }}</td><td class="num muted">{{ t.any_cash|money }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">No history yet.</p>{% endif %}
+  </section>
+  <section>
+    <h2>Recent runs</h2>
+    {% if runs %}
+    <table class="list compact">
+      <thead><tr><th>Started</th><th class="num">Searches</th><th class="num">Failed</th><th>Result</th></tr></thead>
+      <tbody>{% for r in runs %}<tr><td>{{ r.started|when }}</td><td class="num">{{ r.searches }}</td>
+        <td class="num {{ 'bad' if r.failures }}">{{ r.failures }}</td><td class="small">{{ r.note or ('Running…' if not r.finished) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">Not run yet.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

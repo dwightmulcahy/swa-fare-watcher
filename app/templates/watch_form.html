@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New watch' if new else 'Edit watch' }}{% endblock %}
+{% set window = not w.dates and w.days_to is not none %}
+{% block content %}
+<p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
+<h1>{{ 'New watch' if new else 'Edit watch' }}</h1>
+<form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+
+  <fieldset>
+    <legend>Route</legend>
+    <div class="row">
+      <label>From <input name="origin" value="{{ w.origin }}" maxlength="3" placeholder="AUS" required class="code"></label>
+      <label>To <input name="destination" value="{{ w.destination }}" maxlength="3" placeholder="BWI" required class="code"></label>
+      <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>
+    </div>
+    <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="Holiday trip"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Dates <span class="hint">one-way; each date costs 2 searches (cash + points)</span></legend>
+    <div class="seg">
+      <label><input type="radio" name="date_mode" value="dates" {{ '' if window else 'checked' }}> Specific dates</label>
+      <label><input type="radio" name="date_mode" value="window" {{ 'checked' if window }}> Rolling window</label>
+    </div>
+    <div data-mode="dates">
+      <label>Dates <input name="dates" value="{{ (w.dates or '').replace(',', ', ') }}" placeholder="2026-12-18, 2026-12-19">
+        <span class="hint">YYYY-MM-DD, separated by commas.</span></label>
+    </div>
+    <div data-mode="window" class="row">
+      <label>From <span class="hint">days ahead</span><input name="days_from" type="number" min="0" max="365" value="{{ w.days_from if w.days_from is not none else 14 }}"></label>
+      <label>To <span class="hint">days ahead</span><input name="days_to" type="number" min="0" max="365" value="{{ w.days_to if w.days_to is not none else 45 }}"></label>
+    </div>
+    <div class="weekdays">
+      <span class="label">Only these weekdays <span class="hint">optional</span></span>
+      {% for key, label in weekdays %}
+      <label class="chip"><input type="checkbox" name="wd_{{ key }}" value="1" {{ 'checked' if w.weekdays and key in w.weekdays.split(',') }}> {{ label }}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Flight filters</legend>
+    <div class="row">
+      <label>Max stops
+        <select name="max_stops">
+          {% for v, l in [('', 'Any'), ('0', 'Nonstop'), ('1', '1 stop'), ('2', '2 stops')] %}
+          <option value="{{ v }}" {{ 'selected' if (w.max_stops|string if w.max_stops is not none else '') == v }}>{{ l }}</option>
+          {% endfor %}
+        </select></label>
+      <label>Max duration <span class="hint">hours</span><input name="max_duration_h" type="number" step="0.5" min="0.5" max="24" value="{{ (w.max_duration_min / 60)|round(1) if w.max_duration_min else '' }}"></label>
+    </div>
+    <div class="row">
+      <label>Depart after <input name="depart_after" type="time" value="{{ w.depart_after or '' }}"></label>
+      <label>Depart before <input name="depart_before" type="time" value="{{ w.depart_before or '' }}"></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Price</legend>
+    <p class="hint">A flight matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
+    <div class="row">
+      <label>Max cash <span class="hint">USD, total</span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
+      <label>Max points <input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
+      <label>Min ¢/point <input name="min_cpp" type="number" step="0.05" min="0" max="10" value="{{ w.min_cpp }}"></label>
+    </div>
+    <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>
+  </fieldset>
+
+  <fieldset>
+    <input type="hidden" name="active" value="0">
+    <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if w.active }}> Active (searched daily)</label>
+  </fieldset>
+
+  <div class="form-foot">
+    <p class="muted small">Your limits: {{ limits.watches }}{% if limits.max_watches is not none %} / {{ limits.max_watches }}{% endif %} active watches,
+      {{ limits.per_day }}{% if limits.max_searches is not none %} / {{ limits.max_searches }}{% endif %} searches per day.</p>
+    <div class="buttons">
+      <a class="button" href="{{ '/' if new else '/watches/' ~ w.id }}">Cancel</a>
+      <button type="submit" class="primary">{{ 'Create watch' if new else 'Save changes' }}</button>
+    </div>
+  </div>
+</form>
+{% if not new %}
+<form method="post" action="/watches/{{ w.id }}/delete" class="danger-zone" data-confirm="Delete this watch and its price history?">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit" class="danger">Delete watch</button>
+</form>
+{% endif %}
+{% endblock %}

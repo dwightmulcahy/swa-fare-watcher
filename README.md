@@ -6,91 +6,111 @@
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](.github/dependabot.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Searches Southwest fares once a day for the routes you configure, filters by stops, duration, departure time, cash price and points, scores points fares in cents per point, and emails new or lower matches through Gmail.
+A small multi-user web app that searches Southwest fares once a day for each user's saved watches, filters by stops, duration, departure time, cash price and points, scores points fares in cents per point, and emails new or lower matches through Gmail. An admin panel creates and revokes users and sets per-user limits.
 
 > [!WARNING]
-> Southwest has no public fare API. Fares are read from the JSON its booking page loads, which can change without notice, and automated access may conflict with Southwest's terms of use. Keep the number of searches small.
+> Southwest has no public fare API. Fares are read from the JSON its booking page loads, which can change without notice, and automated access may conflict with Southwest's terms of use. Keep the number of users and searches small.
+
+## Features
+
+**Users**
+- Sign in with a username and password; a temporary password from the admin must be changed at first sign-in.
+- Create, edit, pause and delete watches: route, specific dates or a rolling window (e.g. next 14–45 days, Fridays and Saturdays), adults, max stops, max duration, departure window, max cash, max points, minimum ¢/point.
+- See the latest fares per date (matches highlighted, with a Cash/Points recommendation), price history and recent runs; trigger **Search now**.
+- Upload their own Southwest session so searches run as their Rapid Rewards account. Stored encrypted.
+
+**Admin**
+- Create users (temporary password shown once), reset passwords, revoke and restore access, delete users.
+- Per-user limits: **max active watches**, **max searches per day**, **account expiry date**. Blank means no limit.
+- See each user's status, usage today, Southwest session health and last sign-in; run everyone's watches now.
+
+**How limits work**
+- Each date in a watch costs 2 searches (cash + points). Creating or resuming a watch is refused if the user's active watches would need more searches per day than their limit.
+- The worker also stops a user's run when the daily count is reached ("Daily search limit reached"), which covers **Search now**.
+- Revoked or expired users are signed out immediately, can't sign in, and their watches don't run.
 
 ## How it works
 
-- Each date is searched twice in a real Chromium browser: once in dollars, once in points. Requests per run = dates × 2.
-- A flight matches when it passes the stops, duration and departure-time filters **and** either cash ≤ `max_price`, or points ≤ `max_points` with ¢/pt ≥ `min_cpp`.
-- ¢/pt = (cash fare − points taxes) ÷ points × 100. The email's **Use** column says Points when ¢/pt ≥ `min_cpp`, else Cash.
-- A flight is re-sent only when its cash or points price drops below the last alerted price.
-- Every result is stored in `fares.db` (`history` table) for price trends.
-- If every search fails (blocked or signed out), it emails you instead of failing silently.
+One container runs the web app, a single background worker and a daily scheduler. At `SWA_DAILY_AT` every eligible user is queued; the worker processes one user at a time in one Chromium browser (headed inside a private Xvfb display, which Southwest blocks less often), with a random 8–20 s pause between page loads. A flight matches when it passes the stops, duration and time filters **and** either cash ≤ max cash, or points ≤ max points with ¢/pt ≥ the minimum. ¢/pt = (cash fare − points taxes) ÷ points × 100. Each user gets one email per run listing only flights that are new or cheaper than last alerted. If all of a user's searches fail, they get an email asking them to upload a fresh session.
 
-## Configure
+State lives in `/data`: `app.db` (SQLite), `secret.key` (encrypts Southwest sessions; back it up with the DB) and `debug/` (screenshots and raw JSON of failed searches).
 
-All state lives in the data directory (`$SWA_DATA_DIR`; the repo folder when running natively, `/data` in Docker):
-
-| File | Purpose |
-|---|---|
-| `config.yaml` | Routes, filters, email recipients. Created from [`config.example.yaml`](config.example.yaml) on first start. |
-| `.env` | `GMAIL_USER`, `GMAIL_APP_PASSWORD` (app password from myaccount.google.com/apppasswords; needs 2FA) |
-| `storage_state.json` | Your Southwest session cookies, written by `--login`. Optional: searches work signed out. |
-| `fares.db`, `debug/` | Price history; screenshots and raw JSON when a search fails |
-
-Route options (each can also go under `defaults`): `origin`, `destination`, `dates` or `days_ahead: [from, to]`, `weekdays`, `adults`, `max_stops`, `max_duration_min`, `depart_after`, `depart_before`, `max_price`, `max_points`, `min_cpp`.
-
-## Run natively
+## Run with Docker
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium        # skip if config uses browser.channel: chrome
-cp .env.example .env               # set Gmail values
-cp config.example.yaml config.yaml # set routes
-python swa_watch.py --login        # optional: sign in once in the window that opens
-python swa_watch.py --dry-run      # check parsing and filters, no email
+cp .env.example .env        # set ADMIN_PASSWORD, GMAIL_*, BASE_URL, TZ
+mkdir -p data && sudo chown 1000 data
+docker compose up -d --build
+open http://localhost:8080   # sign in as admin
 ```
 
-Daily with cron (`xvfb-run -a` in front on a headless Linux server):
+If `ADMIN_PASSWORD` is blank, a temporary admin password is printed once in `docker compose logs`.
 
-```cron
-20 7 * * * cd /path/to/swa-fare-watcher && .venv/bin/python swa_watch.py >> watch.log 2>&1
-```
-
-## Run in Docker
-
-The image runs Chromium headed inside Xvfb and searches once a day at `SWA_DAILY_AT` in `TZ`.
-
-```bash
-cp .env.example .env               # Gmail values, SWA_DAILY_AT, TZ
-mkdir -p data && cp config.example.yaml data/config.yaml && $EDITOR data/config.yaml
-sudo chown -R 1000 data            # container runs as uid 1000
-docker compose run --rm --build watcher --dry-run   # test now
-docker compose up -d
-```
-
-To use your Southwest login in the container, run `python swa_watch.py --login` on a desktop and copy the resulting `storage_state.json` into `data/`.
+Put it behind an HTTPS reverse proxy (Caddy, Traefik, nginx, Cloudflare Tunnel) before giving others access, then set `COOKIE_SECURE=true` and `BASE_URL=https://…`.
 
 QNAP: `docker compose -f compose.qnap.yaml pull && docker compose -f compose.qnap.yaml up -d` (uses the published image and `QNAP_DATA_DIR`).
 
 Both Compose files run with a read-only root filesystem, dropped capabilities, `no-new-privileges`, bounded memory and PIDs, an init process and rotated logs.
 
-## When it breaks
+## Southwest sessions
 
-- No results or `unrecognized response shape`: run `--dry-run --debug`, inspect `debug/*.json`, adjust `parse_flights()` / `lowest_fare()` in `swa_watch.py`.
-- "All searches failed" email: likely blocked or the session expired. Run `--login` again and check `debug/*.png`.
+Each user uploads their own signed-in session under **Settings → Southwest session**, either:
+
+- **Cookie export:** sign in at southwest.com, export cookies as JSON with a browser extension such as Cookie-Editor, and paste it; or
+- **Helper script:** `python -m app swa-login` on a desktop with this repo and Playwright installed opens a browser, you sign in, and it writes `storage_state.json` to upload.
+
+Only `southwest.com` cookies are kept. Sessions are encrypted with a key derived from `SECRET_KEY` (or `/data/secret.key`). Refreshed cookies are saved after each successful run. Without a session, searches run signed out (prices still show, but points prices are not account-specific).
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / random | First admin, created on first start only |
+| `BASE_URL` | `http://localhost:8080` | Used in email links |
+| `COOKIE_SECURE` | `false` | Set `true` behind HTTPS |
+| `SECRET_KEY` | auto (`/data/secret.key`) | Encrypts stored Southwest sessions; keep stable |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | — | Alert sender ([app password](https://myaccount.google.com/apppasswords), needs 2FA) |
+| `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time |
+| `SWA_SCHEDULER` | `true` | `false` disables the daily run (manual runs still work) |
+| `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |
+| `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
+| `SWA_SEARCH_DELAY` | `8,20` | Random pause range between searches (seconds) |
+| `SWA_HEADLESS` | `false` | `true` runs Chromium headless (no Xvfb; more likely blocked) |
+| `SESSION_DAYS` | `14` | Web sign-in lifetime |
+
+## Run without Docker
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt && playwright install --with-deps chromium
+cp .env.example .env && set -a && . ./.env && set +a
+SWA_DATA_DIR=./data python -m app serve
+```
+
+On a desktop, Chromium opens in a visible window; on a headless Linux server the app starts Xvfb itself (`apt install xvfb`).
+
+## When searches fail
+
+- Users see "Searches failed" on their dashboard and get an email; the usual fix is uploading a fresh session.
+- `unrecognized response shape` in the logs means Southwest changed its page data: inspect `/data/debug/*.json` and adjust `parse_flights()` / `lowest_fare()` in `app/swa.py`.
 
 ## Development
 
 ```bash
 pip install -r requirements-dev.txt
-ruff check . --select F && pyflakes swa_watch.py scripts tests
+ruff check . --select F && pyflakes app scripts tests
 pytest -q
 ```
 
-CI runs the tests, validates both Compose files, builds the image, launches Chromium inside the hardened container, and fails on fixable high or critical vulnerabilities (Trivy). Actions and the base image are pinned by SHA/digest; Dependabot keeps them current.
+Tests cover parsing, filters, ¢/pt, scheduling, the worker (with a fake browser), sign-in, password change, watch CRUD and ownership, limits, revoke/restore/expiry, CSRF, session encryption and login rate limiting.
+
+CI runs the tests, validates both Compose files, builds the image, starts it hardened, checks `/health`, signs in to the admin panel, launches Chromium inside the container, and fails on fixable high or critical vulnerabilities (Trivy). Actions and the base image are pinned by SHA/digest; Dependabot keeps them current.
 
 ## Releasing
 
 1. Merge to `main`.
 2. `git tag v1.2.3 && git push origin v1.2.3`
 3. The Release workflow checks the tag is on `main`, reruns CI, publishes a multi-arch image (`ghcr.io/dwightmulcahy/swa-fare-watcher` by default, or Docker Hub when `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set) and creates a GitHub Release with Conventional Commit notes.
-
-The newest stable release also gets `1.2`, `1` and `latest` tags; prereleases (`v1.3.0-rc.1`) publish only their exact tag.
 
 ## License
 

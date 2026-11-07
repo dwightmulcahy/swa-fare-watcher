@@ -5,7 +5,8 @@ services:
     env_file:
       - path: .env
         required: false
-    command: ["--daily-at", "${SWA_DAILY_AT:-07:20}"]
+    ports:
+      - "${HOST_PORT:-8080}:8080"
     volumes:
       - ${QNAP_DATA_DIR:-/share/Container/swa-fare-watcher/data}:/data
     init: true

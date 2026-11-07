@@ -1,4 +1,4 @@
 *
 !requirements.txt
-!swa_watch.py
-!config.example.yaml
+!app/
+**/__pycache__

@@ -17,6 +17,7 @@ permissions:
 env:
   PYTHON_VERSION: "3.13"
   IMAGE: app:ci
+  PORT: "8080"
 
 jobs:
   compose:
@@ -44,7 +45,7 @@ jobs:
       - name: Ruff and Pyflakes
         run: |
           ruff check . --select F
-          pyflakes swa_watch.py scripts tests
+          pyflakes app scripts tests
       - run: python -m pytest -q
 
   docker-smoke:
@@ -61,19 +62,29 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Launch Chromium in hardened container
+      - name: Start hardened container
         run: |
-          docker run --rm \
+          docker run -d --name app --init -p ${PORT}:8080 \
             --read-only --tmpfs /tmp --tmpfs /data:uid=1000 \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --pids-limit 512 --memory 1g --shm-size 512m \
-            "$IMAGE" --selftest
-      - name: First start seeds config into /data
+            -e ADMIN_PASSWORD=ci-admin-password -e SWA_SCHEDULER=false \
+            "$IMAGE"
+      - name: Check /health
         run: |
-          set +e
-          out=$(docker run --rm --read-only --tmpfs /tmp --tmpfs /data:uid=1000 "$IMAGE" --dry-run 2>&1)
-          echo "$out"
-          grep -q "Created /data/config.yaml" <<<"$out"
+          for i in $(seq 1 30); do
+            curl -fsS "http://localhost:${PORT}/health" && exit 0
+            sleep 1
+          done
+          echo "::error::/health never became ready"; exit 1
+      - name: Sign in as admin and load the admin panel
+        run: |
+          set -euo pipefail
+          base="http://localhost:${PORT}"
+          curl -fsS -c jar -b jar -o /dev/null -w '%{http_code}\n' -d 'username=admin&password=ci-admin-password' "$base/login" | grep -q 303
+          curl -fsS -c jar -b jar "$base/admin" | grep -q '<h1>Users</h1>'
+      - name: Launch Chromium inside the container
+        run: timeout 120 docker exec app python -m app selftest
       - name: Scan image for fixable high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -84,3 +95,6 @@ jobs:
           scanners: vuln
           vuln-type: os,library
           severity: CRITICAL,HIGH
+      - name: Container logs
+        if: failure()
+        run: docker logs app

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<section class="card">
+  <h2>Alerts</h2>
+  <form method="post" action="/settings" class="row end">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="grow">Email alerts to <input name="email" type="email" value="{{ user.email }}" placeholder="you@example.com"></label>
+    <button type="submit" class="primary">Save</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Southwest session</h2>
+  <p>Searches run as your Rapid Rewards account so points prices match what you'd see. Upload your signed-in Southwest session; it's stored encrypted and used only for your searches.</p>
+  <dl class="kv">
+    <dt>Status</dt><dd>{% if user.swa_state %}<span class="pill {{ 'good' if user.swa_status == 'OK' else 'warn' if user.swa_status and user.swa_status.startswith('Searches failed') }}">{{ user.swa_status or 'Uploaded' }}</span>
+      <span class="muted small">{{ user.swa_status_at|when }}</span>{% else %}Not set. Searches run signed out.{% endif %}</dd>
+    {% if user.swa_state_updated %}<dt>Uploaded</dt><dd>{{ user.swa_state_updated|when }}</dd>{% endif %}
+  </dl>
+  <form method="post" action="/settings/swa" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Session file <input type="file" name="state_file" accept=".json,application/json"></label>
+    <label>…or paste the JSON <textarea name="state_text" rows="4" placeholder='[{"domain": ".southwest.com", "name": "...", "value": "..."}]'></textarea></label>
+    <div class="buttons"><button type="submit" class="primary">Upload session</button></div>
+  </form>
+  {% if user.swa_state %}
+  <form method="post" action="/settings/swa/clear" data-confirm="Remove your Southwest session?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="link danger-text">Remove session</button>
+  </form>
+  {% endif %}
+  <details>
+    <summary>How do I get a session file?</summary>
+    <ol>
+      <li><strong>Browser extension (easiest):</strong> sign in at southwest.com in Chrome or Firefox, open a cookie export extension (for example <em>Cookie-Editor</em>), choose <em>Export → JSON</em> while on southwest.com, and paste the result above.</li>
+      <li><strong>Helper script:</strong> on a computer with Python, run <code>python -m app swa-login</code> from this project, sign in in the window that opens, and upload the <code>storage_state.json</code> it writes.</li>
+    </ol>
+    <p class="muted small">Sessions expire. If searches start failing you'll get an email; upload a fresh session.</p>
+  </details>
+</section>
+
+<section class="card">
+  <h2>Account</h2>
+  <dl class="kv">
+    <dt>Username</dt><dd>{{ user.username }}</dd>
+    <dt>Active watches</dt><dd>{{ limits.watches }}{% if limits.max_watches is not none %} of {{ limits.max_watches }}{% else %} (no limit){% endif %}</dd>
+    <dt>Searches per day</dt><dd>{{ limits.max_searches if limits.max_searches is not none else 'No limit' }}</dd>
+    <dt>Account expires</dt><dd>{{ user.expires_at or 'Never' }}</dd>
+  </dl>
+  <a class="button" href="/password">Change password</a>
+</section>
+{% endblock %}

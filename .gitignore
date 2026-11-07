@@ -42,10 +42,10 @@ Thumbs.db
 logs/
 *.log
 
-# Watcher state (personal config, session cookies, history)
+# App state (database, encryption key, Southwest sessions)
 data/
-config.yaml
+*.db
+secret.key
 storage_state.json
-.swa_profile/
-fares.db
 debug/
+.ruff_cache/

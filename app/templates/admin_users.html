@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Users</h1><p class="muted">{{ users|length }} account(s). Blank limits mean no limit.</p></div>
+  <div class="buttons">
+    <form method="post" action="/admin/run-all" class="inline" data-confirm="Run every user's active watches now? This uses their daily search allowance.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Run all now</button></form>
+    <a class="button primary" href="/admin/users/new">New user</a>
+  </div>
+</div>
+<div class="table-wrap">
+<table class="list">
+  <thead><tr><th>User</th><th>Status</th><th class="num">Active watches</th><th class="num">Searches today</th><th>Expires</th><th>Southwest session</th><th>Last sign-in</th><th></th></tr></thead>
+  <tbody>
+  {% for t in users %}
+  {% set expired = t.expires_at and t.expires_at < today %}
+  <tr class="{{ '' if t.active and not expired else 'paused' }}">
+    <td><a class="strong" href="/admin/users/{{ t.id }}">{{ t.username }}</a>{% if t.is_admin %} <span class="pill">Admin</span>{% endif %}<br><span class="muted small">{{ t.email or 'no email' }}</span></td>
+    <td>{% if not t.active %}<span class="pill bad">Revoked</span>{% elif expired %}<span class="pill warn">Expired</span>{% elif t.must_change_pw %}<span class="pill">Invited</span>{% else %}<span class="pill good">Active</span>{% endif %}
+      {% if worker.status(t.id) %}<br><span class="muted small">Search {{ worker.status(t.id) }}</span>{% endif %}</td>
+    <td class="num">{{ t.n_watches }}{% if t.max_watches is not none %} / {{ t.max_watches }}{% endif %}</td>
+    <td class="num">{{ t.today or 0 }}{% if t.max_searches_per_day is not none %} / {{ t.max_searches_per_day }}{% endif %}</td>
+    <td class="small">{{ t.expires_at or '—' }}</td>
+    <td class="small">{% if t.swa_state %}{{ t.swa_status or 'Uploaded' }}{% else %}<span class="muted">None</span>{% endif %}</td>
+    <td class="small">{{ t.last_login|when }}</td>
+    <td class="actions">
+      <a href="/admin/users/{{ t.id }}">Edit</a>
+      {% if t.id != user.id %}
+        {% if t.active %}
+        <form method="post" action="/admin/users/{{ t.id }}/revoke" class="inline" data-confirm="Revoke {{ t.username }}? They'll be signed out and their watches stop running.">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="link danger-text" type="submit">Revoke</button></form>
+        {% else %}
+        <form method="post" action="/admin/users/{{ t.id }}/restore" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Restore</button></form>
+        {% endif %}
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

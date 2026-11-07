@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New user' if new else t.username }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/admin">Users</a> / {{ 'New user' if new else t.username }}</p>
+<h1>{{ 'New user' if new else t.username }}
+  {% if not new %}{% if not t.active %}<span class="pill bad">Revoked</span>{% elif t.expires_at and t.expires_at < today_str %}<span class="pill warn">Expired</span>{% endif %}{% endif %}</h1>
+
+<form method="post" action="{{ '/admin/users' if new else '/admin/users/' ~ t.id }}" class="card form-grid">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset>
+    <legend>Account</legend>
+    <div class="row">
+      {% if new %}<label>Username <input name="username" value="{{ t.username }}" required pattern="[A-Za-z0-9._\-]{3,32}" autocomplete="off"></label>{% endif %}
+      <label class="grow">Email <span class="hint">where alerts go; the user can change it</span><input name="email" type="email" value="{{ t.email }}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="is_admin" value="1" {{ 'checked' if t.is_admin }}> Administrator</label>
+  </fieldset>
+  <fieldset>
+    <legend>Limits <span class="hint">leave blank for no limit</span></legend>
+    <div class="row">
+      <label>Max active watches <input name="max_watches" type="number" min="0" value="{{ t.max_watches if t.max_watches is not none else '' }}"></label>
+      <label>Max searches per day <input name="max_searches_per_day" type="number" min="0" value="{{ t.max_searches_per_day if t.max_searches_per_day is not none else '' }}">
+        <span class="hint">Each date in a watch uses 2 (cash + points).</span></label>
+      <label>Account expires <input name="expires_at" type="date" value="{{ t.expires_at or '' }}">
+        <span class="hint">Signed out and stopped after this date.</span></label>
+    </div>
+  </fieldset>
+  <div class="form-foot">
+    {% if new %}<p class="muted small">A temporary password is generated; the user sets their own at first sign-in.</p>{% else %}<span></span>{% endif %}
+    <div class="buttons">
+      <a class="button" href="/admin">Cancel</a>
+      <button type="submit" class="primary">{{ 'Create user' if new else 'Save' }}</button>
+    </div>
+  </div>
+</form>
+
+{% if not new %}
+<section class="card">
+  <h2>Usage</h2>
+  <dl class="kv">
+    <dt>Searches today</dt><dd>{{ today_used }}{% if t.max_searches_per_day is not none %} of {{ t.max_searches_per_day }}{% endif %}</dd>
+    <dt>Southwest session</dt><dd>{% if t.swa_state %}{{ t.swa_status or 'Uploaded' }} <span class="muted small">{{ t.swa_status_at|when }}</span>{% else %}None{% endif %}</dd>
+    <dt>Created</dt><dd>{{ t.created_at|when }}</dd>
+    <dt>Last sign-in</dt><dd>{{ t.last_login|when }}</dd>
+  </dl>
+  {% if watches %}
+  <table class="list compact">
+    <thead><tr><th>Watch</th><th>Route</th><th class="num">Searches/run</th><th>Last run</th></tr></thead>
+    <tbody>{% for w in watches %}<tr class="{{ '' if w.active else 'paused' }}"><td>{{ w.name }}{% if not w.active %} <span class="pill">Paused</span>{% endif %}</td>
+      <td>{{ w.origin }} → {{ w.destination }}</td><td class="num">{{ est[w.id] }}</td>
+      <td class="small">{{ w.last_run_at|when }} <span class="muted">{{ w.last_status or '' }}</span></td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">No watches.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Access</h2>
+  <div class="buttons left">
+    <form method="post" action="/admin/users/{{ t.id }}/reset-password" class="inline" data-confirm="Reset {{ t.username }}'s password? They'll be signed out.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Reset password</button></form>
+    {% if t.id != user.id %}
+      {% if t.active %}
+      <form method="post" action="/admin/users/{{ t.id }}/revoke" class="inline" data-confirm="Revoke {{ t.username }}? They'll be signed out and their watches stop running.">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="danger">Revoke access</button></form>
+      {% else %}
+      <form method="post" action="/admin/users/{{ t.id }}/restore" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Restore access</button></form>
+      {% endif %}
+      <form method="post" action="/admin/users/{{ t.id }}/delete" class="inline" data-confirm="Permanently delete {{ t.username }}, their watches and history?">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="link danger-text">Delete user</button></form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -8,14 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     SWA_DATA_DIR=/data \
     HOME=/tmp \
+    PORT=8080 \
     TZ=UTC
 
 WORKDIR /app
 COPY requirements.txt ./
-# Chromium + its OS libraries, and Xvfb so the browser runs headed (far less likely to be blocked)
+# Chromium + its OS libraries, and Xvfb so the browser runs headed (far less likely to be blocked).
+# The app starts its own Xvfb display per run.
 RUN apt-get update \
  && apt-get upgrade -y \
- && apt-get install -y --no-install-recommends xvfb xauth tzdata \
+ && apt-get install -y --no-install-recommends xvfb tzdata \
  && pip install -r requirements.txt \
  && playwright install --with-deps chromium \
  && rm -rf /var/lib/apt/lists/* \
@@ -23,9 +25,11 @@ RUN apt-get update \
  && mkdir -p /data && chown app /data
 
 # Files owned by root, process runs as non-root: app cannot modify itself
-COPY swa_watch.py config.example.yaml ./
+COPY app ./app
 USER app
 VOLUME ["/data"]
-HEALTHCHECK NONE
-ENTRYPOINT ["xvfb-run", "-a", "--server-args=-screen 0 1366x900x24", "python", "/app/swa_watch.py"]
-CMD ["--daily-at", "07:20"]
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status != 200)"
+ENTRYPOINT ["python", "-m", "app"]
+CMD ["serve"]

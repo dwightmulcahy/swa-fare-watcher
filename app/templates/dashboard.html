@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Watches{% endblock %}
+{% macro limit(used, cap) %}{{ used }}{% if cap is not none %} / {{ cap }}{% else %} <span class="muted">(no limit)</span>{% endif %}{% endmacro %}
+{% block content %}
+<div class="head">
+  <div>
+    <h1>Your watches</h1>
+    <p class="muted">Searched daily at {{ daily_at }}. New or lower matching fares are emailed to
+      {% if user.email %}<strong>{{ user.email }}</strong>{% else %}<a href="/settings">add an email address</a>{% endif %}.</p>
+  </div>
+  <a class="button primary" href="/watches/new">New watch</a>
+</div>
+
+<div class="stats">
+  <div class="stat"><span class="label">Active watches</span><span class="value">{{ limit(limits.watches, limits.max_watches) }}</span></div>
+  <div class="stat"><span class="label">Searches per daily run</span><span class="value">{{ limit(limits.per_day, limits.max_searches) }}</span></div>
+  <div class="stat"><span class="label">Searches used today</span><span class="value">{{ limit(limits.today, limits.max_searches) }}</span></div>
+  <div class="stat"><span class="label">Southwest session</span>
+    <span class="value small">{% if user.swa_state %}<span class="pill {{ 'good' if user.swa_status == 'OK' else 'warn' if user.swa_status and user.swa_status.startswith('Searches failed') else '' }}">{{ user.swa_status or 'Uploaded' }}</span>{% else %}<a href="/settings">Not set</a>{% endif %}</span></div>
+</div>
+{% if run_status %}<div class="flash info">Your search is {{ run_status }}. Refresh in a few minutes for results.</div>{% endif %}
+{% if user.expires_at %}<p class="muted small">Your account is active until {{ user.expires_at }}.</p>{% endif %}
+
+{% if not watches %}
+<section class="card empty">
+  <h2>No watches yet</h2>
+  <p>A watch searches a route on the dates you choose and emails you when a fare passes your filters.</p>
+  <a class="button primary" href="/watches/new">Create your first watch</a>
+</section>
+{% else %}
+<div class="table-wrap">
+<table class="list">
+  <thead><tr><th>Watch</th><th>Dates</th><th>Filters</th><th class="num">Best match</th><th>Last run</th><th></th></tr></thead>
+  <tbody>
+  {% for w in watches %}{% set b = best[w.id] %}
+  <tr class="{{ '' if w.active else 'paused' }}">
+    <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin }} → {{ w.destination }}</span>
+      {% if not w.active %}<span class="pill">Paused</span>{% endif %}</td>
+    <td class="small">{% if w.dates %}{{ w.dates.split(',')|length }} date(s)<br><span class="muted">{{ w.dates.split(',')[0] }}{% if w.dates.split(',')|length > 1 %} … {{ w.dates.split(',')[-1] }}{% endif %}</span>
+      {% else %}Next {{ w.days_from }}–{{ w.days_to }} days{% endif %}
+      {% if w.weekdays %}<br><span class="muted">{{ w.weekdays.replace(',', ', ')|title }}</span>{% endif %}
+      <br><span class="muted">{{ est[w.id] }} searches/run</span></td>
+    <td class="small">{% if w.max_stops == 0 %}Nonstop{% elif w.max_stops is not none %}≤ {{ w.max_stops }} stop{{ '' if w.max_stops == 1 else 's' }}{% else %}Any stops{% endif %}
+      {% if w.max_duration_min %}· ≤ {{ w.max_duration_min|dur }}{% endif %}
+      <br>{% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %}
+      <span class="muted">· ≥ {{ w.min_cpp }}¢/pt</span></td>
+    <td class="num">{% if b and b.n %}
+        {% if b.cash or b.points %}<span class="price">{{ b.cash|money }}</span><br><span class="muted small">{{ b.points|pts }} pts</span>
+        {% else %}<span class="muted small">No match<br>lowest {{ b.any_cash|money }}</span>{% endif %}
+      {% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="small">{{ w.last_run_at|when }}<br><span class="muted">{{ w.last_status or 'Not run yet' }}</span></td>
+    <td class="actions">
+      <form method="post" action="/watches/{{ w.id }}/toggle" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="link" type="submit">{{ 'Pause' if w.active else 'Resume' }}</button></form>
+      <a href="/watches/{{ w.id }}/edit">Edit</a>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

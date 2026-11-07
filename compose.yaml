@@ -6,9 +6,10 @@ services:
     env_file:
       - path: .env
         required: false
-    command: ["--daily-at", "${SWA_DAILY_AT:-07:20}"]
+    ports:
+      - "${HOST_PORT:-8080}:8080"
     volumes:
-      - ${DATA_DIR:-./data}:/data      # config.yaml, storage_state.json, fares.db, debug/
+      - ${DATA_DIR:-./data}:/data      # app.db, secret.key, debug/
     init: true
     read_only: true
     tmpfs:
