@@ -270,6 +270,18 @@ class Worker:
                                    if rt else "") + " date(s) to search", watch_id=w["id"])
                         w_s = w_f = w_m = 0
                         note = None
+                        if settings.calendar and hasattr(searcher, "calendar") and dates:
+                            before = 2 * len(dates)
+                            dates, used, hit_cap = self._calendar_phase(user_id, w, route, dates, searcher, cap)
+                            w_s += used
+                            total += used + 2 * len(dates) - before
+                            done += used
+                            self.phase(user_id, f"{route}: calendar narrowed it to {len(dates)} date(s) to search",
+                                       watch_id=w["id"], done=done, total=total)
+                            if hit_cap:
+                                note, limited, dates = "Daily search limit reached", True, []
+                            elif not dates:
+                                note = "No date on the calendar under your target"
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
                         for leg, date in dates:
                             if cap is not None and db.searches_today(user_id) + 2 > cap:
@@ -411,6 +423,54 @@ class Worker:
         if signin is not None:
             out["signin"] = signin.status
         return out
+
+    def _calendar_phase(self, user_id, w, route, dates, searcher, cap):
+        """Read the low-fare calendar (cash and points, each month and direction) and keep the
+        dates worth a full search. Returns (dates, calendar loads used, hit the daily cap)."""
+        cal, used = {}, 0
+        for leg in ("out", "ret"):
+            leg_dates = [d for lg, d in dates if lg == leg]
+            if not leg_dates:
+                continue
+            frm, to = (w["origin"], w["destination"]) if leg == "out" else (w["destination"], w["origin"])
+            lows, ok = {}, True
+            months = list(swa.calendar_months(leg_dates).items())
+            for month, first in random.sample(months, len(months)):
+                for ft in random.sample(("USD", "POINTS"), 2):
+                    if cap is not None and db.searches_today(user_id) + 1 > cap:
+                        self.phase(user_id, f"{route}: daily search limit reached, stopping",
+                                   watch_id=w["id"], level="warn")
+                        return [], used, True
+                    self.phase(user_id, f"{route}: reading the {month} {'cash' if ft == 'USD' else 'points'} "
+                               f"calendar {frm}→{to}", watch_id=w["id"])
+                    days = searcher.calendar(frm, to, first, w["adults"], ft)
+                    with db.tx() as con:
+                        db.add_searches(con, user_id, 1)
+                    used += 1
+                    if days is None:
+                        ok = False
+                    else:
+                        field = "cash" if ft == "USD" else "points"
+                        for d, v in days.items():
+                            lows.setdefault(d, {"cash": None, "points": None})[field] = v
+                    self.sleep(search_pause(*settings.search_delay))
+            cal[leg] = lows if ok else None
+            if ok:
+                ts = db.now()
+                with db.tx() as con:
+                    con.executemany(
+                        "INSERT INTO calendar_fares(watch_id, ts, leg, date, cash, points) VALUES (?,?,?,?,?,?)",
+                        [(w["id"], ts, leg, d, v["cash"], v["points"]) for d, v in sorted(lows.items())])
+                cheap = min((v["cash"] for d, v in lows.items() if d in leg_dates and v["cash"] is not None),
+                            default=None)
+                applog.info(f"{route}: {frm}→{to} calendar read for {len(leg_dates)} date(s)"
+                            + (f", lowest ${cheap:,.0f} per person" if cheap is not None else ""),
+                            user_id=user_id, watch_id=w["id"], source="run")
+            else:
+                applog.warn(f"{route}: {frm}→{to} calendar unreadable; searching every date",
+                            user_id=user_id, watch_id=w["id"], source="run")
+        picked = swa.calendar_pick(w, cal, dates, settings.calendar_detail_dates)
+        return search_order(picked), used, False
 
     @staticmethod
     def _finish_run(run_id, watch_id, note, searches, failures, matches):

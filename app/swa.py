@@ -17,6 +17,8 @@ from . import applog
 from .config import settings
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
+CALENDAR_URL = "https://www.southwest.com/air/low-fare-calendar/select-dates"
+CALENDAR_API = "low-fare-calendar"   # the calendar page's data request contains this
 SHOPPING_API = "/air-booking/page/air/booking/shopping"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -91,6 +93,139 @@ def parse_flights(payload):
                 "fare": lowest_fare(d),
             }
     return out
+
+
+# ---------- low-fare calendar ----------
+_ISO_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+_PRICE_KEYS = ("lowest", "price", "fare", "amount", "points", "value")
+_SKIP_KEYS = ("original", "strike", "before", "was", "regular", "tax", "fee")
+
+
+def _amount(v, depth=0):
+    """A price from a number, "1,234", "$481" or {"value": "481"}-style objects."""
+    if isinstance(v, bool) or v is None or depth > 3:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        return num(v)
+    if isinstance(v, dict):
+        for k in ("value", "amount", "totalFare", "price", "points", "fare"):
+            if k in v:
+                a = _amount(v[k], depth + 1)
+                if a is not None:
+                    return a
+    return None
+
+
+def parse_calendar(payload):
+    """{YYYY-MM-DD: lowest fare that day (None = unavailable)} from the calendar's JSON, or None
+    if nothing in it looks like a day with a price. Southwest's format isn't documented, so this
+    looks for any object that has a date and a price; struck-through "was" prices are ignored."""
+    out = {}
+
+    def walk(x, depth=0):
+        if depth > 14:
+            return
+        if isinstance(x, dict):
+            day = None
+            for k, v in x.items():
+                if "date" in k.lower() and isinstance(v, str) and _ISO_DAY.match(v):
+                    day = v[:10]
+                    break
+            if day:
+                amt, unavailable = None, False
+                for k, v in x.items():
+                    kl = k.lower()
+                    if any(t in kl for t in _SKIP_KEYS):
+                        continue
+                    if any(t in kl for t in _PRICE_KEYS):
+                        a = _amount(v)
+                        if a is not None and a > 0:
+                            amt = a if amt is None else min(amt, a)
+                    if (kl in ("unavailable", "isunavailable", "soldout") and v is True) or (
+                            isinstance(v, str) and v.strip().upper().replace(" ", "_") in ("UNAVAILABLE", "SOLD_OUT")):
+                        unavailable = True
+                if amt is not None:
+                    out[day] = amt if out.get(day) is None else min(out[day], amt)
+                elif unavailable:
+                    out.setdefault(day, None)
+            for v in x.values():
+                walk(v, depth + 1)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, depth + 1)
+
+    walk(payload)
+    return out if any(v is not None for v in out.values()) else None
+
+
+def calendar_months(dates):
+    """For each month the dates fall in, the earliest of those dates (the calendar opens on it)."""
+    first = {}
+    for d in sorted(dates):
+        first.setdefault(d[:7], d)
+    return first
+
+
+def _day_low(lows, d):
+    x = (lows or {}).get(d) or {}
+    return x.get("cash"), x.get("points")
+
+
+def _rank(cash, points):
+    # cheapest first; points-only days ranked at ~1.3¢/pt
+    return cash if cash is not None else (points * 0.013 if points is not None else float("inf"))
+
+
+def calendar_pick(w, cal, legs, limit):
+    """Which (leg, date) searches to run, given calendar lows.
+
+    cal = {"out": {date: {"cash", "points"}}, "ret": {...}}, with a leg missing (None) when its
+    calendar couldn't be read: that leg keeps every date. A day's calendar low is the cheapest
+    fare that day, so a day whose low already misses the target can't produce a match and is
+    skipped; filters (stops, times) only make fares dearer. All prices are per person.
+    Round trips rank date pairs by the sum of the two lows. At most `limit` dates per leg
+    (or pairs for a round trip) are kept, cheapest first."""
+    by_leg = {"out": [], "ret": []}
+    for leg, d in legs:
+        by_leg[leg].append(d)
+
+    def priced(leg, d):
+        return cal.get(leg) is not None and d in cal[leg]
+
+    if not is_roundtrip(w):
+        if cal.get("out") is None:
+            return list(legs)
+        keep = []
+        for d in by_leg["out"]:
+            c, p = _day_low(cal["out"], d)
+            if not priced("out", d):
+                keep.append((float("inf"), d))      # not on the calendar: search to be sure
+            elif (c is not None or p is not None) and price_ok(c, p, None, w):
+                keep.append((_rank(c, p), d))
+        keep.sort()
+        return [("out", d) for _, d in keep[:limit]]
+
+    pairs = [(o, r) for o, r in trip_pairs(w) if o in by_leg["out"] and r in by_leg["ret"]]
+    scored = []
+    for o, r in pairs:
+        oc, op = _day_low(cal.get("out"), o) if priced("out", o) else (None, None)
+        rc, rp = _day_low(cal.get("ret"), r) if priced("ret", r) else (None, None)
+        unknown_o, unknown_r = not priced("out", o), not priced("ret", r)
+        if (not unknown_o and oc is None and op is None) or (not unknown_r and rc is None and rp is None):
+            continue                                 # sold out one way
+        cash = None if (unknown_o or unknown_r or oc is None or rc is None) else oc + rc
+        pts = None if (unknown_o or unknown_r or op is None or rp is None) else op + rp
+        if unknown_o or unknown_r:
+            scored.append((float("inf"), o, r))
+        elif (cash is not None or pts is not None) and price_ok(cash, pts, None, w):
+            scored.append((_rank(cash, pts), o, r))
+    scored.sort()
+    chosen = scored[:limit]
+    outs = {o for _, o, _ in chosen}
+    rets = {r for _, _, r in chosen}
+    return [(leg, d) for leg, d in legs if (d in outs if leg == "out" else d in rets)]
 
 
 def combine(cash, points):
@@ -577,6 +712,54 @@ class BrowserSearcher:
     def _uid(self):
         return self.profile_key if isinstance(self.profile_key, int) else None
 
+    def calendar(self, origin, dest, date, adults, fare_type):
+        """Lowest fare for each day of the month containing `date` (one page load), as
+        {YYYY-MM-DD: amount or None}. Returns None if the calendar couldn't be read. The raw
+        data is saved to debug/calendar/ so the parser can be checked against the real thing."""
+        q = {
+            "adultPassengersCount": adults, "adultsCount": adults,
+            "currencyCode": "PTS" if fare_type == "POINTS" else "USD",
+            "departureDate": date, "destinationAirportCode": dest, "fareType": fare_type,
+            "lapInfantPassengersCount": 0, "originationAirportCode": origin, "passengerType": "ADULT",
+            "promoCode": "", "returnAirportCode": "", "returnDate": "", "tripType": "oneway",
+        }
+        tag = f"calendar-{origin}-{dest}-{date[:7]}-{fare_type}"
+        if not self._warmed:
+            self.warm_up()
+
+        def is_data(r):
+            return (CALENDAR_API in r.url and r.request.resource_type in ("xhr", "fetch")
+                    and "json" in (r.headers.get("content-type") or ""))
+        seen = []  # JSON requests the page made, logged if the calendar's isn't found
+
+        def note(r):
+            if r.request.resource_type in ("xhr", "fetch") and len(seen) < 15:
+                seen.append(r.url.split("?")[0][:120])
+        self.page.on("response", note)
+        try:
+            with self.page.expect_response(is_data, timeout=60_000) as info:
+                self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
+            payload = info.value.json()
+        except Exception as e:
+            applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
+                        f"page {self.page.url[:120]}; requests seen: {', '.join(seen) or 'none'}",
+                        source="search", user_id=self._uid(), attachment=self.capture(tag))
+            return None
+        finally:
+            self.page.remove_listener("response", note)
+        raw = self._save_json(tag, payload, sub="calendar")
+        if self.humanize:
+            try:
+                self.human.read()
+            except Exception:
+                pass
+        days = parse_calendar(payload)
+        if days is None:
+            applog.warn(f"{tag}: couldn't find daily fares in the calendar data; raw data saved to {raw}. "
+                        "Falling back to searching each date.", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag))
+        return days
+
     def capture(self, tag):
         """Screenshot what the browser shows right now, for the log. Returns the file (or None)."""
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
@@ -589,13 +772,15 @@ class BrowserSearcher:
         except Exception:
             return None
 
-    def _save_json(self, tag, payload):
-        d = settings.debug_dir
+    def _save_json(self, tag, payload, sub=""):
+        d = settings.debug_dir / sub if sub else settings.debug_dir
         try:
             d.mkdir(parents=True, exist_ok=True)
-            (d / f"{dt.datetime.now():%Y%m%d-%H%M%S}-{tag}.json").write_text(json.dumps(payload, indent=2))
+            path = d / f"{dt.datetime.now():%Y%m%d-%H%M%S}-{tag}.json"
+            path.write_text(json.dumps(payload, indent=2))
+            return str(path.relative_to(settings.data_dir)) if settings.data_dir in path.parents else str(path)
         except Exception:
-            pass
+            return None
 
 
 SELFTEST_PAGE = """<!doctype html><title>selftest</title>

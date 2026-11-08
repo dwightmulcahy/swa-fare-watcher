@@ -16,7 +16,8 @@ A small multi-user web app that searches Southwest fares once a day for each use
 **Users**
 - Sign in with a username and password; a temporary password from the admin must be changed at first sign-in.
 - Create, edit, pause and delete watches: route, specific dates or a rolling window (e.g. next 14–45 days, Fridays and Saturdays), adults, max stops, max duration, departure window, max cash, max points, minimum ¢/point.
-- **One-way or round trip.** Round trips take return dates, or a stay length (e.g. 3–5 nights after each departure), and an optional return departure window. Southwest prices each direction on its own, so a round trip always costs exactly two one-ways: the watcher searches each direction once and pairs them, giving the cheapest round trip for every date pair. Price targets apply to the round-trip total. With **Book as two one-ways** on, it also picks the best payment per direction, e.g. *cash out, points back* when one leg's ¢/pt clears your minimum and the other doesn't.
+- **Calendar first.** Each run reads Southwest's low-fare calendar (one page per month, cash and points, each direction) and fully searches only the days whose lowest fare can beat your target, cheapest first. A day whose calendar low already misses the target can't match, since filters only remove cheaper flights. Far fewer searches per run, and closer to how a person shops.
+- **One-way or round trip.** Round trips take return dates, or a stay length (e.g. 3–5 nights after each departure), and an optional return departure window. Southwest prices each direction on its own, so a round trip always costs exactly two one-ways: the watcher searches each direction once and pairs them, giving the cheapest round trip for every date pair. Price targets are per person and apply to the round-trip total. With **Book as two one-ways** on, it also picks the best payment per direction, e.g. *cash out, points back* when one leg's ¢/pt clears your minimum and the other doesn't.
 - See the latest fares per date (matches highlighted, with a Cash/Points recommendation), price history and recent runs; trigger **Search now**.
 - Upload their own Southwest session so searches run as their Rapid Rewards account. Stored encrypted.
 
@@ -184,6 +185,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |
 | `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
 | `SWA_SEARCH_DELAY` | `8,20` | Random pause range between searches (seconds) |
+| `SWA_CALENDAR` | `true` | Read the low-fare calendar first; search only days whose low can beat the target. Falls back to every date if the calendar can't be read; raw calendar data is saved under `debug/calendar/` |
+| `SWA_CALENDAR_DETAIL_DATES` | `6` | Most days (round trip: date pairs) given a full search after the calendar |
 | `SWA_HEADLESS` | `false` | `true` runs the browser headless (no Xvfb; more likely blocked) |
 | `SWA_BROWSER_CHANNEL` | `auto` | `auto` = Google Chrome if installed, else Chromium; or `chrome`, `chromium`, `msedge` |
 | `SWA_HUMANIZE` | `true` | Home-page warm-up and mouse/scroll/dwell behaviour around searches |

@@ -98,8 +98,8 @@
     <legend>Price</legend>
     <p class="hint">A <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip (both directions together)</span> matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
     <div class="row">
-      <label>Max cash <span class="hint">USD, <span data-when="trip_type:roundtrip">round-trip</span> total</span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
-      <label>Max points <input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
+      <label>Max cash <span class="hint">USD per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
+      <label>Max points <span class="hint">per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
       <label>Min ¢/point <input name="min_cpp" type="number" step="0.05" min="0" max="10" value="{{ w.min_cpp }}"></label>
     </div>
     <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>

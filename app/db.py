@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS code_requests(
   code TEXT,
   status TEXT NOT NULL DEFAULT 'waiting'   -- waiting, submitted, used, expired
 );
+CREATE TABLE IF NOT EXISTS calendar_fares(
+  id INTEGER PRIMARY KEY,
+  watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+  ts TEXT NOT NULL,
+  leg TEXT NOT NULL,
+  date TEXT NOT NULL,
+  cash REAL,
+  points REAL
+);
+CREATE INDEX IF NOT EXISTS calendar_watch ON calendar_fares(watch_id, leg, date, ts);
 CREATE TABLE IF NOT EXISTS logs(
   id INTEGER PRIMARY KEY,
   ts TEXT NOT NULL,

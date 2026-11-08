@@ -40,6 +40,11 @@ class Settings:
         self.code_wait_seconds = int(_env("SWA_CODE_WAIT_SECONDS", "600"))
         self.code_poll_seconds = float(_env("SWA_CODE_POLL_SECONDS", "3"))
         self.home_url = _env("SWA_HOME_URL", "https://www.southwest.com/")  # tests point this at a fake site
+        # Low-fare calendar: one page load per month instead of one per date; full searches
+        # only for the days that can beat the target (at most this many per direction).
+        self.calendar = _bool("SWA_CALENDAR", True)
+        self.calendar_url = _env("SWA_CALENDAR_URL", "https://www.southwest.com/air/low-fare-calendar/select-dates")
+        self.calendar_detail_dates = int(_env("SWA_CALENDAR_DETAIL_DATES", "6"))
         lo, hi = (float(x) for x in _env("SWA_SEARCH_DELAY", "8,20").split(","))
         self.search_delay = (lo, hi)
         self.max_dates_per_watch = int(_env("MAX_DATES_PER_WATCH", "31"))
