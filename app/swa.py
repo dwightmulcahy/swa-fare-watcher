@@ -558,12 +558,22 @@ def use_label(trip, w):
     return "Points" if trip["cpp"] >= (w["min_cpp"] or 0) else "Cash"
 
 
-def booking_url(origin, dest, date, adults=1, return_date=None):
-    q = {"originationAirportCode": origin, "destinationAirportCode": dest,
-         "departureDate": date, "tripType": "oneway", "adultPassengersCount": adults}
-    if return_date:
-        q.update(tripType="roundtrip", returnDate=return_date)
-    return f"{SEARCH_URL}?" + urlencode(q)
+def search_query(origin, dest, date, adults=1, fare_type="USD", return_date=None):
+    """The select-depart query Southwest's own search form sends. The page rejects requests
+    missing any of these ("Sorry, we found some errors..."), so links and searches share it."""
+    return {
+        "adultPassengersCount": adults, "adultsCount": adults,
+        "departureDate": date, "departureTimeOfDay": "ALL_DAY",
+        "destinationAirportCode": dest, "fareType": fare_type,
+        "lapInfantPassengersCount": 0, "originationAirportCode": origin,
+        "passengerType": "ADULT", "promoCode": "",
+        "returnDate": return_date or "", "returnTimeOfDay": "ALL_DAY",
+        "tripType": "roundtrip" if return_date else "oneway", "reset": "true",
+    }
+
+
+def booking_url(origin, dest, date, adults=1, return_date=None, fare_type="USD"):
+    return f"{SEARCH_URL}?" + urlencode(search_query(origin, dest, date, adults, fare_type, return_date))
 
 
 # ---------- Southwest session import ----------
@@ -838,12 +848,7 @@ class BrowserSearcher:
                                          screenshot=rec.shot("exception"))
 
     def search(self, origin, dest, date, adults, fare_type):
-        q = {
-            "adultPassengersCount": adults, "departureDate": date,
-            "departureTimeOfDay": "ALL_DAY", "destinationAirportCode": dest,
-            "fareType": fare_type, "originationAirportCode": origin,
-            "passengerType": "ADULT", "returnDate": "", "tripType": "oneway", "reset": "true",
-        }
+        q = search_query(origin, dest, date, adults, fare_type)
         tag = f"{origin}-{dest}-{date}-{fare_type}"
         if not self._warmed:
             self.warm_up()
