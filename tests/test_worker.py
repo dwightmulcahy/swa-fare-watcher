@@ -1,10 +1,11 @@
 import datetime as dt
+import random
 
 import pytest
 
 from app import db
 from app.security import decrypt_json, encrypt_json, hash_password
-from app.worker import seconds_until
+from app.worker import next_run_time, seconds_until
 from tests.conftest import FakeSearcher, future
 
 
@@ -93,3 +94,32 @@ def test_seconds_until_wraps_to_tomorrow():
     now = dt.datetime(2026, 11, 6, 8, 0)
     assert seconds_until("07:20", now) == pytest.approx(23 * 3600 + 20 * 60)
     assert seconds_until("09:00", now) == 3600
+
+
+def test_next_run_is_jittered_within_window_and_varies():
+    now = dt.datetime(2026, 11, 8, 6, 0)
+    times = [next_run_time("07:20", 45, now, rng=random.Random(i)) for i in range(200)]
+    base = dt.datetime(2026, 11, 8, 7, 20)
+    assert all(abs((t - base).total_seconds()) <= 45 * 60 for t in times)
+    assert len({t.strftime("%H:%M") for t in times}) > 50      # different minute most days
+    assert len({t.second for t in times}) > 30                 # and never on :00 seconds
+
+
+def test_next_run_skips_today_once_run_or_past():
+    now = dt.datetime(2026, 11, 8, 6, 0)
+    t = next_run_time("07:20", 45, now, last_day=dt.date(2026, 11, 8), rng=random.Random(1))
+    assert t.date() == dt.date(2026, 11, 9)
+    late = dt.datetime(2026, 11, 8, 9, 0)  # window already over today
+    assert next_run_time("07:20", 45, late, rng=random.Random(1)).date() == dt.date(2026, 11, 9)
+
+
+def test_next_run_without_jitter_is_exact():
+    now = dt.datetime(2026, 11, 8, 6, 0)
+    assert next_run_time("07:20", 0, now) == dt.datetime(2026, 11, 8, 7, 20)
+
+
+def test_next_run_started_mid_window_still_runs_today():
+    now = dt.datetime(2026, 11, 8, 7, 30)  # window 06:35-08:05 partly gone
+    for i in range(50):
+        t = next_run_time("07:20", 45, now, rng=random.Random(i))
+        assert dt.datetime(2026, 11, 8, 7, 31) <= t <= dt.datetime(2026, 11, 8, 8, 5)

@@ -5,7 +5,7 @@
 <div class="head">
   <div>
     <h1>Your watches</h1>
-    <p class="muted">Searched daily at {{ daily_at }}. New or lower matching fares are emailed to
+    <p class="muted">Searched daily {% if jitter %}at a random time around {{ daily_at }} (±{{ jitter }} min){% else %}at {{ daily_at }}{% endif %}{% if next_run %}; next run {{ next_run.strftime('%a %H:%M') }}{% endif %}. New or lower matching fares are emailed to
       {% if user.email %}<strong>{{ user.email }}</strong>{% else %}<a href="/settings">add an email address</a>{% endif %}.</p>
   </div>
   <a class="button primary" href="/watches/new">New watch</a>

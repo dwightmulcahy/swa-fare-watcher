@@ -20,6 +20,8 @@ class Settings:
         self.db_path = self.data_dir / "app.db"
         self.debug_dir = self.data_dir / "debug"
         self.daily_at = _env("SWA_DAILY_AT", "07:20")
+        # Each day's run starts at a random time within ± this many minutes of daily_at
+        self.daily_jitter_min = max(0, int(_env("SWA_DAILY_JITTER_MINUTES", "45")))
         self.scheduler = _bool("SWA_SCHEDULER", True)
         self.base_url = _env("BASE_URL", "http://localhost:8080").rstrip("/")
         self.cookie_secure = _bool("COOKIE_SECURE", False)

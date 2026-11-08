@@ -21,6 +21,30 @@ def seconds_until(hhmm, now=None):
     return (nxt - now).total_seconds()
 
 
+def next_run_time(hhmm, jitter_min, now=None, last_day=None, rng=random):
+    """When the next daily run should start: hh:mm plus a fresh random offset within
+    ±jitter_min, so runs never start at the same minute (or second) two days in a row.
+    Skips any day already run (last_day) and any time already past."""
+    now = now or dt.datetime.now()
+    h, m = map(int, hhmm.split(":"))
+    for add in range(0, 3):
+        day = now.date() + dt.timedelta(days=add)
+        if last_day is not None and day <= last_day:
+            continue
+        base = dt.datetime.combine(day, dt.time(h, m))
+        lo = base - dt.timedelta(minutes=jitter_min)
+        hi = base + dt.timedelta(minutes=jitter_min)
+        if hi <= now:
+            continue  # today's window is over
+        lo = max(lo, now + dt.timedelta(seconds=60))  # started mid-window: pick from what's left
+        if lo >= hi:
+            when = hi
+        else:
+            when = lo + dt.timedelta(seconds=rng.uniform(0, (hi - lo).total_seconds()))
+        return when.replace(microsecond=0)
+    raise RuntimeError("no next run time")  # unreachable with sane input
+
+
 def _is_new_low(con, watch_id, key, r):
     row = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
                       (watch_id, key)).fetchone()
@@ -40,6 +64,7 @@ class Worker:
         self.pending = {}          # user_id -> set(watch_ids) or None (all)
         self.signin_only = set()   # users queued just to test sign-in (no searches)
         self.running_user = None
+        self.next_run = None
         self._threads = []
 
     # ----- queueing -----
@@ -70,6 +95,8 @@ class Worker:
     def enqueue_all(self):
         rows = db.query("SELECT DISTINCT u.* FROM users u JOIN watches w ON w.user_id=u.id "
                         "WHERE w.active=1 AND u.active=1")
+        rows = list(rows)
+        random.shuffle(rows)  # a different order every day
         for u in rows:
             if db.user_can_run(u):
                 self.enqueue(u["id"])
@@ -100,12 +127,17 @@ class Worker:
                 self.running_user = None
 
     def _schedule(self):
-        print(f"[scheduler] daily at {settings.daily_at}", file=sys.stderr, flush=True)
+        last_day = None
         while True:
-            time.sleep(seconds_until(settings.daily_at))
+            when = next_run_time(settings.daily_at, settings.daily_jitter_min, last_day=last_day)
+            print(f"[scheduler] next run {when:%Y-%m-%d %H:%M:%S} "
+                  f"({settings.daily_at} ±{settings.daily_jitter_min} min)", file=sys.stderr, flush=True)
+            self.next_run = when
+            while (wait := (when - dt.datetime.now()).total_seconds()) > 0:
+                time.sleep(min(wait, 300))  # re-check: survives clock changes and sleep/suspend
+            last_day = when.date()
             n = self.enqueue_all()
             print(f"[scheduler] queued {n} user(s)", file=sys.stderr, flush=True)
-            time.sleep(61)
 
     # ----- the actual run -----
     def run_user(self, user_id, watch_ids=None, signin_only=False):
