@@ -79,7 +79,7 @@ def test_run_writes_log_entries(worker, sent):
     msgs = [r["message"] for r in db.query("SELECT * FROM logs WHERE user_id=? ORDER BY id", (uid,))]
     assert msgs[0].startswith("Starting a run") and msgs[-1].startswith("Run finished")
     assert any("Starting the browser" in m for m in msgs)
-    assert any(m.endswith("flight(s), 1 matching") for m in msgs)
+    assert any("2 flight(s), cheapest $190 / 12,000 pts, 1 matching" in m for m in msgs)
     assert db.one("SELECT COUNT(*) FROM logs WHERE watch_id=?", (wid,))[0] > 3
 
 

@@ -325,7 +325,13 @@ class Worker:
                                             "watch": route, "use": swa.recommend(r, w),
                                             "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
                                         })
-                            applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)"
+                            cheap_c = min((r["cash"] for r in rows if r["cash"] is not None), default=None)
+                            cheap_p = min((r["points"] for r in rows if r["points"] is not None), default=None)
+                            cheapest = ", cheapest " + " / ".join(
+                                x for x in (f"${cheap_c:,.0f}" if cheap_c is not None else "",
+                                            f"{cheap_p:,.0f} pts" if cheap_p is not None else "") if x) \
+                                if (cheap_c is not None or cheap_p is not None) else ""
+                            applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
                                         + ("" if rt else f", {n_match} matching"),
                                         user_id=user_id, watch_id=w["id"], source="run")
                         if rt:

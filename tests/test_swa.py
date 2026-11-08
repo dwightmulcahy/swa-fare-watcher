@@ -98,3 +98,20 @@ def test_normalize_playwright_state():
 def test_normalize_rejects_files_without_southwest_cookies():
     with pytest.raises(ValueError, match="No southwest.com cookies"):
         swa.normalize_state(json.dumps([{"domain": ".google.com", "name": "a", "value": "b"}]))
+
+
+def test_flight_numbers_as_list_and_iso_times():
+    # what Southwest actually sends: a list of flight numbers for connections
+    d = detail("189.98", "20.00")
+    d["flightNumbers"] = ["1234", "567"]
+    d["departureTime"] = "2026-12-18T06:05:00"
+    d["arrivalTime"] = "9:40"
+    (f,) = swa.parse_flights(payload(d)).values()
+    assert f["flights"] == "1234/567" and (f["depart"], f["arrive"]) == ("06:05", "09:40")
+    r = swa.combine(swa.parse_flights(payload(d)), swa.parse_flights(payload(d)))[0]
+    assert all(not isinstance(v, (list, dict)) for v in r.values())  # everything storable in SQLite
+
+
+def test_flight_numbers_other_shapes():
+    assert swa._text([{"number": "12"}, {"number": 34}]) == "12/34"
+    assert swa._text(4321) == "4321" and swa._text(None) == ""

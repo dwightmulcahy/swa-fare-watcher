@@ -3,6 +3,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -49,6 +50,24 @@ def lowest_fare(detail):
     return best
 
 
+def _text(v):
+    """Flatten a value from Southwest's JSON to text: flight numbers arrive as a list
+    (["1234", "567"] for a connection), sometimes as a string or number."""
+    if v is None:
+        return ""
+    if isinstance(v, (list, tuple)):
+        return "/".join(_text(x) for x in v if x not in (None, ""))
+    if isinstance(v, dict):
+        return _text(v.get("number") or v.get("flightNumber") or v.get("value") or "")
+    return str(v)
+
+
+def _clock(v):
+    """HH:MM from "08:15", "8:15", "08:15:00" or an ISO date-time like "2026-12-18T08:15"."""
+    m = re.search(r"(\d{1,2}):(\d{2})", _text(v).split("T")[-1])
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else ""
+
+
 def parse_flights(payload):
     """Return {key: flight dict} or None if the payload shape is unrecognized."""
     try:
@@ -61,11 +80,12 @@ def parse_flights(payload):
             stops = d.get("numberOfStops")
             if stops is None:
                 stops = max(len(d.get("stopsDetails") or [None]) - 1, 0)
-            key = f'{d.get("flightNumbers")}|{d.get("departureDateTime") or d.get("departureTime")}'
+            flights = _text(d.get("flightNumbers"))
+            key = f'{flights}|{_text(d.get("departureDateTime") or d.get("departureTime"))}'
             out[key] = {
-                "flights": d.get("flightNumbers"),
-                "depart": (d.get("departureTime") or "")[:5],
-                "arrive": (d.get("arrivalTime") or "")[:5],
+                "flights": flights,
+                "depart": _clock(d.get("departureTime") or d.get("departureDateTime")),
+                "arrive": _clock(d.get("arrivalTime") or d.get("arrivalDateTime")),
                 "duration": int(num(d.get("totalDuration")) or 0),
                 "stops": int(stops),
                 "fare": lowest_fare(d),
