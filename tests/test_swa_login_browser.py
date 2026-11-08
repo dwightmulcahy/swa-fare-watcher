@@ -148,14 +148,17 @@ def test_worker_waits_for_code_from_the_app(site, monkeypatch, sent):
 
     def user_enters_code():
         for _ in range(600):
-            req = db.one("SELECT * FROM code_requests WHERE user_id=? AND status='waiting'", (uid,))
+            try:
+                req = db.one("SELECT * FROM code_requests WHERE user_id=? AND status='waiting'", (uid,))
+            except Exception:
+                return  # test already over
             if req:
                 with db.tx() as con:
                     con.execute("UPDATE code_requests SET code='123456', status='submitted' WHERE id=?", (req["id"],))
                 return
             time.sleep(0.1)
 
-    t = threading.Thread(target=user_enters_code)
+    t = threading.Thread(target=user_enters_code, daemon=True)
     t.start()
     res = w.run_user(uid, signin_only=True)
     t.join()

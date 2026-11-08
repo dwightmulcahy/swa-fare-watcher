@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 
 from .config import settings
@@ -301,15 +302,21 @@ class BrowserSearcher:
     def _launch(self, kw):
         want = settings.browser_channel
         if want in ("auto", "chrome"):
-            try:
-                ctx = self._pw.chromium.launch_persistent_context(channel="chrome", **kw)
-                self.channel = "chrome"
-                return ctx
-            except Exception as e:
-                if want == "chrome":
-                    raise
-                print(f"[browser] Google Chrome unavailable ({str(e).splitlines()[0][:120]}); "
-                      "using bundled Chromium", file=sys.stderr)
+            err = None
+            for attempt in range(2):  # Chrome occasionally exits during start-up; try once more
+                try:
+                    ctx = self._pw.chromium.launch_persistent_context(channel="chrome", **kw)
+                    self.channel = "chrome"
+                    return ctx
+                except Exception as e:
+                    err = e
+                    if "is not found" in str(e) or "Executable doesn't exist" in str(e):
+                        break  # not installed: retrying won't help
+                    time.sleep(1.5)
+            if want == "chrome" or not Path(self._pw.chromium.executable_path).exists():
+                raise err  # no fallback browser: report the real Chrome error
+            print(f"[browser] Google Chrome unavailable ({str(err).splitlines()[0][:120]}); "
+                  "using bundled Chromium", file=sys.stderr)
         elif want and want != "chromium":
             ctx = self._pw.chromium.launch_persistent_context(channel=want, **kw)
             self.channel = want
