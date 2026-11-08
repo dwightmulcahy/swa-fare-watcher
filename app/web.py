@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
 templates.env.filters["pts"] = lambda v: "—" if v is None else f"{int(v):,}"
+templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
 templates.env.filters["when"] = lambda s: (s or "")[:16].replace("T", " ") or "—"
 # Version label / About dialog: build info embedded in every page; "<" escaped so it can't close the tag
 templates.env.globals["build_info_json"] = json.dumps(buildinfo.load()).replace("<", "\\u003c")
@@ -342,8 +343,8 @@ def create_app(worker=None, start_worker=True):
 
         w = {
             "name": str(f.get("name", "")).strip()[:60],
-            "origin": str(f.get("origin", "")).strip().upper(),
-            "destination": str(f.get("destination", "")).strip().upper(),
+            "origin": ",".join(swa.airports(str(f.get("origin", "")))),
+            "destination": ",".join(swa.airports(str(f.get("destination", "")))),
             "dates": None, "days_from": None, "days_to": None,
             "weekdays": ",".join(d for d in swa.WEEKDAYS if f.get(f"wd_{d}")) or None,
             "adults": opt_int("adults", 1, 8) or 1,
@@ -367,11 +368,14 @@ def create_app(worker=None, start_worker=True):
         except ValueError:
             errs.append("Minimum ¢/point must be a number.")
         if not w["name"]:
-            w["name"] = f'{w["origin"]}→{w["destination"]}'
-        for k in ("origin", "destination"):
-            if not IATA.match(w[k]):
-                errs.append(f"{k.capitalize()} must be a 3-letter airport code.")
-        if w["origin"] == w["destination"]:
+            w["name"] = swa.route_label(w)
+        for k, label in (("origin", "From"), ("destination", "To")):
+            codes = swa.airports(w[k])
+            if not codes or not all(IATA.match(c) for c in codes):
+                errs.append(f"{label} must be 3-letter airport codes, separated by commas.")
+            elif len(codes) > swa.MAX_AIRPORTS:
+                errs.append(f"{label}: at most {swa.MAX_AIRPORTS} airports.")
+        if not errs and not swa.routes(w):
             errs.append("Origin and destination must differ.")
         for k in ("depart_after", "depart_before"):
             if w[k] and not TIME.match(w[k]):
@@ -398,6 +402,7 @@ def create_app(worker=None, start_worker=True):
         w["ret_depart_after"] = str(f.get("ret_depart_after", "")).strip() or None
         w["ret_depart_before"] = str(f.get("ret_depart_before", "")).strip() or None
         w["mix_payment"] = 1 if f.get("mix_payment") else 0
+        w["same_airports"] = 1 if f.get("same_airports") else 0
         if w["trip_type"] == "roundtrip":
             for k in ("ret_depart_after", "ret_depart_before"):
                 if w[k] and not TIME.match(w[k]):
@@ -436,6 +441,12 @@ def create_app(worker=None, start_worker=True):
         for r in rows:
             legs.setdefault(r["leg"], {}).setdefault(r["date"], []).append(dict(r))
         return legs
+
+    def fare_route(w, f):
+        if f["origin"] and f["dest"]:
+            return f["origin"], f["dest"]
+        o, d = swa.airports(w["origin"])[0], swa.airports(w["destination"])[0]   # stored before multi-airport
+        return (o, d) if f["leg"] == "out" else (d, o)
 
     def best_roundtrip(w):
         trips = swa.roundtrips(w, latest_legs(w["id"]))
@@ -477,7 +488,7 @@ def create_app(worker=None, start_worker=True):
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
              "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,
-             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1}
+             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0}
         return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True, limits=limits_for(u))
 
     @app.post("/watches")
@@ -530,10 +541,9 @@ def create_app(worker=None, start_worker=True):
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
                       run_status=app.state.worker.status(u["id"]),
-                      book=lambda d, leg="out": (swa.booking_url(w["origin"], w["destination"], d, w["adults"])
-                                                 if leg == "out" else
-                                                 swa.booking_url(w["destination"], w["origin"], d, w["adults"])),
-                      book_rt=lambda o, r: swa.booking_url(w["origin"], w["destination"], o, w["adults"], r),
+                      book=lambda f: swa.booking_url(*fare_route(w, f), f["date"], w["adults"]),
+                      fare_route=lambda f: "→".join(fare_route(w, f)),
+                      multi=len(swa.routes(w)) > 1, searches=swa.searches_per_run(w),
                       recommend=lambda r: swa.recommend(r, w))
 
     @app.get("/watches/{wid}/edit", response_class=HTMLResponse)

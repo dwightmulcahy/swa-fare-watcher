@@ -47,7 +47,7 @@
   <table class="list compact">
     <thead><tr><th>Watch</th><th>Route</th><th class="num">Searches/run</th><th>Last run</th></tr></thead>
     <tbody>{% for w in watches %}<tr class="{{ '' if w.active else 'paused' }}"><td>{{ w.name }}{% if not w.active %} <span class="pill">Paused</span>{% endif %}</td>
-      <td>{{ w.origin }} → {{ w.destination }}</td><td class="num">{{ est[w.id] }}</td>
+      <td>{{ w.origin|airports }} → {{ w.destination|airports }}</td><td class="num">{{ est[w.id] }}</td>
       <td class="small">{{ w.last_run_at|when }} <span class="muted">{{ w.last_status or '' }}</span></td></tr>{% endfor %}</tbody>
   </table>
   {% else %}<p class="muted">No watches.</p>{% endif %}

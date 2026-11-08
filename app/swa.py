@@ -240,6 +240,60 @@ def calendar_pick(w, cal, legs, limit):
     return [(leg, d) for leg, d in legs if (d in outs if leg == "out" else d in rets)]
 
 
+def calendar_routes(w, cal_routes, picked):
+    """Which airport pairs to fully search for each picked (leg, date).
+
+    cal_routes = {leg: {(from, to): {date: {"cash", "points"}} or None (unreadable)}}.
+    A pair is skipped on a day when its own calendar low can't make the target (for a round
+    trip: even with the cheapest return/outbound low among the picked dates). Unknown lows
+    are always searched. Returns {(leg, date): [(from, to), ...]}."""
+    def low(leg, rt_, d):
+        x = (cal_routes.get(leg) or {}).get(rt_)
+        if x is None or d not in x:
+            return None, None, True        # unknown
+        v = x[d] or {}
+        return v.get("cash"), v.get("points"), False
+
+    rt = is_roundtrip(w)
+    best = {}   # leg -> (cheapest cash, cheapest points) over picked dates and pairs, None = unknown
+    if rt:
+        for leg in ("out", "ret"):
+            cs, ps, unknown = [], [], False
+            for lg, d in picked:
+                if lg != leg:
+                    continue
+                for rt_ in routes(w, leg):
+                    c, p, u = low(leg, rt_, d)
+                    unknown |= u
+                    cs += [c] if c is not None else []
+                    ps += [p] if p is not None else []
+            best[leg] = None if unknown else (min(cs, default=None), min(ps, default=None))
+    out = {}
+    for leg, d in picked:
+        keep = []
+        for rt_ in routes(w, leg):
+            c, p, unknown = low(leg, rt_, d)
+            if unknown:
+                keep.append(rt_)
+                continue
+            if c is None and p is None:
+                continue                    # sold out on this pair
+            if rt:
+                other = best.get("ret" if leg == "out" else "out")
+                if other is None:
+                    keep.append(rt_)
+                    continue
+                oc, op = other
+                c = c + oc if c is not None and oc is not None else None
+                p = p + op if p is not None and op is not None else None
+                if c is None and p is None:
+                    continue
+            if price_ok(c, p, None, w):
+                keep.append(rt_)
+        out[(leg, d)] = keep
+    return out
+
+
 def combine(cash, points):
     cash, points = cash or {}, points or {}
     rows = []
@@ -328,8 +382,32 @@ def search_legs(w, today=None):
     return legs
 
 
+MAX_AIRPORTS = 3   # per side
+
+
+def airports(s):
+    """"SJO, LIR" / "SJO/LIR" -> ["SJO", "LIR"] (order kept, duplicates dropped)."""
+    out = []
+    for a in re.split(r"[,/\s]+", (s or "").upper()):
+        if a and a not in out:
+            out.append(a)
+    return out
+
+
+def routes(w, leg="out"):
+    """(from, to) airport pairs searched for a leg: every origin × destination; the return
+    leg is the same pairs reversed."""
+    pairs = [(a, b) for a in airports(w["origin"]) for b in airports(w["destination"]) if a != b]
+    return pairs if leg == "out" else [(b, a) for a, b in pairs]
+
+
+def route_label(w, leg="out"):
+    o, d = "/".join(airports(w["origin"])), "/".join(airports(w["destination"]))
+    return f"{o}→{d}" if leg == "out" else f"{d}→{o}"
+
+
 def searches_per_run(w, today=None) -> int:
-    return 2 * len(search_legs(w, today))
+    return 2 * sum(len(routes(w, leg)) for leg, _ in search_legs(w, today))
 
 
 def passes_leg(r, w, leg="out"):
@@ -374,50 +452,88 @@ def roundtrips(w, legs):
 
     Southwest prices each direction on its own, so a round trip costs exactly the sum of two
     one-ways: for each date pair the cheapest round trip is the cheapest eligible flight each way.
+    With several airports, any outbound airport pair can combine with any return pair, unless
+    same_airports is on (back from the airport you flew into, to the one you left from).
     Returns one dict per date pair, cheapest cash first:
       cash: total with the cheapest cash flight each way (out_cash / ret_cash rows)
       points, taxes, cpp: the same with the cheapest points flight each way
       mix: when mix_payment is on, the best payment per leg (points where that leg's ¢/pt
            clears the minimum, else cash), e.g. cash out and points back
+      url / ret_url: booking links (one round-trip link, or one per direction when the
+           airports differ)
     """
-    min_cpp = w["min_cpp"] or 0
     out = []
     for o, r in trip_pairs(w):
         o_rows = [x for x in legs.get("out", {}).get(o, []) if passes_leg(x, w, "out")]
         r_rows = [x for x in legs.get("ret", {}).get(r, []) if passes_leg(x, w, "ret")]
         if not o_rows or not r_rows:
             continue
-
-        def cheapest(rows, field):
-            rows = [x for x in rows if x[field] is not None]
-            return min(rows, key=lambda x: x[field]) if rows else None
-
-        oc, rc = cheapest(o_rows, "cash"), cheapest(r_rows, "cash")
-        op, rp = cheapest(o_rows, "points"), cheapest(r_rows, "points")
-        cash = oc["cash"] + rc["cash"] if oc and rc else None
-        points = op["points"] + rp["points"] if op and rp else None
-        taxes = (op["points_taxes"] or 0) + (rp["points_taxes"] or 0) if op and rp else None
-        trip = {
-            "out_date": o, "ret_date": r,
-            "nights": (dt.date.fromisoformat(r) - dt.date.fromisoformat(o)).days,
-            "out_cash": oc, "ret_cash": rc, "out_points": op, "ret_points": rp,
-            "cash": cash, "points": points, "taxes": taxes, "cpp": _cpp(cash, points, taxes),
-        }
-        mix = []
-        for leg, c, pt in (("out", oc, op), ("ret", rc, rp)):
-            leg_cpp = _cpp(c["cash"], pt["points"], pt["points_taxes"]) if c and pt else None
-            use_points = pt is not None and (c is None or (leg_cpp is not None and leg_cpp >= min_cpp))
-            mix.append({"leg": leg, "pay": "points" if use_points else "cash",
-                        "flight": pt if use_points else c, "cpp": leg_cpp})
-        trip["mix"] = mix
-        trip["mix_cash"] = sum(m["flight"]["cash"] for m in mix if m["pay"] == "cash" and m["flight"])
-        trip["mix_points"] = sum(m["flight"]["points"] for m in mix if m["pay"] == "points" and m["flight"])
-        trip["mix_taxes"] = sum(m["flight"]["points_taxes"] or 0 for m in mix if m["pay"] == "points" and m["flight"])
-        trip["use"] = use_label(trip, w)
-        trip["matched"] = price_ok(cash, points, trip["cpp"], w)
+        if _get(w, "same_airports", 0):
+            groups = {}
+            for x in o_rows:
+                groups.setdefault((x.get("origin"), x.get("dest")), []).append(x)
+            cands = [_price_pair(w, o, r, g, [y for y in r_rows if (y.get("origin"), y.get("dest")) == (b, a)])
+                     for (a, b), g in groups.items()]
+            cands = [c for c in cands if c]
+            if not cands:
+                continue
+            trip = min(cands, key=_trip_order)
+        else:
+            trip = _price_pair(w, o, r, o_rows, r_rows)
         out.append(trip)
-    return sorted(out, key=lambda t: (t["cash"] if t["cash"] is not None else 1e9,
-                                      t["points"] if t["points"] is not None else 1e9))
+    return sorted(out, key=_trip_order)
+
+
+def _trip_order(t):
+    return (t["cash"] if t["cash"] is not None else 1e9, t["points"] if t["points"] is not None else 1e9)
+
+
+def _price_pair(w, o, r, o_rows, r_rows):
+    if not o_rows or not r_rows:
+        return None
+    min_cpp = w["min_cpp"] or 0
+
+    def cheapest(rows, field):
+        rows = [x for x in rows if x[field] is not None]
+        return min(rows, key=lambda x: x[field]) if rows else None
+
+    oc, rc = cheapest(o_rows, "cash"), cheapest(r_rows, "cash")
+    op, rp = cheapest(o_rows, "points"), cheapest(r_rows, "points")
+    cash = oc["cash"] + rc["cash"] if oc and rc else None
+    points = op["points"] + rp["points"] if op and rp else None
+    taxes = (op["points_taxes"] or 0) + (rp["points_taxes"] or 0) if op and rp else None
+    trip = {
+        "out_date": o, "ret_date": r,
+        "nights": (dt.date.fromisoformat(r) - dt.date.fromisoformat(o)).days,
+        "out_cash": oc, "ret_cash": rc, "out_points": op, "ret_points": rp,
+        "cash": cash, "points": points, "taxes": taxes, "cpp": _cpp(cash, points, taxes),
+    }
+    mix = []
+    for leg, c, pt in (("out", oc, op), ("ret", rc, rp)):
+        leg_cpp = _cpp(c["cash"], pt["points"], pt["points_taxes"]) if c and pt else None
+        use_points = pt is not None and (c is None or (leg_cpp is not None and leg_cpp >= min_cpp))
+        mix.append({"leg": leg, "pay": "points" if use_points else "cash",
+                    "flight": pt if use_points else c, "cpp": leg_cpp})
+    trip["mix"] = mix
+    trip["mix_cash"] = sum(m["flight"]["cash"] for m in mix if m["pay"] == "cash" and m["flight"])
+    trip["mix_points"] = sum(m["flight"]["points"] for m in mix if m["pay"] == "points" and m["flight"])
+    trip["mix_taxes"] = sum(m["flight"]["points_taxes"] or 0 for m in mix if m["pay"] == "points" and m["flight"])
+    trip["use"] = use_label(trip, w)
+    trip["matched"] = price_ok(cash, points, trip["cpp"], w)
+    first_o = trip["out_cash"] or trip["out_points"]
+    first_r = trip["ret_cash"] or trip["ret_points"]
+    fo, to_ = (first_o.get("origin"), first_o.get("dest")) if first_o else (None, None)
+    fr, tr = (first_r.get("origin"), first_r.get("dest")) if first_r else (None, None)
+    fo = fo or (airports(_get(w, "origin", "")) + ["?"])[0]
+    to_ = to_ or (airports(_get(w, "destination", "")) + ["?"])[0]
+    fr, tr = fr or to_, tr or fo
+    adults = _get(w, "adults", 1)
+    trip["out_route"], trip["ret_route"] = f"{fo}→{to_}", f"{fr}→{tr}"
+    if (fr, tr) == (to_, fo):
+        trip["url"], trip["ret_url"] = booking_url(fo, to_, o, adults, r), None
+    else:
+        trip["url"], trip["ret_url"] = booking_url(fo, to_, o, adults), booking_url(fr, tr, r, adults)
+    return trip
 
 
 def use_label(trip, w):

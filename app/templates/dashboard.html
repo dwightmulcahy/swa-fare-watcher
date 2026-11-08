@@ -34,7 +34,7 @@
   <tbody>
   {% for w in watches %}{% set b = best[w.id] %}
   <tr class="{{ '' if w.active else 'paused' }}">
-    <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin }} {{ '⇄' if w.trip_type == 'roundtrip' else '→' }} {{ w.destination }}</span>
+    <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin|airports }} {{ '⇄' if w.trip_type == 'roundtrip' else '→' }} {{ w.destination|airports }}</span>
       {% if w.trip_type == 'roundtrip' %}<span class="pill trip">Round trip</span>{% endif %}
       {% if not w.active %}<span class="pill">Paused</span>{% endif %}</td>
     <td class="small">{% if w.dates %}{{ w.dates.split(',')|length }} date(s)<br><span class="muted">{{ w.dates.split(',')[0] }}{% if w.dates.split(',')|length > 1 %} … {{ w.dates.split(',')[-1] }}{% endif %}</span>

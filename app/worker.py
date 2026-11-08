@@ -242,7 +242,7 @@ class Worker:
 
         watches = random.sample(watches, len(watches))  # different watch order each day
         plan = [(w, search_order(swa.search_legs(w))) for w in watches]  # [(leg, date)], legs mixed
-        total = sum(2 * len(d) for _, d in plan)
+        total = sum(2 * len(swa.routes(w)) * len(d) for w, d in plan)
         done = 0
         self.phase(user_id, "Sign-in check only" if signin_only else
                    f"Starting a run: {len(plan)} watch(es), up to {total} searches", done=0, total=total)
@@ -258,7 +258,7 @@ class Worker:
                     elif plan:
                         self.phase(user_id, "Opening southwest.com")
                     for w, dates in plan:
-                        route = f'{w["name"]} ({w["origin"]}→{w["destination"]})'
+                        route = f'{w["name"]} ({swa.route_label(w)})'
                         with db.tx() as con:
                             open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
                                                              (w["id"], db.now())).lastrowid
@@ -270,11 +270,14 @@ class Worker:
                                    if rt else "") + " date(s) to search", watch_id=w["id"])
                         w_s = w_f = w_m = 0
                         note = None
+                        n_routes = len(swa.routes(w))
+                        to_search = {}   # (leg, date) -> airport pairs; default: all of them
                         if settings.calendar and hasattr(searcher, "calendar") and dates:
-                            before = 2 * len(dates)
-                            dates, used, hit_cap = self._calendar_phase(user_id, w, route, dates, searcher, cap)
+                            before = 2 * n_routes * len(dates)
+                            dates, to_search, used, hit_cap = self._calendar_phase(
+                                user_id, w, route, dates, searcher, cap)
                             w_s += used
-                            total += used + 2 * len(dates) - before
+                            total += used + 2 * sum(len(v) for v in to_search.values()) - before
                             done += used
                             self.phase(user_id, f"{route}: calendar narrowed it to {len(dates)} date(s) to search",
                                        watch_id=w["id"], done=done, total=total)
@@ -283,69 +286,74 @@ class Worker:
                             elif not dates:
                                 note = "No date on the calendar under your target"
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
+                        multi = n_routes > 1
                         for leg, date in dates:
-                            if cap is not None and db.searches_today(user_id) + 2 > cap:
-                                note, limited = "Daily search limit reached", True
-                                self.phase(user_id, f"{route}: daily search limit reached, stopping",
-                                           watch_id=w["id"], level="warn")
-                                break
-                            frm, to = (w["origin"], w["destination"]) if leg == "out" else (w["destination"], w["origin"])
-                            res = {}
-                            for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
-                                done += 1
-                                self.phase(user_id, f"{route}: searching {frm}→{to} {date} "
-                                           f"({'cash' if ft == 'USD' else 'points'})",
-                                           watch_id=w["id"], done=done, total=total)
-                                res[ft] = searcher.search(frm, to, date, w["adults"], ft)
-                                with db.tx() as con:
-                                    db.add_searches(con, user_id, 1)
-                                attempts += 1
-                                w_s += 1
-                                if res[ft] is None:
-                                    failures += 1
-                                    w_f += 1
-                                    self.phase(user_id, f"{route}: {frm}→{to} {date} {ft.lower()} search returned no fares",
+                            ts = db.now()   # one timestamp per date, shared by its airport pairs
+                            for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
+                                if cap is not None and db.searches_today(user_id) + 2 > cap:
+                                    note, limited = "Daily search limit reached", True
+                                    self.phase(user_id, f"{route}: daily search limit reached, stopping",
                                                watch_id=w["id"], level="warn")
-                                pause = search_pause(*settings.search_delay)
-                                self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
-                                           watch_id=w["id"], log=False)
-                                self.sleep(pause)
-                            ts = db.now()
-                            n_flights = n_match = 0
-                            rows = swa.combine(res["USD"], res["POINTS"])
-                            legs[leg][date] = rows
-                            with db.tx() as con:
+                                    break
+                                res = {}
+                                for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
+                                    done += 1
+                                    self.phase(user_id, f"{route}: searching {frm}→{to} {date} "
+                                               f"({'cash' if ft == 'USD' else 'points'})",
+                                               watch_id=w["id"], done=done, total=total)
+                                    res[ft] = searcher.search(frm, to, date, w["adults"], ft)
+                                    with db.tx() as con:
+                                        db.add_searches(con, user_id, 1)
+                                    attempts += 1
+                                    w_s += 1
+                                    if res[ft] is None:
+                                        failures += 1
+                                        w_f += 1
+                                        self.phase(user_id, f"{route}: {frm}→{to} {date} {ft.lower()} search "
+                                                   "returned no fares", watch_id=w["id"], level="warn")
+                                    pause = search_pause(*settings.search_delay)
+                                    self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
+                                               watch_id=w["id"], log=False)
+                                    self.sleep(pause)
+                                n_flights = n_match = 0
+                                rows = swa.combine(res["USD"], res["POINTS"])
                                 for r in rows:
-                                    n_flights += 1
-                                    # one-way: the flight must match on its own; round trip: totals decide below
-                                    matched = swa.passes(r, w) if not rt else swa.passes_leg(r, w, leg)
-                                    con.execute(
-                                        "INSERT INTO fares(watch_id, ts, date, leg, flight_key, flights, depart, arrive,"
-                                        " stops, duration, cash, points, points_taxes, cpp, matched)"
-                                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                                        (w["id"], ts, date, leg, r["key"], r["flights"], r["depart"], r["arrive"],
-                                         r["stops"], r["duration"], r["cash"], r["points"], r["points_taxes"],
-                                         r["cpp"], int(matched)))
-                                    if not matched or rt:
-                                        continue
-                                    w_m += 1
-                                    n_match += 1
-                                    key = f"{date}|{r['key']}"
-                                    if _is_new_low(con, w["id"], key, r):
-                                        hits.append({
-                                            "watch_id": w["id"], "key": key, "row": r, "date": date,
-                                            "watch": route, "use": swa.recommend(r, w),
-                                            "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
-                                        })
-                            cheap_c = min((r["cash"] for r in rows if r["cash"] is not None), default=None)
-                            cheap_p = min((r["points"] for r in rows if r["points"] is not None), default=None)
-                            cheapest = ", cheapest " + " / ".join(
-                                x for x in (f"${cheap_c:,.0f}" if cheap_c is not None else "",
-                                            f"{cheap_p:,.0f} pts" if cheap_p is not None else "") if x) \
-                                if (cheap_c is not None or cheap_p is not None) else ""
-                            applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
-                                        + ("" if rt else f", {n_match} matching"),
-                                        user_id=user_id, watch_id=w["id"], source="run")
+                                    r["origin"], r["dest"] = frm, to
+                                legs[leg].setdefault(date, []).extend(rows)
+                                with db.tx() as con:
+                                    for r in rows:
+                                        n_flights += 1
+                                        # one-way: the flight must match on its own; round trip: totals decide below
+                                        matched = swa.passes(r, w) if not rt else swa.passes_leg(r, w, leg)
+                                        con.execute(
+                                            "INSERT INTO fares(watch_id, ts, date, leg, origin, dest, flight_key, flights,"
+                                            " depart, arrive, stops, duration, cash, points, points_taxes, cpp, matched)"
+                                            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                            (w["id"], ts, date, leg, frm, to, r["key"], r["flights"], r["depart"],
+                                             r["arrive"], r["stops"], r["duration"], r["cash"], r["points"],
+                                             r["points_taxes"], r["cpp"], int(matched)))
+                                        if not matched or rt:
+                                            continue
+                                        w_m += 1
+                                        n_match += 1
+                                        key = f"{date}|{frm}-{to}|{r['key']}" if multi else f"{date}|{r['key']}"
+                                        if _is_new_low(con, w["id"], key, r):
+                                            hits.append({
+                                                "watch_id": w["id"], "key": key, "row": r, "date": date,
+                                                "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
+                                                "url": swa.booking_url(frm, to, date, w["adults"]),
+                                            })
+                                cheap_c = min((r["cash"] for r in rows if r["cash"] is not None), default=None)
+                                cheap_p = min((r["points"] for r in rows if r["points"] is not None), default=None)
+                                cheapest = ", cheapest " + " / ".join(
+                                    x for x in (f"${cheap_c:,.0f}" if cheap_c is not None else "",
+                                                f"{cheap_p:,.0f} pts" if cheap_p is not None else "") if x) \
+                                    if (cheap_c is not None or cheap_p is not None) else ""
+                                applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
+                                            + ("" if rt else f", {n_match} matching"),
+                                            user_id=user_id, watch_id=w["id"], source="run")
+                            if limited:
+                                break
                         if rt:
                             trips = swa.roundtrips(w, legs)
                             with db.tx() as con:
@@ -358,9 +366,9 @@ class Worker:
                                         hits.append({
                                             "watch_id": w["id"], "key": key, "trip": t, "date": t["out_date"],
                                             "row": {"cash": t["cash"], "points": t["points"]},
-                                            "watch": route, "use": t["use"],
-                                            "url": swa.booking_url(w["origin"], w["destination"], t["out_date"],
-                                                                   w["adults"], t["ret_date"]),
+                                            "watch": f'{w["name"]} ({t["out_route"]}, {t["ret_route"]})'
+                                                     if multi else route, "use": t["use"],
+                                            "url": t["url"], "ret_url": t["ret_url"],
                                         })
                             applog.info(f"{route}: {len(trips)} round trip(s) priced, {w_m} matching",
                                         user_id=user_id, watch_id=w["id"], source="run")
@@ -425,52 +433,72 @@ class Worker:
         return out
 
     def _calendar_phase(self, user_id, w, route, dates, searcher, cap):
-        """Read the low-fare calendar (cash and points, each month and direction) and keep the
-        dates worth a full search. Returns (dates, calendar loads used, hit the daily cap)."""
-        cal, used = {}, 0
+        """Read the low-fare calendar (cash and points, for each month, direction and airport
+        pair) and keep the dates and pairs worth a full search.
+        Returns (dates, {(leg, date): airport pairs}, calendar loads used, hit the daily cap)."""
+        cal, cal_routes, used = {}, {"out": {}, "ret": {}}, 0
         for leg in ("out", "ret"):
             leg_dates = [d for lg, d in dates if lg == leg]
             if not leg_dates:
                 continue
-            frm, to = (w["origin"], w["destination"]) if leg == "out" else (w["destination"], w["origin"])
-            lows, ok = {}, True
             months = list(swa.calendar_months(leg_dates).items())
-            for month, first in random.sample(months, len(months)):
-                for ft in random.sample(("USD", "POINTS"), 2):
-                    if cap is not None and db.searches_today(user_id) + 1 > cap:
-                        self.phase(user_id, f"{route}: daily search limit reached, stopping",
-                                   watch_id=w["id"], level="warn")
-                        return [], used, True
-                    self.phase(user_id, f"{route}: reading the {month} {'cash' if ft == 'USD' else 'points'} "
-                               f"calendar {frm}→{to}", watch_id=w["id"])
-                    days = searcher.calendar(frm, to, first, w["adults"], ft)
-                    with db.tx() as con:
-                        db.add_searches(con, user_id, 1)
-                    used += 1
-                    if days is None:
-                        ok = False
-                    else:
-                        field = "cash" if ft == "USD" else "points"
-                        for d, v in days.items():
-                            lows.setdefault(d, {"cash": None, "points": None})[field] = v
-                    self.sleep(search_pause(*settings.search_delay))
-            cal[leg] = lows if ok else None
-            if ok:
-                ts = db.now()
+            jobs = [(rt_, m, first, ft) for rt_ in swa.routes(w, leg) for m, first in months
+                    for ft in ("USD", "POINTS")]
+            lows = {rt_: {} for rt_ in swa.routes(w, leg)}
+            broken = set()
+            for (frm, to), month, first, ft in random.sample(jobs, len(jobs)):
+                if cap is not None and db.searches_today(user_id) + 1 > cap:
+                    self.phase(user_id, f"{route}: daily search limit reached, stopping",
+                               watch_id=w["id"], level="warn")
+                    return [], {}, used, True
+                self.phase(user_id, f"{route}: reading the {month} {'cash' if ft == 'USD' else 'points'} "
+                           f"calendar {frm}→{to}", watch_id=w["id"])
+                days = searcher.calendar(frm, to, first, w["adults"], ft)
                 with db.tx() as con:
-                    con.executemany(
-                        "INSERT INTO calendar_fares(watch_id, ts, leg, date, cash, points) VALUES (?,?,?,?,?,?)",
-                        [(w["id"], ts, leg, d, v["cash"], v["points"]) for d, v in sorted(lows.items())])
-                cheap = min((v["cash"] for d, v in lows.items() if d in leg_dates and v["cash"] is not None),
-                            default=None)
+                    db.add_searches(con, user_id, 1)
+                used += 1
+                if days is None:
+                    broken.add((frm, to))
+                else:
+                    field = "cash" if ft == "USD" else "points"
+                    for d, v in days.items():
+                        lows[(frm, to)].setdefault(d, {"cash": None, "points": None})[field] = v
+                self.sleep(search_pause(*settings.search_delay))
+            ts = db.now()
+            with db.tx() as con:
+                con.executemany(
+                    "INSERT INTO calendar_fares(watch_id, ts, leg, origin, dest, date, cash, points)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    [(w["id"], ts, leg, frm, to, d, v["cash"], v["points"])
+                     for (frm, to), days in lows.items() if (frm, to) not in broken for d, v in sorted(days.items())])
+            for frm, to in swa.routes(w, leg):
+                if (frm, to) in broken:
+                    cal_routes[leg][(frm, to)] = None
+                    applog.warn(f"{route}: {frm}→{to} calendar unreadable; searching every date",
+                                user_id=user_id, watch_id=w["id"], source="run")
+                    continue
+                cal_routes[leg][(frm, to)] = lows[(frm, to)]
+                cheap = min((v["cash"] for d, v in lows[(frm, to)].items()
+                             if d in leg_dates and v["cash"] is not None), default=None)
                 applog.info(f"{route}: {frm}→{to} calendar read for {len(leg_dates)} date(s)"
                             + (f", lowest ${cheap:,.0f} per person" if cheap is not None else ""),
                             user_id=user_id, watch_id=w["id"], source="run")
+            # per day, the cheapest over all airport pairs (any unreadable pair: keep every date)
+            if broken:
+                cal[leg] = None
             else:
-                applog.warn(f"{route}: {frm}→{to} calendar unreadable; searching every date",
-                            user_id=user_id, watch_id=w["id"], source="run")
+                merged = {}
+                for days in lows.values():
+                    for d, v in days.items():
+                        m = merged.setdefault(d, {"cash": None, "points": None})
+                        for f in ("cash", "points"):
+                            if v[f] is not None and (m[f] is None or v[f] < m[f]):
+                                m[f] = v[f]
+                cal[leg] = merged
         picked = swa.calendar_pick(w, cal, dates, settings.calendar_detail_dates)
-        return search_order(picked), used, False
+        to_search = swa.calendar_routes(w, cal_routes, picked)
+        picked = [x for x in picked if to_search.get(x)]
+        return search_order(picked), to_search, used, False
 
     @staticmethod
     def _finish_run(run_id, watch_id, note, searches, failures, matches):

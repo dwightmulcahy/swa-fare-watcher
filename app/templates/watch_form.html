@@ -12,10 +12,11 @@
   <fieldset>
     <legend>Route</legend>
     <div class="row">
-      <label>From <input name="origin" value="{{ w.origin }}" maxlength="3" placeholder="AUS" required class="code"></label>
-      <label>To <input name="destination" value="{{ w.destination }}" maxlength="3" placeholder="BWI" required class="code"></label>
+      <label>From <span class="hint">one or more</span><input name="origin" value="{{ w.origin|airports|replace('/', ', ') }}" maxlength="20" placeholder="SJO, LIR" required class="code" autocapitalize="characters" spellcheck="false"></label>
+      <label>To <span class="hint">one or more</span><input name="destination" value="{{ w.destination|airports|replace('/', ', ') }}" maxlength="20" placeholder="HOU, AUS" required class="code" autocapitalize="characters" spellcheck="false"></label>
       <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>
     </div>
+    <p class="hint">Separate airports with commas (up to 3 each). Every From × To pair is searched, so each extra airport adds searches; the low-fare calendar keeps the extra cost down.</p>
     <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="Holiday trip"></label>
   </fieldset>
 
@@ -67,6 +68,9 @@
       <label>Return departs after <input name="ret_depart_after" type="time" value="{{ w.ret_depart_after or '' }}"></label>
       <label>Return departs before <input name="ret_depart_before" type="time" value="{{ w.ret_depart_before or '' }}"></label>
     </div>
+    <input type="hidden" name="same_airports" value="">
+    <label class="check"><input type="checkbox" name="same_airports" value="1" {{ 'checked' if w.same_airports }}>
+      Return between the same airports <span class="hint">(otherwise, with several airports, it may fly you into one and back from another)</span></label>
     <input type="hidden" name="mix_payment" value="">
     <label class="check"><input type="checkbox" name="mix_payment" value="1" {{ 'checked' if w.mix_payment }}>
       Book as two one-ways: pick the cheapest flight and the best way to pay (cash or points) for each direction</label>

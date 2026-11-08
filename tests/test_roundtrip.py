@@ -9,7 +9,7 @@ TODAY = dt.date(2026, 11, 8)
 
 
 def rt(**kw):
-    base = {"trip_type": "roundtrip", "dates": "2026-12-18,2026-12-19", "days_from": None, "days_to": None,
+    base = {"trip_type": "roundtrip", "origin": "AUS", "destination": "BWI", "dates": "2026-12-18,2026-12-19", "days_from": None, "days_to": None,
             "weekdays": None, "ret_dates": None, "nights_min": 2, "nights_max": 3,
             "max_stops": 1, "max_duration_min": None, "depart_after": None, "depart_before": None,
             "ret_depart_after": None, "ret_depart_before": None, "max_price": 300, "max_points": 25000,

@@ -145,7 +145,7 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus, button:focus-visible, .button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .top a:focus-visible, .top button:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
-input.code { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; max-width: 7rem; }
+input.code { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; max-width: 12rem; }
 input[type=checkbox], input[type=radio] { width: auto; accent-color: var(--accent); }
 textarea { font: .85rem ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
 .stack { display: flex; flex-direction: column; gap: .9rem; }

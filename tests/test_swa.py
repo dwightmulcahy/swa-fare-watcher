@@ -56,7 +56,7 @@ def test_unset_limits_mean_any():
 
 
 def w(**kw):
-    base = {"dates": None, "days_from": None, "days_to": None, "weekdays": None}
+    base = {"origin": "AUS", "destination": "BWI", "dates": None, "days_from": None, "days_to": None, "weekdays": None}
     return {**base, **kw}
 
 

@@ -40,13 +40,18 @@ def render_hits(hits):
     for h in hits:
         t = h.get("trip")
         if t:  # round trip: one row, both legs
-            def leg(f):
-                return (f'{e(str(f["flights"]))} {e(f["depart"])}–{e(f["arrive"])}' if f else "—")
+            def leg(f, url=None):
+                if not f:
+                    return "—"
+                txt = f'{e(str(f["flights"]))} {e(f["depart"])}–{e(f["arrive"])}'
+                if f.get("origin"):
+                    txt = f'{e(f["origin"])}→{e(f["dest"])} {txt}'
+                return f'<a href="{e(url)}">{txt}</a>' if url else txt
             pts = f'{int(t["points"]):,} + ${t["taxes"]:.2f}' if t["points"] else "—"
             cells = [
                 f'<a href="{e(h["url"])}">{e(h["watch"])}</a>',
                 f'{e(t["out_date"])} → {e(t["ret_date"])} ({t["nights"]} night{"s" if t["nights"] != 1 else ""})',
-                f'{leg(t["out_cash"])}<br>{leg(t["ret_cash"])}', "", "", "",
+                f'{leg(t["out_cash"])}<br>{leg(t["ret_cash"], h.get("ret_url"))}', "", "", "",
                 f'${t["cash"]:.0f}' if t["cash"] else "—", pts,
                 f'{t["cpp"]:.2f}' if t["cpp"] else "—", e(h["use"]),
             ]
