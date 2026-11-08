@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import urlencode
 
 from .config import settings
@@ -189,8 +190,18 @@ LAUNCH_ARGS = [
     "--lang=en-US",
     "--disk-cache-size=67108864",
 ]
-# Playwright adds these by default; real Chrome never runs with them.
-IGNORE_DEFAULT_ARGS = ["--enable-automation", "--disable-component-extensions-with-background-pages"]
+# Playwright adds these by default; real Chrome never runs with them, and each one changes
+# something a page can observe (automation flag, popup blocking, back/forward cache, colour
+# management). Playwright's --disable-field-trial-config stays: official Chrome doesn't ship the
+# testing field-trial config it disables, while Chromium / Chrome for Testing would otherwise turn
+# on experimental features (e.g. trimmed navigator.languages) that real users don't have.
+IGNORE_DEFAULT_ARGS = [
+    "--enable-automation",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-popup-blocking",
+    "--disable-back-forward-cache",
+    "--force-color-profile=srgb",
+]
 
 
 def window_size_for(key):
@@ -265,7 +276,8 @@ class BrowserSearcher:
             args=[*LAUNCH_ARGS, f"--window-size={width},{height}", "--window-position=0,0"],
             ignore_default_args=IGNORE_DEFAULT_ARGS,
             no_viewport=True,  # page size comes from the real window, so inner/outer/screen sizes agree
-            locale="en-US",
+            # No Playwright `locale`: its override trims languages to ["en-US"] / "en-US". With just
+            # --lang, Chrome reports ["en-US","en"] and "en-US,en;q=0.9" like a normal install.
         )
         if settings.browser_timezone:
             kw["timezone_id"] = settings.browser_timezone
@@ -372,13 +384,13 @@ class BrowserSearcher:
         tag = f"{origin}-{dest}-{date}-{fare_type}"
         if not self._warmed:
             self.warm_up()
-        referer = self.page.url if self.page.url.startswith("https://www.southwest.com") else None
+        # Loaded like a bookmarked search URL. No Referer: page.goto is an address-bar navigation
+        # (Sec-Fetch-Site: none), and a real browser never sends a Referer with one.
         try:
             with self.page.expect_response(
                 lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=60_000
             ) as info:
-                self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded",
-                               referer=referer)
+                self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded")
             payload = info.value.json()
         except Exception as e:
             print(f"[warn] {tag}: no fare data ({e.__class__.__name__})", file=sys.stderr)
@@ -413,47 +425,85 @@ SELFTEST_PAGE = """<!doctype html><title>selftest</title>
 <input id="q" style="position:absolute;left:300px;top:260px;width:320px;height:36px">
 <button id="go" style="position:absolute;left:300px;top:340px;width:140px;height:40px">Go</button>
 <script>
-window.ev = {moves: 0, trustedClicks: 0, keys: 0, untrusted: 0, wheels: 0};
+window.ev = {moves: 0, trustedClicks: 0, keys: 0, untrusted: 0, wheels: [], dwell: [], shift: 0, cdp: false};
+const downAt = {};
 addEventListener('mousemove', e => { ev.moves++; if (!e.isTrusted) ev.untrusted++; });
-addEventListener('wheel', e => { ev.wheels++; });
-addEventListener('keydown', e => { ev.keys++; if (!e.isTrusted) ev.untrusted++; });
+addEventListener('wheel', e => { ev.wheels.push(e.deltaY); });
+addEventListener('keydown', e => { ev.keys++; if (!e.isTrusted) ev.untrusted++; if (e.key === 'Shift') ev.shift++; downAt[e.key] = e.timeStamp; });
+addEventListener('keyup', e => { if (e.key !== 'Shift' && downAt[e.key] !== undefined) ev.dwell.push(e.timeStamp - downAt[e.key]); });
 document.getElementById('go').addEventListener('click', e => { if (e.isTrusted) ev.trustedClicks++; });
+// DevTools-protocol leak check: the console serializer reads .stack only when automation listens
+setInterval(() => { const e = new Error(); Object.defineProperty(e, 'stack', {get() { ev.cdp = true; return ''; }}); console.debug(e); }, 100);
 </script>"""
 
 
 def selftest(verbose=True):
     """Launch the browser exactly as searches do, then exercise human input on a local page.
-    Fails if automation is visible (navigator.webdriver) or the input isn't trusted/accurate."""
+    Fails if a page could see automation: navigator.webdriver, Headless UA, untrusted or
+    zero-length key presses, capitals without Shift, uneven wheel steps, trimmed languages,
+    or the DevTools-protocol console leak."""
     import random
+    import statistics
 
     from .human import Human
 
     with BrowserSearcher(human=True) as b:
         p = b.page
         p.set_content(SELFTEST_PAGE)
-        h = Human(p, rng=random.Random(7), typo_rate=0.25, speed=0.2)
+        h = Human(p, rng=random.Random(7), typo_rate=0.25)  # normal speed: key hold times are checked
         text = "Dallas Love Field, 2026"
         h.type(p.locator("#q"), text)
         h.click(p.locator("#go"))
         h.scroll(300)
-        info = p.evaluate("""() => ({value: document.getElementById('q').value, ev: window.ev,
-            webdriver: navigator.webdriver, ua: navigator.userAgent, lang: navigator.language,
+        time.sleep(0.4)
+        info = p.evaluate("""() => {
+            const gl = document.createElement('canvas').getContext('webgl');
+            const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+            return {value: document.getElementById('q').value, ev: window.ev,
+            webdriver: navigator.webdriver, ua: navigator.userAgent, languages: navigator.languages,
+            brands: navigator.userAgentData ? navigator.userAgentData.brands.map(b => b.brand) : [],
             inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight],
-            screen: [screen.width, screen.height], tz: Intl.DateTimeFormat().resolvedOptions().timeZone})""")
+            screen: [screen.width, screen.height], tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            gl: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+            fonts: ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia',
+                    'DejaVu Sans', 'Liberation Sans', 'Noto Sans'].filter(f => document.fonts.check(`12px "${f}"`)),
+            automationGlobals: Object.keys(window).filter(k => /playwright|__pw|cdc_|puppeteer/i.test(k))};
+        }""")
         problems = []
+        ev = info["ev"]
         if info["value"] != text:
             problems.append(f"typed {info['value']!r}, expected {text!r}")
         if info["webdriver"]:
             problems.append("navigator.webdriver is true")
         if "Headless" in info["ua"]:
             problems.append("user agent says Headless")
-        ev = info["ev"]
         if ev["trustedClicks"] != 1 or ev["untrusted"] or ev["moves"] < 10 or ev["keys"] < len(text):
-            problems.append(f"unexpected input events {ev}")
+            problems.append(f"unexpected input events (clicks {ev['trustedClicks']}, untrusted {ev['untrusted']}, "
+                            f"moves {ev['moves']}, keys {ev['keys']})")
+        dwell = statistics.median(ev["dwell"]) if ev["dwell"] else 0
+        if dwell < 30:
+            problems.append(f"keys held only {dwell:.0f} ms (people: ~50-150 ms)")
+        if ev["shift"] < 3:  # D, L, F
+            problems.append("capital letters typed without Shift")
+        if len({abs(w) for w in ev["wheels"]}) > 1:
+            problems.append(f"uneven wheel steps {sorted(set(ev['wheels']))}")
+        if list(info["languages"])[:2] != ["en-US", "en"]:
+            problems.append(f"navigator.languages {info['languages']} (normal Chrome: ['en-US', 'en'])")
+        if ev["cdp"]:
+            problems.append("DevTools-protocol console leak detected")
+        if info["automationGlobals"]:
+            problems.append(f"automation globals {info['automationGlobals']}")
         if verbose:
             print(f"browser: {b.channel}  ua: {info['ua']}")
-            print(f"window: inner {info['inner']} outer {info['outer']} screen {info['screen']}  "
-                  f"lang {info['lang']}  tz {info['tz']}  events {ev}")
+            print(f"brands: {info['brands']}  languages: {info['languages']}  tz: {info['tz']}")
+            print(f"window: inner {info['inner']} outer {info['outer']} screen {info['screen']}")
+            print(f"webgl: {info['gl']}")
+            print(f"fonts: {len(info['fonts'])}/9 {info['fonts']}")
+            print(f"input: key hold median {dwell:.0f} ms, shift presses {ev['shift']}, wheel steps "
+                  f"{sorted(set(ev['wheels']))}, mouse moves {ev['moves']}, clicks {ev['trustedClicks']}, "
+                  f"cdp leak {ev['cdp']}")
+            if info["gl"] and "SwiftShader" in info["gl"]:
+                print("note: WebGL is software-rendered (SwiftShader); sites can tell there's no GPU")
         if problems:
             raise SystemExit("selftest FAILED: " + "; ".join(problems))
     print("selftest ok")

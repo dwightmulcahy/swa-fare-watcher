@@ -1,5 +1,6 @@
 """Background worker: runs one user's watches at a time in a single browser, plus a daily scheduler."""
 import datetime as dt
+import math
 import queue
 import random
 import sys
@@ -21,10 +22,9 @@ def seconds_until(hhmm, now=None):
     return (nxt - now).total_seconds()
 
 
-def next_run_time(hhmm, jitter_min, now=None, last_day=None, rng=random):
-    """When the next daily run should start: hh:mm plus a fresh random offset within
-    ±jitter_min, so runs never start at the same minute (or second) two days in a row.
-    Skips any day already run (last_day) and any time already past."""
+def day_window(hhmm, jitter_min, now=None, last_day=None):
+    """The next daily window (day, start, end) still ahead of `now`: hh:mm ± jitter_min, skipping
+    days already run. If the window has already started, it begins a minute from now."""
     now = now or dt.datetime.now()
     h, m = map(int, hhmm.split(":"))
     for add in range(0, 3):
@@ -32,17 +32,48 @@ def next_run_time(hhmm, jitter_min, now=None, last_day=None, rng=random):
         if last_day is not None and day <= last_day:
             continue
         base = dt.datetime.combine(day, dt.time(h, m))
-        lo = base - dt.timedelta(minutes=jitter_min)
-        hi = base + dt.timedelta(minutes=jitter_min)
+        lo, hi = base - dt.timedelta(minutes=jitter_min), base + dt.timedelta(minutes=jitter_min)
         if hi <= now:
             continue  # today's window is over
-        lo = max(lo, now + dt.timedelta(seconds=60))  # started mid-window: pick from what's left
-        if lo >= hi:
-            when = hi
-        else:
-            when = lo + dt.timedelta(seconds=rng.uniform(0, (hi - lo).total_seconds()))
-        return when.replace(microsecond=0)
-    raise RuntimeError("no next run time")  # unreachable with sane input
+        return day, max(lo, now + dt.timedelta(seconds=60)), hi
+    raise RuntimeError("no next window")  # unreachable with sane input
+
+
+def plan_day(user_ids, lo, hi, rng=random):
+    """Give each user their own random start time inside the window, so several accounts
+    never search back to back from the same IP. Returns [(time, user_id)] sorted by time."""
+    span = max((hi - lo).total_seconds(), 0)
+    plan = [((lo + dt.timedelta(seconds=rng.uniform(0, span))).replace(microsecond=0), uid) for uid in user_ids]
+    return sorted(plan, key=lambda x: x[0])
+
+
+def next_run_time(hhmm, jitter_min, now=None, last_day=None, rng=random):
+    """A single run time for the next window (one user's plan)."""
+    _, lo, hi = day_window(hhmm, jitter_min, now, last_day)
+    return plan_day([0], lo, hi, rng)[0][0] if hi > lo else hi.replace(microsecond=0)
+
+
+def search_pause(lo, hi, rng=random):
+    """Seconds to wait between searches: log-normal around the middle of (lo, hi), so most gaps
+    are similar, some are short, a few are long; plus an occasional real break."""
+    median = (lo + hi) / 2
+    d = min(max(rng.lognormvariate(math.log(median), 0.45), lo * 0.6), hi * 3)
+    if rng.random() < 0.07:
+        d += rng.uniform(45, 180)  # stepped away / got distracted
+    return d
+
+
+def search_order(dates, rng=random):
+    """The order to look at a watch's dates: usually earliest first, sometimes latest first,
+    sometimes jumping around, like a person comparing days."""
+    r = rng.random()
+    if r < 0.6:
+        return list(dates)
+    if r < 0.8:
+        return list(reversed(dates))
+    out = list(dates)
+    rng.shuffle(out)
+    return out
 
 
 def _is_new_low(con, watch_id, key, r):
@@ -64,7 +95,8 @@ class Worker:
         self.pending = {}          # user_id -> set(watch_ids) or None (all)
         self.signin_only = set()   # users queued just to test sign-in (no searches)
         self.running_user = None
-        self.next_run = None
+        self.next_window = None    # (start, end) of the next daily window
+        self.planned = {}          # user_id -> start time within today's window
         self._threads = []
 
     # ----- queueing -----
@@ -92,15 +124,18 @@ class Worker:
             return "running"
         return "queued" if user_id in self.pending else None
 
-    def enqueue_all(self):
+    def eligible_users(self):
         rows = db.query("SELECT DISTINCT u.* FROM users u JOIN watches w ON w.user_id=u.id "
                         "WHERE w.active=1 AND u.active=1")
-        rows = list(rows)
-        random.shuffle(rows)  # a different order every day
-        for u in rows:
-            if db.user_can_run(u):
-                self.enqueue(u["id"])
-        return len(rows)
+        return [u["id"] for u in rows if db.user_can_run(u)]
+
+    def enqueue_all(self):
+        """Queue everyone now (admin 'Run all now'), in a shuffled order."""
+        ids = self.eligible_users()
+        random.shuffle(ids)
+        for uid in ids:
+            self.enqueue(uid)
+        return len(ids)
 
     def start(self, scheduler=True):
         t = threading.Thread(target=self._loop, name="swa-worker", daemon=True)
@@ -126,18 +161,32 @@ class Worker:
             finally:
                 self.running_user = None
 
+    def _sleep_until(self, when):
+        while (wait := (when - dt.datetime.now()).total_seconds()) > 0:
+            time.sleep(min(wait, 300))  # re-check: survives clock changes and sleep/suspend
+
     def _schedule(self):
         last_day = None
         while True:
-            when = next_run_time(settings.daily_at, settings.daily_jitter_min, last_day=last_day)
-            print(f"[scheduler] next run {when:%Y-%m-%d %H:%M:%S} "
-                  f"({settings.daily_at} ±{settings.daily_jitter_min} min)", file=sys.stderr, flush=True)
-            self.next_run = when
-            while (wait := (when - dt.datetime.now()).total_seconds()) > 0:
-                time.sleep(min(wait, 300))  # re-check: survives clock changes and sleep/suspend
-            last_day = when.date()
-            n = self.enqueue_all()
-            print(f"[scheduler] queued {n} user(s)", file=sys.stderr, flush=True)
+            day, lo, hi = day_window(settings.daily_at, settings.daily_jitter_min, last_day=last_day)
+            self.next_window = (lo, hi)
+            print(f"[scheduler] next window {lo:%Y-%m-%d %H:%M}-{hi:%H:%M}", file=sys.stderr, flush=True)
+            self._sleep_until(lo)
+            plan = plan_day(self.eligible_users(), dt.datetime.now(), hi)
+            self.planned = {uid: t for t, uid in plan}
+            print(f"[scheduler] {len(plan)} user(s): "
+                  + ", ".join(f"{uid}@{t:%H:%M:%S}" for t, uid in plan), file=sys.stderr, flush=True)
+            for t, uid in plan:
+                self._sleep_until(t)
+                self.enqueue(uid)
+                self.planned.pop(uid, None)
+            last_day = day
+
+    def next_run_for(self, user_id):
+        """This user's planned start today, or the next window (start, end)."""
+        if user_id in self.planned:
+            return self.planned[user_id], None
+        return None, self.next_window
 
     # ----- the actual run -----
     def run_user(self, user_id, watch_ids=None, signin_only=False):
@@ -158,6 +207,7 @@ class Worker:
         limited = False
         signin = None
 
+        watches = random.sample(watches, len(watches))  # different watch order each day
         with self.searcher_factory(state, profile_key=user_id) as searcher:
             if creds and hasattr(searcher, "ensure_signed_in"):
                 signin = self._sign_in(user, creds, searcher, manual=signin_only)
@@ -168,12 +218,12 @@ class Worker:
                                          (w["id"], db.now())).lastrowid
                 w_s = w_f = w_m = 0
                 note = None
-                for date in swa.watch_dates(w):
+                for date in search_order(swa.watch_dates(w)):
                     if cap is not None and db.searches_today(user_id) + 2 > cap:
                         note, limited = "Daily search limit reached", True
                         break
                     res = {}
-                    for ft in ("USD", "POINTS"):
+                    for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
                         res[ft] = searcher.search(w["origin"], w["destination"], date, w["adults"], ft)
                         with db.tx() as con:
                             db.add_searches(con, user_id, 1)
@@ -182,7 +232,7 @@ class Worker:
                         if res[ft] is None:
                             failures += 1
                             w_f += 1
-                        self.sleep(random.uniform(*settings.search_delay))
+                        self.sleep(search_pause(*settings.search_delay))
                     ts = db.now()
                     with db.tx() as con:
                         for r in swa.combine(res["USD"], res["POINTS"]):

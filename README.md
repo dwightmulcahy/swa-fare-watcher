@@ -42,6 +42,28 @@ Southwest's bot detection looks at the browser fingerprint and at how the page i
 - **Keeps a consistent fingerprint per user:** a persistent Chrome profile in `/data/profiles/<user id>` (Southwest's device cookies, cache and storage survive between runs, so it's the same "returning device" and less likely to trigger verification), a fixed real window size per user, real `en-US` language and the container's time zone (`TZ`, or `SWA_TIMEZONE`).
 - **Behaves like a visitor** (`app/human.py`): lands on the home page first and looks around; after each result page loads, moves the mouse along curved, eased paths with tremor and occasional overshoot, scrolls with uneven wheel notches, and dwells a few seconds. Clicks land at a random point inside the target after a short hover, with a realistic press duration. Typing uses varied (log-normal) key gaps, slower at word boundaries, occasional hesitations, and neighbouring-key typos fixed with Backspace (off for passwords). All input goes through real trusted mouse/keyboard events.
 
+**Patterns removed after an audit** (measured from a page's point of view in real Chrome):
+
+| A page/server could see | Now |
+|---|---|
+| Keys held ~2 ms; capitals typed with no Shift | Keys held ~85 ms (log-normal); Shift pressed for capitals/symbols; shortcuts use the platform modifier |
+| Wheel steps of mixed sizes | One fixed notch (100 px); speed shows as bursts and pauses |
+| Mouse jitter identical on both axes; pointer appearing mid-page | Independent jitter per axis; pointer enters from the top edge |
+| Select-all before typing into an empty field | Only clears fields that have text |
+| `Referer` on address-bar navigations (`Sec-Fetch-Site: none`) | No Referer on direct search URLs |
+| `navigator.languages = ["en-US"]`, `Accept-Language: en-US` | Normal Chrome values: `["en-US","en"]`, `en-US,en;q=0.9` |
+| Playwright flags: popup blocker off, back/forward cache off, forced colour profile | Removed |
+| Searches always earliest date first, cash before points, evenly spaced | Date order varies, cash/points order random, log-normal gaps with occasional 1–3 min breaks |
+| Every account searching back to back at the same minute | Each user gets their own random start inside the daily window; window moves daily |
+
+**Known residual signals** (can't be fixed in code):
+
+- **WebGL reports SwiftShader** (software rendering) in the server's virtual display; sites can tell there's no GPU. Running the browser on a machine with a GPU removes it.
+- **Linux desktop + datacenter IP** is a common bot profile; a residential connection looks more normal.
+- **Several Rapid Rewards accounts from one IP** is still visible even when spread out.
+- **Chrome version** is fixed when the image is built; rebuild regularly so it doesn't fall behind real users. The arm64 image uses Chromium (no "Google Chrome" brand).
+- Two page loads per date (cash, then points) is more traffic than a person toggling the price display.
+
 `python -m app selftest` launches the browser exactly as searches do and checks the result: Chrome in use, `navigator.webdriver` false, no "Headless" in the user agent, all events trusted, and text typed with typos ends up exact. CI runs it inside the built image.
 
 None of this guarantees Southwest won't block requests; it lowers the odds. Fewer searches per day help more than anything.

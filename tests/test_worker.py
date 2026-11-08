@@ -5,7 +5,7 @@ import pytest
 
 from app import db
 from app.security import decrypt_json, encrypt_json, hash_password
-from app.worker import next_run_time, seconds_until
+from app.worker import day_window, next_run_time, plan_day, search_order, search_pause, seconds_until
 from tests.conftest import FakeSearcher, future
 
 
@@ -123,3 +123,46 @@ def test_next_run_started_mid_window_still_runs_today():
     for i in range(50):
         t = next_run_time("07:20", 45, now, rng=random.Random(i))
         assert dt.datetime(2026, 11, 8, 7, 31) <= t <= dt.datetime(2026, 11, 8, 8, 5)
+
+
+def test_users_get_separate_random_starts_across_the_window():
+    lo, hi = dt.datetime(2026, 11, 9, 6, 35), dt.datetime(2026, 11, 9, 8, 5)
+    plan = plan_day([1, 2, 3, 4, 5], lo, hi, rng=random.Random(2))
+    times = [t for t, _ in plan]
+    assert times == sorted(times) and all(lo <= t <= hi for t in times)
+    assert sorted(uid for _, uid in plan) == [1, 2, 3, 4, 5]
+    gaps = [(b - a).total_seconds() for a, b in zip(times, times[1:])]
+    assert sum(gaps) > 30 * 60  # spread over the window, not a back-to-back burst
+
+
+def test_day_window_starts_now_if_already_open_and_skips_done_days():
+    now = dt.datetime(2026, 11, 9, 7, 30)
+    day, lo, hi = day_window("07:20", 45, now)
+    assert day == now.date() and lo == now + dt.timedelta(seconds=60) and hi == dt.datetime(2026, 11, 9, 8, 5)
+    day, lo, _ = day_window("07:20", 45, now, last_day=now.date())
+    assert day == dt.date(2026, 11, 10) and lo == dt.datetime(2026, 11, 10, 6, 35)
+
+
+def test_search_pauses_vary_naturally_with_occasional_breaks():
+    rng = random.Random(5)
+    d = sorted(search_pause(8, 20, rng) for _ in range(3000))
+    median = d[1500]
+    assert 11 < median < 17
+    assert d[0] >= 4.8                          # never machine-gun fast
+    assert sum(x > 45 for x in d) > 100         # some real breaks
+    assert len({round(x, 1) for x in d}) > 500  # no fixed cadence
+
+
+def test_search_order_varies():
+    rng = random.Random(1)
+    dates = ["2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04"]
+    orders = {tuple(search_order(dates, rng)) for _ in range(200)}
+    assert tuple(dates) in orders and tuple(reversed(dates)) in orders and len(orders) > 5
+
+
+def test_cash_and_points_order_varies(worker, sent):
+    uid = make_user()
+    make_watch(uid, dates=",".join(future(d) for d in range(10, 20)))
+    worker.run_user(uid)
+    firsts = [c[3] for c in FakeSearcher.calls[::2]]  # first fare type searched for each date
+    assert set(firsts) == {"USD", "POINTS"}

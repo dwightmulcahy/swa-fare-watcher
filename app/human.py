@@ -8,6 +8,9 @@ import math
 import random
 import time
 
+# Characters typed with Shift held on a US keyboard.
+SHIFTED = set('~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+
 # Neighbouring keys on a US QWERTY keyboard, for realistic typos.
 _ROWS = ["`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./"]
 _NEIGHBOURS = {}
@@ -61,12 +64,19 @@ def path(start, end, rng, steps=None):
     for i in range(1, steps + 1):
         t = _ease(i / steps)
         x, y = _bezier((x0, y0), c1, c2, (x1, y1), t)
-        tremor = 0 if i == steps else rng.gauss(0, 0.6)
-        pts.append((x + tremor, y + tremor))
+        if i < steps:  # hand tremor, independent on each axis
+            x += rng.gauss(0, 0.6)
+            y += rng.gauss(0, 0.6)
+        pts.append((x, y))
     return pts
 
 
 class Human:
+    """One person at one browser window. Keeps a fixed scroll-wheel step (a physical wheel
+    always moves the same amount per notch) and tracks where the pointer is."""
+
+    WHEEL_NOTCH = 100  # Chrome on Windows/Linux reports 100 px per wheel notch at 100% zoom
+
     def __init__(self, page, rng=None, sleep=time.sleep, typo_rate=0.03, speed=1.0):
         self.page = page
         self.rng = rng or random.Random()
@@ -81,15 +91,21 @@ class Human:
                 vp = None
         vp = vp or {"width": 1366, "height": 768}
         self.w, self.h = vp["width"], vp["height"]
-        self.pos = (self.rng.uniform(0.3, 0.7) * self.w, self.rng.uniform(0.3, 0.7) * self.h)
+        # The pointer arrives from the browser's toolbar/tab strip, i.e. the top edge of the page.
+        self.pos = (self.rng.uniform(0.15, 0.85) * self.w, self.rng.uniform(1, 12))
 
     # ---------- timing ----------
     def pause(self, lo, hi):
         self.sleep(self.rng.uniform(lo, hi) * self.speed)
 
+    def _dwell(self):
+        # how long a key is held down: median ~85 ms, like real typing (automation is ~2 ms)
+        return min(max(self.rng.lognormvariate(math.log(0.085), 0.3), 0.035), 0.22) * self.speed
+
     def _key_delay(self, prev, ch):
-        # lognormal inter-key interval, median ~110 ms; slower after word/punctuation boundaries
-        d = self.rng.lognormvariate(math.log(0.11), 0.35)
+        # gap after releasing one key before pressing the next; with the dwell this gives a
+        # median ~160 ms key-to-key interval (~70 wpm), slower around word/punctuation boundaries
+        d = self.rng.lognormvariate(math.log(0.075), 0.4)
         if prev == " " or ch == " ":
             d += self.rng.uniform(0.03, 0.15)
         if not ch.isalnum() and ch != " ":
@@ -148,51 +164,94 @@ class Human:
         self.pause(0.1, 0.35)
 
     # ---------- keyboard ----------
+    def key(self, key):
+        """Press and release one key with a human hold time; capitals and symbols hold Shift."""
+        kb = self.page.keyboard
+        shift = len(key) == 1 and key in SHIFTED
+        if shift:
+            kb.down("Shift")
+            self.sleep(self.rng.uniform(0.04, 0.11) * self.speed)
+        kb.down(key)
+        self.sleep(self._dwell())
+        kb.up(key)
+        if shift:
+            self.sleep(self.rng.uniform(0.02, 0.08) * self.speed)
+            kb.up("Shift")
+
+    def _shortcut(self, *keys):
+        kb = self.page.keyboard
+        for k in keys[:-1]:
+            kb.down(k)
+            self.sleep(self.rng.uniform(0.05, 0.12) * self.speed)
+        self.key(keys[-1])
+        for k in reversed(keys[:-1]):
+            self.sleep(self.rng.uniform(0.02, 0.07) * self.speed)
+            kb.up(k)
+
+    def _field_has_text(self, locator):
+        try:
+            return bool(locator.input_value(timeout=1000))
+        except Exception:
+            return True  # unknown: clear to be safe
+
     def type(self, locator, text, typos=True, clear=False):
         """Click into the field and type like a person, optionally fixing occasional typos."""
         self.click(locator)
-        if clear:
-            self.page.keyboard.press("ControlOrMeta+A")
+        if clear and self._field_has_text(locator):
+            mod = "Meta" if "Mac" in (self._platform() or "") else "Control"
+            self._shortcut(mod, "a")
             self.pause(0.08, 0.2)
-            self.page.keyboard.press("Backspace")
+            self.key("Backspace")
         self.pause(0.15, 0.5)
         prev = ""
         for ch in text:
             if typos and self.rng.random() < self.typo_rate:
                 wrong = neighbour_key(ch, self.rng)
                 if wrong:
-                    self.page.keyboard.type(wrong)
+                    self.key(wrong)
                     self.sleep(self._key_delay(prev, wrong))
                     if self.rng.random() < 0.35:  # sometimes notice only after the next key
-                        self.page.keyboard.type(ch)
+                        self.key(ch)
                         self.pause(0.2, 0.5)
-                        self.page.keyboard.press("Backspace")
+                        self.key("Backspace")
                         self.sleep(self._key_delay("", "x"))
                     else:
                         self.pause(0.15, 0.45)
-                    self.page.keyboard.press("Backspace")
+                    self.key("Backspace")
                     self.sleep(self._key_delay("", "x"))
-            self.page.keyboard.type(ch)
+            self.key(ch)
             self.sleep(self._key_delay(prev, ch))
             prev = ch
         self.pause(0.2, 0.6)
 
     def press(self, key):
         self.pause(0.1, 0.3)
-        self.page.keyboard.press(key)
+        self.key(key)
+
+    def _platform(self):
+        if not hasattr(self, "_plat"):
+            try:
+                self._plat = self.page.evaluate("navigator.platform")
+            except Exception:
+                self._plat = ""
+        return self._plat
 
     # ---------- scrolling / idling ----------
     def scroll(self, dy):
-        """Wheel-scroll roughly dy pixels in uneven notches."""
-        done = 0
-        sign = 1 if dy > 0 else -1
-        while abs(done) < abs(dy):
-            notch = sign * self.rng.choice((100, 100, 100, 120, 80, 200))
-            self.page.mouse.wheel(0, notch)
-            done += notch
-            self.sleep(self.rng.uniform(0.03, 0.12) * self.speed)
-            if self.rng.random() < 0.15:
-                self.pause(0.3, 0.9)
+        """Wheel-scroll roughly dy pixels. Every event is one notch of the same size, like a real
+        wheel; speed shows up as timing: quick bursts of notches with short gaps, then pauses."""
+        notches = max(1, round(abs(dy) / self.WHEEL_NOTCH))
+        step = self.WHEEL_NOTCH if dy > 0 else -self.WHEEL_NOTCH
+        while notches > 0:
+            burst = min(notches, self.rng.randint(1, 4))
+            for _ in range(burst):
+                self.page.mouse.wheel(0, step)
+                self.sleep(self.rng.uniform(0.018, 0.06) * self.speed)
+            notches -= burst
+            if notches:
+                self.sleep(self.rng.uniform(0.08, 0.35) * self.speed)
+                if self.rng.random() < 0.12:
+                    self.pause(0.3, 0.9)
 
     def _scroll_y(self):
         try:

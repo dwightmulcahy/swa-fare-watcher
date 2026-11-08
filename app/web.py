@@ -331,7 +331,7 @@ def create_app(worker=None, start_worker=True):
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
                       daily_at=settings.daily_at, jitter=settings.daily_jitter_min,
-                      next_run=getattr(app.state.worker, "next_run", None))
+                      next_run=app.state.worker.next_run_for(u["id"]))
 
     @app.get("/watches/new", response_class=HTMLResponse)
     def new_watch(request: Request):
