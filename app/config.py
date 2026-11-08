@@ -28,6 +28,8 @@ class Settings:
         self.session_days = int(_env("SESSION_DAYS", "14"))
         self.gmail_user = _env("GMAIL_USER")
         self.gmail_password = _env("GMAIL_APP_PASSWORD")
+        self.gmail_host = _env("GMAIL_SMTP_HOST", "smtp.gmail.com")
+        self.gmail_port = int(_env("GMAIL_SMTP_PORT", "465"))   # 587 (STARTTLS) is tried too
         self.admin_username = _env("ADMIN_USERNAME", "admin")
         self.admin_password = _env("ADMIN_PASSWORD")
         self.headless = _bool("SWA_HEADLESS", False)

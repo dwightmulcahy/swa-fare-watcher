@@ -235,3 +235,7 @@ CI runs the tests, validates both Compose files, builds the image, starts it har
 ## License
 
 [MIT](LICENSE)
+
+## Email trouble
+
+Run `python -m app test-email` (Docker: `docker compose exec watcher python -m app test-email`). It checks both Gmail ports (465 SSL and 587 STARTTLS), logs in, and sends a test message, saying exactly what failed. Alerts try 465 first and fall back to 587 automatically.

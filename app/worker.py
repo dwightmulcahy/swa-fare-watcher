@@ -119,9 +119,11 @@ class Worker:
         self.q.put(user_id)
 
     # ----- live progress (shown in the UI while a run is going) -----
-    def phase(self, user_id, text, watch_id=None, done=None, total=None, log=True, level="info", source="run"):
+    def phase(self, user_id, text, watch_id=None, done=None, total=None, log=True, level="info", source="run",
+              until=None):
+        """until: epoch seconds a pause ends, so the page can count down."""
         p = self.progress.setdefault(user_id, {"started": db.now()})
-        p.update(phase=text, at=db.now())
+        p.update(phase=text, at=db.now(), until=until)
         if watch_id is not None:
             p["watch_id"] = watch_id
         if total is not None:
@@ -133,7 +135,7 @@ class Worker:
         """JSON-friendly view of this user's run for the live status display."""
         state = self.status(user_id)
         p = dict(self.progress.get(user_id) or {})
-        return {"state": state, **({k: p.get(k) for k in ("phase", "done", "total", "watch_id", "started", "at")}
+        return {"state": state, **({k: p.get(k) for k in ("phase", "done", "total", "watch_id", "started", "at", "until")}
                                    if state == "running" else {})}
 
     def status(self, user_id):
@@ -315,7 +317,7 @@ class Worker:
                                                    "returned no fares", watch_id=w["id"], level="warn")
                                     pause = search_pause(*settings.search_delay)
                                     self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
-                                               watch_id=w["id"], log=False)
+                                               watch_id=w["id"], log=False, until=time.time() + pause)
                                     self.sleep(pause)
                                 n_flights = n_match = 0
                                 rows = swa.combine(res["USD"], res["POINTS"])
@@ -480,7 +482,10 @@ class Worker:
                     field = "cash" if ft == "USD" else "points"
                     for d, v in days.items():
                         lows[(frm, to)].setdefault(d, {"cash": None, "points": None})[field] = v
-                self.sleep(search_pause(*settings.search_delay))
+                pause = search_pause(*settings.search_delay)
+                self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
+                           watch_id=w["id"], log=False, until=time.time() + pause)
+                self.sleep(pause)
             ts = db.now()
             with db.tx() as con:
                 con.executemany(

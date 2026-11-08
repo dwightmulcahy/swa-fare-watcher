@@ -13,19 +13,44 @@ def send(to, subject, body_html) -> bool:
         from . import applog
         applog.warn(f"Gmail not configured; email '{subject}' to {to} not sent", source="mail")
         return False
+    from . import applog
     msg = MIMEText(body_html, "html")
     msg["Subject"], msg["From"], msg["To"] = subject, settings.gmail_user, to
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
-            s.login(settings.gmail_user, settings.gmail_password)
-            s.sendmail(settings.gmail_user, [to], msg.as_string())
-        from . import applog
-        applog.info(f"Email sent to {to}: {subject}", source="mail")
-        return True
-    except Exception as e:
-        from . import applog
-        applog.error(f"Email to {to} failed: {e!r}", source="mail")
-        return False
+    password = settings.gmail_password.replace(" ", "")   # app passwords are shown as "abcd efgh ..."
+    errors = []
+    # Port 465 (SSL) first, then 587 (STARTTLS): some networks and ISPs block or cut one of them,
+    # which shows up as "Connection unexpectedly closed"
+    for port in _ports():
+        try:
+            if port == 465:
+                conn = smtplib.SMTP_SSL(settings.gmail_host, 465, timeout=30)
+            else:
+                conn = smtplib.SMTP(settings.gmail_host, port, timeout=30)
+            with conn as s:
+                if port != 465:
+                    s.ehlo()
+                    s.starttls()
+                    s.ehlo()
+                s.login(settings.gmail_user, password)
+                s.sendmail(settings.gmail_user, [to], msg.as_string())
+            applog.info(f"Email sent to {to} (port {port}): {subject}", source="mail")
+            return True
+        except smtplib.SMTPAuthenticationError as e:
+            applog.error(f"Email to {to} failed: Gmail rejected the login ({e.smtp_code}). GMAIL_USER must be the "
+                         "full address and GMAIL_APP_PASSWORD a 16-letter app password "
+                         "(myaccount.google.com/apppasswords, needs 2-Step Verification).", source="mail")
+            return False
+        except Exception as e:
+            errors.append(f"port {port}: {e!r}")
+    applog.error(f"Email to {to} failed ({'; '.join(errors)}). If both ports fail, outgoing mail from this "
+                 "server is probably blocked; check the firewall/ISP, or run `python -m app test-email`.",
+                 source="mail")
+    return False
+
+
+def _ports():
+    first = settings.gmail_port
+    return [first] + [p for p in (465, 587) if p != first]
 
 
 def fmt_dur(m):

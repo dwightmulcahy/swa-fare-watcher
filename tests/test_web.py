@@ -205,3 +205,13 @@ def test_login_rate_limited(client):
     for _ in range(10):
         login(client, "admin", "wrong")
     assert login(client, "admin", ADMIN_PW).status_code == 429
+
+
+def test_dashboard_has_delete(client):
+    token = admin_client(client)
+    client.post("/watches", data=watch_form(token), follow_redirects=False)
+    wid = db.one("SELECT id FROM watches ORDER BY id DESC")["id"]
+    page = client.get("/").text
+    assert f'action="/watches/{wid}/delete"' in page and "data-confirm" in page
+    assert client.post(f"/watches/{wid}/delete", data={"csrf": token}, follow_redirects=False).status_code == 303
+    assert db.one("SELECT id FROM watches WHERE id=?", (wid,)) is None

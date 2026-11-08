@@ -127,6 +127,45 @@ def login_test(a):
     return result.exit_code
 
 
+def test_email(to=None):
+    """Connect to Gmail on each port and report exactly what happens, then send a test message."""
+    import smtplib
+    import socket
+
+    from . import db, mailer
+    from .config import settings
+    if not (settings.gmail_user and settings.gmail_password):
+        print("GMAIL_USER and GMAIL_APP_PASSWORD must both be set.")
+        return 2
+    print(f"GMAIL_USER={settings.gmail_user}  app password: {len(settings.gmail_password.replace(' ', ''))} "
+          "characters (should be 16)")
+    host = settings.gmail_host
+    try:
+        print(f"{host} resolves to: {', '.join(sorted({a[4][0] for a in socket.getaddrinfo(host, None)}))}")
+    except OSError as e:
+        print(f"DNS lookup for {host} failed: {e}")
+    for port in (465, 587):
+        try:
+            conn = smtplib.SMTP_SSL(host, port, timeout=20) if port == 465 else smtplib.SMTP(host, port, timeout=20)
+            with conn as c:
+                if port == 587:
+                    c.ehlo()
+                    c.starttls()
+                    c.ehlo()
+                c.login(settings.gmail_user, settings.gmail_password.replace(" ", ""))
+            print(f"port {port}: OK (connected and logged in)")
+        except smtplib.SMTPAuthenticationError as e:
+            print(f"port {port}: connected, but Gmail rejected the login ({e.smtp_code}): use an app password "
+                  "from myaccount.google.com/apppasswords")
+        except Exception as e:
+            print(f"port {port}: FAILED {e!r}")
+    db.init()
+    ok = mailer.send(to or settings.gmail_user, "Fare Watcher test email",
+                     "<p>This is a test from Fare Watcher. Email alerts are working.</p>")
+    print("Test email sent." if ok else "Test email NOT sent (details in the Log tab).")
+    return 0 if ok else 1
+
+
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser(prog="python -m app")
@@ -138,6 +177,8 @@ def main():
     lg = sub.add_parser("swa-login")
     lg.add_argument("out", nargs="?", default="storage_state.json")
     sub.add_parser("check-tz", help="check the browser time zone matches this machine's internet location")
+    te = sub.add_parser("test-email", help="check Gmail sending on both ports and send a test message")
+    te.add_argument("to", nargs="?", help="default: GMAIL_USER")
     lt = sub.add_parser("login-test", help="try an automated Southwest sign-in")
     lt.add_argument("--username", help="default: SWA_USERNAME")
     lt.add_argument("--profile", default="login-test", help="browser profile name under data/profiles/")
@@ -156,6 +197,8 @@ def main():
     if a.cmd == "check-tz":
         from .tzcheck import enforce
         sys.exit(0 if enforce() else 2)
+    if a.cmd == "test-email":
+        sys.exit(test_email(a.to))
     if a.cmd == "swa-login":
         return swa_login(a.out)
     if a.cmd == "login-test":

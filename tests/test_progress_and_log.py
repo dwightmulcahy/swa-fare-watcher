@@ -173,3 +173,13 @@ def test_error_mid_run_logs_a_screenshot(worker, sent, monkeypatch, tmp_path):
     row = db.one("SELECT * FROM logs WHERE level='error' AND user_id=?", (uid,))
     assert "page died" in row["message"] and row["attachment"] == "debug/err.png"
     assert db.one("SELECT COUNT(*) FROM logs WHERE level='error'")[0] == 1  # logged once
+
+
+def test_pause_reports_when_it_ends(worker):
+    import time
+    worker.phase(1, "Pausing 12 s before the next search", until=time.time() + 12)
+    worker.running_user = 1
+    s = worker.snapshot(1)
+    assert 11 < s["until"] - time.time() <= 12
+    worker.phase(1, "searching")
+    assert worker.snapshot(1)["until"] is None

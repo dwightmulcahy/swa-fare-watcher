@@ -144,14 +144,33 @@ document.addEventListener("DOMContentLoaded", () => {
   let wasActive = false;
   let timer = null;
 
+  // A pause counts down every second between status polls (the server sends when it ends)
+  let tick = null;
+  const phaseText = (s) => {
+    if (s.state !== "running") return "waiting for the browser to be free";
+    if (s.until) {
+      const left = Math.max(0, Math.ceil(s.until - Date.now() / 1000));
+      return left > 0 ? `Pausing before the next search: ${fmtLeft(left)}` : "Starting the next search…";
+    }
+    return s.phase || "starting…";
+  };
+  const fmtLeft = (n) => (n >= 60 ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}` : `${n} s`);
+
   function render(s) {
+    clearInterval(tick);
+    if (s.state === "running" && s.until) {
+      tick = setInterval(() => {
+        const t = phaseText(s);
+        box.querySelector(".live-phase").textContent = t;
+        document.querySelectorAll(`[data-watch-status="${s.watch_id}"] .muted`).forEach((el) => { el.textContent = t; });
+      }, 1000);
+    }
     const active = s.state === "running" || s.state === "queued";
     box.hidden = !active;
     box.classList.toggle("queued", s.state === "queued");
     if (active) {
       box.querySelector(".live-state").textContent = s.state === "running" ? "Searching:" : "Queued:";
-      box.querySelector(".live-phase").textContent =
-        s.state === "running" ? (s.phase || "starting…") : "waiting for the browser to be free";
+      box.querySelector(".live-phase").textContent = phaseText(s);
       const counted = s.state === "running" && s.total && s.done;
       box.querySelector(".live-count").textContent = counted ? `search ${s.done} of ${s.total}` : "";
       box.querySelector(".live-bar span").style.width = counted ? `${Math.round((100 * s.done) / s.total)}%` : "0";
@@ -159,7 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll("[data-watch-status]").forEach((cell) => {
         if (s.state === "running" && String(s.watch_id) === cell.dataset.watchStatus) {
           cell.innerHTML = '<span class="pill">Running now</span><br><span class="muted"></span>';
-          cell.querySelector(".muted").textContent = s.phase || "";
+          cell.querySelector(".muted").textContent = phaseText(s);
         }
       });
     }

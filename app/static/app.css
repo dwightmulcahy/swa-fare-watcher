@@ -286,3 +286,4 @@ table.list.log { min-width: 760px; }
 .chip-x:hover, .chip-x:focus-visible { background: color-mix(in srgb, var(--red) 20%, transparent); }
 .date-add { display: flex; gap: .5rem; align-items: center; }
 .date-add input[type=date] { max-width: 12rem; }
+button.link.danger { color: var(--red); }
