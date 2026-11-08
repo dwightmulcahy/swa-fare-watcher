@@ -1,0 +1,7 @@
+<!doctype html><title>Low fare calendar</title>
+<body><h1>Low fare calendar</h1>
+<script>
+// like the real page: its build manifest first, then the fares
+fetch("v2/air/low-fare-calendar/manifest.json").then(() =>
+  setTimeout(() => fetch("calendar-data.json" + location.search), 300));
+</script>

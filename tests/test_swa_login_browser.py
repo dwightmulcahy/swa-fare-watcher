@@ -178,3 +178,18 @@ def test_worker_wrong_password_turns_off(site, monkeypatch, sent):
     row = db.one("SELECT * FROM logs WHERE source='signin' AND message LIKE 'Sign-in result%'")
     shot = applog.attachment_path(row["attachment"])
     assert shot is not None and shot.read_bytes()[:4] == b"\x89PNG"
+
+
+def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.swa import BrowserSearcher
+
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with BrowserSearcher(profile_key="t-cal", human=False) as b:
+        b._warmed = True
+        days = b.calendar("LIR", "HOU", "2026-11-09", 1, "USD")
+    assert days == {"2026-11-09": 481.0, "2026-11-10": 256.0, "2026-11-11": None}
+    (saved,) = (tmp_path / "debug" / "calendar").glob("*.json")
+    assert "calendar-data.json" in saved.read_text()

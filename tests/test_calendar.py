@@ -103,3 +103,11 @@ def test_worker_falls_back_when_calendar_unreadable(worker, sent):
     uid = make_user()
     make_watch(uid)
     assert worker.run_user(uid)["attempts"] == 4
+
+
+def test_best_calendar_ignores_build_manifest():
+    manifest = {"artifact": "spa-air-low-fare-calendar-v2", "created": "Tuesday, 27 October 2026 at 09:46"}
+    fares = {"days": [{"date": "2026-11-09", "lowestPrice": {"price": "481"}}]}
+    url, _, days = swa.best_calendar([(".../low-fare-calendar/manifest.json", manifest), ("/api/cal", fares)])
+    assert url == "/api/cal" and days == {"2026-11-09": 481.0}
+    assert swa.best_calendar([("m", manifest)]) is None

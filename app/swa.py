@@ -18,7 +18,6 @@ from .config import settings
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
 CALENDAR_URL = "https://www.southwest.com/air/low-fare-calendar/select-dates"
-CALENDAR_API = "low-fare-calendar"   # the calendar page's data request contains this
 SHOPPING_API = "/air-booking/page/air/booking/shopping"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -158,6 +157,19 @@ def parse_calendar(payload):
 
     walk(payload)
     return out if any(v is not None for v in out.values()) else None
+
+
+def best_calendar(payloads):
+    """(url, payload, days) for the response with the most priced days, or None.
+    payloads = [(url, parsed JSON)] in the order the page received them."""
+    best = None
+    for url, payload in payloads:
+        days = parse_calendar(payload)
+        if days:
+            n = sum(v is not None for v in days.values())
+            if best is None or n > best[0]:
+                best = (n, url, payload, days)
+    return best[1:] if best else None
 
 
 def calendar_months(dates):
@@ -727,38 +739,59 @@ class BrowserSearcher:
         if not self._warmed:
             self.warm_up()
 
-        def is_data(r):
-            return (CALENDAR_API in r.url and r.request.resource_type in ("xhr", "fetch")
-                    and "json" in (r.headers.get("content-type") or ""))
-        seen = []  # JSON requests the page made, logged if the calendar's isn't found
+        # Every JSON response the page loads; the calendar's is the one with fares by day.
+        # (Matching on the URL alone isn't enough: the app's own build manifest lives under
+        # .../low-fare-calendar too.)
+        responses = []
 
         def note(r):
-            if r.request.resource_type in ("xhr", "fetch") and len(seen) < 15:
-                seen.append(r.url.split("?")[0][:120])
+            try:
+                if (r.request.resource_type in ("xhr", "fetch")
+                        and "json" in (r.headers.get("content-type") or "") and len(responses) < 60):
+                    responses.append(r)
+            except Exception:
+                pass
         self.page.on("response", note)
+        found, checked, payloads = None, 0, []
         try:
-            with self.page.expect_response(is_data, timeout=60_000) as info:
-                self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
-            payload = info.value.json()
+            self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                while checked < len(responses):
+                    r = responses[checked]
+                    checked += 1
+                    try:
+                        payload = r.json()
+                    except Exception:
+                        continue
+                    payloads.append((r.url, payload))
+                    found = best_calendar(payloads)
+                if found and time.monotonic() > deadline - 40:   # give later responses a moment
+                    break
+                self.page.wait_for_timeout(500)
         except Exception as e:
             applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
-                        f"page {self.page.url[:120]}; requests seen: {', '.join(seen) or 'none'}",
-                        source="search", user_id=self._uid(), attachment=self.capture(tag))
+                        f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag))
             return None
         finally:
             self.page.remove_listener("response", note)
-        raw = self._save_json(tag, payload, sub="calendar")
         if self.humanize:
             try:
                 self.human.read()
             except Exception:
                 pass
-        days = parse_calendar(payload)
-        if days is None:
-            applog.warn(f"{tag}: couldn't find daily fares in the calendar data; raw data saved to {raw}. "
-                        "Falling back to searching each date.", source="search", user_id=self._uid(),
-                        attachment=self.capture(tag))
-        return days
+        if found:
+            url, payload, days = found
+            self._save_json(tag, {"url": url, "data": payload}, sub="calendar")
+            return days
+        # Nothing recognisable: keep every JSON response so the parser can be fixed from them
+        raw = self._save_json(tag + "-all", [{"url": u, "data": d} for u, d in payloads], sub="calendar")
+        applog.warn(f"{tag}: couldn't find daily fares in {len(payloads)} data response(s) "
+                    f"({', '.join(u.split('?')[0][-60:] for u, _ in payloads[:8]) or 'none'}); saved to {raw}. "
+                    "Falling back to searching each date.", source="search", user_id=self._uid(),
+                    attachment=self.capture(tag))
+        return None
 
     def capture(self, tag):
         """Screenshot what the browser shows right now, for the log. Returns the file (or None)."""
