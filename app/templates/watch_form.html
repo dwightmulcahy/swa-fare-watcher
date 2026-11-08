@@ -35,13 +35,15 @@
       <label><input type="radio" name="date_mode" value="window" {{ 'checked' if window }}> Rolling window</label>
     </div>
     <div data-mode="dates">
-      <label>Dates <input name="dates" value="{{ (w.dates or '').replace(',', ', ') }}" placeholder="2026-12-18, 2026-12-19">
-        <span class="hint">YYYY-MM-DD, separated by commas.</span></label>
+      <label>Dates <input name="dates" value="{{ (w.dates or '').replace(',', ', ') }}" placeholder="2026-12-18, 2026-12-19"
+        data-date-list data-min="{{ today_str }}">
+        <span class="hint" data-date-list-hint>YYYY-MM-DD, separated by commas.</span></label>
     </div>
     <div data-mode="window" class="row">
-      <label>From <span class="hint">days ahead</span><input name="days_from" type="number" min="0" max="365" value="{{ w.days_from if w.days_from is not none else 14 }}"></label>
-      <label>To <span class="hint">days ahead</span><input name="days_to" type="number" min="0" max="365" value="{{ w.days_to if w.days_to is not none else 45 }}"></label>
+      <label>Start <input name="window_start" type="date" min="{{ today_str }}" max="{{ 365|days_ahead }}" value="{{ (w.days_from if w.days_from is not none else 14)|days_ahead }}" data-ahead="ws"></label>
+      <label>End <input name="window_end" type="date" min="{{ today_str }}" max="{{ 365|days_ahead }}" value="{{ (w.days_to if w.days_to is not none else 45)|days_ahead }}" data-ahead="we"></label>
     </div>
+    <p class="hint" data-mode="window" data-ahead-hint data-today="{{ today_str }}">Rolls forward each day: always searches the same number of days ahead as these dates are from today.</p>
     <div class="weekdays">
       <span class="label">Only these weekdays <span class="hint">optional</span></span>
       {% for key, label in weekdays %}
@@ -61,7 +63,8 @@
       <label>At most <span class="hint">nights</span><input name="nights_max" type="number" min="0" max="60" value="{{ w.nights_max if w.nights_max is not none else 5 }}"></label>
     </div>
     <div data-when="return_mode:dates">
-      <label>Return dates <input name="ret_dates" value="{{ (w.ret_dates or '').replace(',', ', ') }}" placeholder="2026-12-26, 2026-12-27">
+      <label>Return dates <input name="ret_dates" value="{{ (w.ret_dates or '').replace(',', ', ') }}" placeholder="2026-12-26, 2026-12-27"
+        data-date-list data-min="{{ today_str }}">
         <span class="hint">YYYY-MM-DD, separated by commas. Every departure date is paired with every later return date.</span></label>
     </div>
     <div class="row">
@@ -100,10 +103,10 @@
 
   <fieldset>
     <legend>Price</legend>
-    <p class="hint">A <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip (both directions together)</span> matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
+    <p class="hint">Optional. Leave both empty to get the cheapest <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip</span> found each time it gets cheaper. With a target, a <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip (both directions together)</span> matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
     <div class="row">
-      <label>Max cash <span class="hint">USD per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
-      <label>Max points <span class="hint">per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
+      <label>Max cash <span class="hint">optional, USD per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
+      <label>Max points <span class="hint">optional, per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
       <label>Min ¢/point <input name="min_cpp" type="number" step="0.05" min="0" max="10" value="{{ w.min_cpp }}"></label>
     </div>
     <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>

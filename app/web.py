@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
 templates.env.filters["pts"] = lambda v: "—" if v is None else f"{int(v):,}"
+templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
 templates.env.filters["when"] = lambda s: (s or "")[:16].replace("T", " ") or "—"
 # Version label / About dialog: build info embedded in every page; "<" escaped so it can't close the tag
@@ -381,10 +382,19 @@ def create_app(worker=None, start_worker=True):
             if w[k] and not TIME.match(w[k]):
                 errs.append("Departure times must be HH:MM.")
         if f.get("date_mode") == "window":
-            w["days_from"] = opt_int("days_from", 0, 365)
-            w["days_to"] = opt_int("days_to", 0, 365)
+            # picked as calendar dates, stored as days ahead so the window rolls forward daily
+            for k, src in (("days_from", "window_start"), ("days_to", "window_end")):
+                if f.get(src):
+                    try:
+                        days = (dt.date.fromisoformat(str(f[src])) - dt.date.today()).days
+                    except ValueError:
+                        days = None
+                    w[k] = days if days is not None and 0 <= days <= 365 else None
+                else:
+                    w[k] = opt_int(k, 0, 365)
             if w["days_from"] is None or w["days_to"] is None or w["days_to"] < w["days_from"]:
-                errs.append("Rolling window needs 'from' and 'to' days, with 'to' ≥ 'from'.")
+                errs.append("Rolling window needs a start and end date between today and a year ahead, "
+                            "with the end on or after the start.")
         else:
             raw = [d.strip() for d in re.split(r"[,\s]+", str(f.get("dates", ""))) if d.strip()]
             try:
@@ -425,8 +435,6 @@ def create_app(worker=None, start_worker=True):
                 errs.append("No return date falls on or after an outbound date. Check the return dates or stay length.")
         else:
             w["ret_depart_after"] = w["ret_depart_before"] = None
-        if w["max_price"] is None and w["max_points"] is None:
-            errs.append("Set a max cash price, a max points price, or both.")
         return w, errs
 
     def latest_legs(wid, day=None):

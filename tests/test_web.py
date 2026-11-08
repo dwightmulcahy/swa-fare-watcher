@@ -86,7 +86,8 @@ def test_validation_errors(client):
     token = admin_client(client)
     r = client.post("/watches", data=watch_form(token, origin="AUSTIN", max_price="", dates="12/18"))
     assert r.status_code == 400
-    assert "3-letter airport code" in r.text and "YYYY-MM-DD" in r.text and "max cash price" in r.text
+    assert "3-letter airport code" in r.text and "YYYY-MM-DD" in r.text
+    assert "max cash price" not in r.text  # price targets are optional now
 
 
 def test_limits_enforced(client):

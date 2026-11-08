@@ -44,7 +44,7 @@
       <br><span class="muted">{{ est[w.id] }} searches/run</span></td>
     <td class="small">{% if w.max_stops == 0 %}Nonstop{% elif w.max_stops is not none %}≤ {{ w.max_stops }} stop{{ '' if w.max_stops == 1 else 's' }}{% else %}Any stops{% endif %}
       {% if w.max_duration_min %}· ≤ {{ w.max_duration_min|dur }}{% endif %}
-      <br>{% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %}
+      <br>{% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %}{% if not w.max_price and not w.max_points %}Cheapest fare{% endif %}
       <span class="muted">· ≥ {{ w.min_cpp }}¢/pt</span></td>
     <td class="num">{% if b and b.n %}
         {% if b.cash or b.points %}<span class="price">{{ b.cash|money }}</span><br><span class="muted small">{{ b.points|pts }} pts</span>

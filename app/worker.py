@@ -287,6 +287,8 @@ class Worker:
                                 note = "No date on the calendar under your target"
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
                         multi = n_routes > 1
+                        best = swa.best_only(w)
+                        best_cands = []   # no target: only the run's cheapest flight is reported
                         for leg, date in dates:
                             ts = db.now()   # one timestamp per date, shared by its airport pairs
                             for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
@@ -336,6 +338,9 @@ class Worker:
                                             continue
                                         w_m += 1
                                         n_match += 1
+                                        if best:
+                                            best_cands.append((r, date, frm, to))
+                                            continue
                                         key = f"{date}|{frm}-{to}|{r['key']}" if multi else f"{date}|{r['key']}"
                                         if _is_new_low(con, w["id"], key, r):
                                             hits.append({
@@ -354,14 +359,26 @@ class Worker:
                                             user_id=user_id, watch_id=w["id"], source="run")
                             if limited:
                                 break
+                        if best_cands:
+                            r, date, frm, to = min(best_cands, key=lambda c: swa.cheapest_first(c[0]))
+                            with db.tx() as con:
+                                if _is_new_low(con, w["id"], "best", r):
+                                    hits.append({
+                                        "watch_id": w["id"], "key": "best", "row": r, "date": date,
+                                        "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
+                                        "url": swa.booking_url(frm, to, date, w["adults"]),
+                                    })
                         if rt:
                             trips = swa.roundtrips(w, legs)
+                            best_trip = next((t for t in trips if t["matched"]), None) if best else None
                             with db.tx() as con:
                                 for t in trips:
                                     if not t["matched"]:
                                         continue
                                     w_m += 1
-                                    key = f"rt|{t['out_date']}|{t['ret_date']}"
+                                    if best and t is not best_trip:
+                                        continue
+                                    key = "rt|best" if best else f"rt|{t['out_date']}|{t['ret_date']}"
                                     if _is_new_low(con, w["id"], key, {"cash": t["cash"], "points": t["points"]}):
                                         hits.append({
                                             "watch_id": w["id"], "key": key, "trip": t, "date": t["out_date"],

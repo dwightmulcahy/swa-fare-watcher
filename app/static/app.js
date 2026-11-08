@@ -44,6 +44,90 @@ document.addEventListener("DOMContentLoaded", () => {
     input.form && input.form.addEventListener("submit", () => { input.type = "password"; });
   });
 
+  // Several dates: a date picker that adds each picked day as a removable chip. The original
+  // comma-separated field stays as the hidden value that's submitted.
+  document.querySelectorAll("input[data-date-list]").forEach((field) => {
+    const label = field.closest("label");
+    const box = document.createElement("div");
+    box.className = "date-list";
+    const chips = document.createElement("ul");
+    chips.className = "chips";
+    chips.setAttribute("aria-live", "polite");
+    const picker = document.createElement("input");
+    picker.type = "date";
+    if (field.dataset.min) picker.min = field.dataset.min;
+    picker.setAttribute("aria-label", "Add a date");
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "btn small";
+    add.textContent = "Add";
+    const row = document.createElement("div");
+    row.className = "date-add";
+    row.append(picker, add);
+    box.append(chips, row);
+    label.after(box);
+    field.type = "hidden";
+    const hint = label.querySelector(".hint");
+    if (hint) hint.textContent = hint.textContent.replace("YYYY-MM-DD, separated by commas.", "Pick a date to add it; add as many as you like.");
+
+    const read = () => field.value.split(/[\s,]+/).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    const thisYear = String(new Date().getFullYear());
+    const opts = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
+    const short = new Intl.DateTimeFormat(undefined, opts);
+    const long = new Intl.DateTimeFormat(undefined, { ...opts, year: "numeric" });
+    const fmt = { format: (dte) => (dte.toISOString().startsWith(thisYear) ? short : long).format(dte) };
+    const draw = () => {
+      const days = [...new Set(read())].sort();
+      field.value = days.join(", ");
+      chips.replaceChildren(...days.map((d) => {
+        const li = document.createElement("li");
+        li.className = "chip date-chip";
+        li.append(fmt.format(new Date(d + "T00:00:00Z")) + " ");
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "chip-x";
+        x.textContent = "×";
+        x.setAttribute("aria-label", `Remove ${d}`);
+        x.addEventListener("click", () => { field.value = read().filter((v) => v !== d).join(","); draw(); picker.focus(); });
+        li.append(x);
+        return li;
+      }));
+      if (!days.length) {
+        const li = document.createElement("li");
+        li.className = "muted small";
+        li.textContent = "No dates yet";
+        chips.append(li);
+      }
+    };
+    const addPicked = () => {
+      if (!picker.value) return;
+      field.value = [...read(), picker.value].join(",");
+      picker.value = "";
+      draw();
+    };
+    picker.addEventListener("change", addPicked);
+    add.addEventListener("click", addPicked);
+    picker.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addPicked(); } });
+    draw();
+  });
+
+  // Rolling window: show how far ahead the picked dates are, since that's what's kept
+  const aheadHint = document.querySelector("[data-ahead-hint]");
+  if (aheadHint) {
+    const today = new Date(aheadHint.dataset.today + "T00:00:00Z");
+    const ws = document.querySelector('[data-ahead="ws"]'), we = document.querySelector('[data-ahead="we"]');
+    const days = (el) => el.value ? Math.round((new Date(el.value + "T00:00:00Z") - today) / 864e5) : null;
+    const show = () => {
+      const a = days(ws), b = days(we);
+      aheadHint.textContent = (a === null || b === null) ? "Pick a start and end date."
+        : b < a ? "The end date must be on or after the start date."
+        : `Searches ${a}–${b} days ahead, rolling forward each day (${b - a + 1} departure date${b === a ? "" : "s"}).`;
+    };
+    ws.addEventListener("input", show);
+    we.addEventListener("input", show);
+    show();
+  }
+
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const text = document.getElementById(btn.dataset.copy).textContent.trim();

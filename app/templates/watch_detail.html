@@ -28,7 +28,7 @@
     {% if rt and (w.ret_depart_after or w.ret_depart_before) %} · back departs {{ w.ret_depart_after or '00:00' }}–{{ w.ret_depart_before or '23:59' }}{% endif %}
     {% if rt %}<br>{% if w.ret_dates %}Return on listed dates{% else %}Stay {{ w.nights_min }}–{{ w.nights_max }} nights{% endif %}{% if w.mix_payment %} · cash/points per leg{% endif %}{% if multi and w.same_airports %} · same airports back{% endif %}{% endif %}</span></div>
   <div class="stat"><span class="label">Price target</span><span class="value small">
-    {% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %} · ≥ {{ w.min_cpp }}¢/pt</span></div>
+    {% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %}{% if not w.max_price and not w.max_points %}Cheapest fare{% endif %} · ≥ {{ w.min_cpp }}¢/pt</span></div>
   <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
 </div>
 

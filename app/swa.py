@@ -425,6 +425,16 @@ def passes_leg(r, w, leg="out"):
     return True
 
 
+def best_only(w):
+    """No price target: report just the cheapest fare found, whenever it drops."""
+    return _get(w, "max_price") is None and _get(w, "max_points") is None
+
+
+def cheapest_first(r):
+    return (r["cash"] if r["cash"] is not None else float("inf"),
+            r["points"] if r["points"] is not None else float("inf"))
+
+
 def price_ok(cash, points, cpp, w):
     max_price = w["max_price"] if w["max_price"] is not None else float("inf")
     max_points = w["max_points"] if w["max_points"] is not None else float("inf")
