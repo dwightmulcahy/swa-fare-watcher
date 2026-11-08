@@ -189,6 +189,10 @@ LAUNCH_ARGS = [
     "--password-store=basic",
     "--lang=en-US",
     "--disk-cache-size=67108864",
+    # Official Chrome shows an "unsupported command-line flag" warning bar for --no-sandbox and
+    # --disable-blink-features; the bar makes innerHeight ~55 px smaller than a normal window,
+    # which a page can measure. --test-type suppresses the bar.
+    "--test-type",
 ]
 # Playwright adds these by default; real Chrome never runs with them, and each one changes
 # something a page can observe (automation flag, popup blocking, back/forward cache, colour
@@ -465,8 +469,6 @@ def selftest(verbose=True):
             inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight],
             screen: [screen.width, screen.height], tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
             gl: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
-            fonts: ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia',
-                    'DejaVu Sans', 'Liberation Sans', 'Noto Sans'].filter(f => document.fonts.check(`12px "${f}"`)),
             automationGlobals: Object.keys(window).filter(k => /playwright|__pw|cdc_|puppeteer/i.test(k))};
         }""")
         problems = []
@@ -491,14 +493,17 @@ def selftest(verbose=True):
             problems.append(f"navigator.languages {info['languages']} (normal Chrome: ['en-US', 'en'])")
         if ev["cdp"]:
             problems.append("DevTools-protocol console leak detected")
+        chrome_ui = info["outer"][1] - info["inner"][1]
+        if chrome_ui > 120:  # tabs + toolbar are ~80-95 px; more means a warning bar is showing
+            problems.append(f"browser UI is {chrome_ui} px tall: a warning/info bar is showing")
         if info["automationGlobals"]:
             problems.append(f"automation globals {info['automationGlobals']}")
         if verbose:
             print(f"browser: {b.channel}  ua: {info['ua']}")
             print(f"brands: {info['brands']}  languages: {info['languages']}  tz: {info['tz']}")
-            print(f"window: inner {info['inner']} outer {info['outer']} screen {info['screen']}")
+            print(f"window: inner {info['inner']} outer {info['outer']} screen {info['screen']} "
+                  f"(browser UI {info['outer'][1] - info['inner'][1]} px)")
             print(f"webgl: {info['gl']}")
-            print(f"fonts: {len(info['fonts'])}/9 {info['fonts']}")
             print(f"input: key hold median {dwell:.0f} ms, shift presses {ev['shift']}, wheel steps "
                   f"{sorted(set(ev['wheels']))}, mouse moves {ev['moves']}, clicks {ev['trustedClicks']}, "
                   f"cdp leak {ev['cdp']}")
