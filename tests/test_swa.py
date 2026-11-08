@@ -115,3 +115,15 @@ def test_flight_numbers_as_list_and_iso_times():
 def test_flight_numbers_other_shapes():
     assert swa._text([{"number": "12"}, {"number": 34}]) == "12/34"
     assert swa._text(4321) == "4321" and swa._text(None) == ""
+
+
+def test_booking_links_carry_the_full_search_query():
+    from urllib.parse import parse_qs, urlsplit
+    q = {k: v[0] for k, v in parse_qs(urlsplit(swa.booking_url("SJO", "HOU", "2026-11-09", 2)).query,
+                                         keep_blank_values=True).items()}
+    assert q == {k: str(v) for k, v in swa.search_query("SJO", "HOU", "2026-11-09", 2).items()}
+    for k in ("adultsCount", "passengerType", "fareType", "departureTimeOfDay", "returnDate", "promoCode"):
+        assert k in q
+    assert (q["tripType"], q["returnDate"], q["adultsCount"]) == ("oneway", "", "2")
+    rt = parse_qs(urlsplit(swa.booking_url("SJO", "HOU", "2026-11-09", 1, "2026-11-12")).query)
+    assert rt["tripType"] == ["roundtrip"] and rt["returnDate"] == ["2026-11-12"]
