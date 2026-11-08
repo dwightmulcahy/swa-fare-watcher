@@ -663,6 +663,14 @@ def start_xvfb(timeout=10):
     if not num.isdigit():
         proc.kill()
         raise RuntimeError("Xvfb did not start")
+    # make sure it's really accepting connections (a display number just released by another
+    # Xvfb can briefly look free while its socket is still going away)
+    sock = Path(f"/tmp/.X11-unix/X{num}")
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and proc.poll() is None and not sock.exists():
+        time.sleep(0.05)
+    if proc.poll() is not None:
+        raise RuntimeError("Xvfb exited right after starting")
     return proc, f":{num}"
 
 
@@ -734,6 +742,8 @@ class BrowserSearcher:
                     if "is not found" in str(e) or "Executable doesn't exist" in str(e):
                         break  # not installed: retrying won't help
                     time.sleep(1.5 * (attempt + 1))
+                    if self._xvfb and ("Missing X server" in str(e) or self._xvfb.poll() is not None):
+                        self._restart_xvfb(kw)
                     # a Chrome that was still closing can leave the profile locked
                     for lock in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
                         try:
@@ -750,6 +760,15 @@ class BrowserSearcher:
             return ctx
         self.channel = "chromium"
         return self._pw.chromium.launch_persistent_context(**kw)
+
+    def _restart_xvfb(self, kw):
+        try:
+            self._xvfb.kill()
+            self._xvfb.wait(timeout=5)
+        except Exception:
+            pass
+        self._xvfb, display = start_xvfb()
+        kw.setdefault("env", {})["DISPLAY"] = display
 
     def __exit__(self, *exc):
         try:
