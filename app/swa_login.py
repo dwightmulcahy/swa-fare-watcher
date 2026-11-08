@@ -78,8 +78,9 @@ RESULTS = {
 
 
 class LoginResult:
-    def __init__(self, status, detail="", name=None):
+    def __init__(self, status, detail="", name=None, screenshot=None):
         self.status, self.detail, self.name = status, detail, name
+        self.screenshot = screenshot  # what the page looked like when it went wrong
 
     @property
     def ok(self):
@@ -212,6 +213,7 @@ class Recorder:
 
     def __init__(self, page, out_dir, log=print):
         self.page, self.dir, self.n, self._log = page, out_dir, 0, log
+        self.last = None  # path of the most recent screenshot
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def log(self, msg):
@@ -226,12 +228,13 @@ class Recorder:
         for attempt in range(3):  # a just-opened window may not have painted yet
             try:
                 self.page.screenshot(path=str(path), full_page=False, timeout=10_000)
-                break
+                self.last = path
+                return path
             except Exception as e:
                 if attempt == 2:
                     self.log(f"  (screenshot failed: {str(e).splitlines()[0][:150]})")
                 time.sleep(1)
-        return path
+        return None
 
 
 def watch_network(page, rec):

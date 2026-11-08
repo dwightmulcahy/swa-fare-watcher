@@ -95,8 +95,21 @@ def combine(cash, points):
 
 
 # ---------- rules ----------
+def _get(w, key, default=None):
+    """Watch column, tolerating dicts/rows created before round trips existed."""
+    try:
+        v = w[key]
+    except (KeyError, IndexError):
+        return default
+    return default if v is None else v
+
+
+def is_roundtrip(w):
+    return _get(w, "trip_type", "oneway") == "roundtrip"
+
+
 def watch_dates(w, today=None):
-    """Dates a watch searches. `w` is a mapping with watch columns."""
+    """Outbound dates a watch searches. `w` is a mapping with watch columns."""
     today = today or dt.date.today()
     if w["dates"]:
         ds = sorted({dt.date.fromisoformat(d.strip()) for d in w["dates"].split(",") if d.strip()})
@@ -109,28 +122,74 @@ def watch_dates(w, today=None):
     return [d.isoformat() for d in ds if d >= today][: settings.max_dates_per_watch]
 
 
+def return_dates(w, today=None):
+    """Return-leg dates for a round trip: the listed return dates, or every outbound date plus
+    each allowed stay length (nights_min..nights_max)."""
+    if not is_roundtrip(w):
+        return []
+    today = today or dt.date.today()
+    explicit = _get(w, "ret_dates", "")
+    if explicit:
+        ds = {dt.date.fromisoformat(d.strip()) for d in explicit.split(",") if d.strip()}
+    else:
+        lo, hi = _get(w, "nights_min", 0), _get(w, "nights_max", 0)
+        ds = {dt.date.fromisoformat(o) + dt.timedelta(days=n)
+              for o in watch_dates(w, today) for n in range(lo, hi + 1)}
+    return [d.isoformat() for d in sorted(ds) if d >= today][: settings.max_dates_per_watch]
+
+
+def trip_pairs(w, today=None):
+    """(outbound date, return date) combinations a round trip considers."""
+    outs, rets = watch_dates(w, today), return_dates(w, today)
+    explicit = bool(_get(w, "ret_dates", ""))
+    lo, hi = _get(w, "nights_min", 0), _get(w, "nights_max", 365)
+    pairs = []
+    for o in outs:
+        for r in rets:
+            nights = (dt.date.fromisoformat(r) - dt.date.fromisoformat(o)).days
+            if nights >= 0 and (explicit or lo <= nights <= hi):
+                pairs.append((o, r))
+    return pairs
+
+
+def search_legs(w, today=None):
+    """Every (leg, date) a run searches; each costs 2 searches (cash + points)."""
+    legs = [("out", d) for d in watch_dates(w, today)]
+    if is_roundtrip(w):
+        pair_dates = {r for _, r in trip_pairs(w, today)}
+        legs += [("ret", d) for d in return_dates(w, today) if d in pair_dates]
+    return legs
+
+
 def searches_per_run(w, today=None) -> int:
-    return 2 * len(watch_dates(w, today))
+    return 2 * len(search_legs(w, today))
 
 
-def passes(r, w):
+def passes_leg(r, w, leg="out"):
+    """Flight filters (stops, duration, departure window) for one leg; no price check."""
     if w["max_stops"] is not None and r["stops"] > w["max_stops"]:
         return False
     if w["max_duration_min"] and r["duration"] > w["max_duration_min"]:
         return False
-    if w["depart_after"] and r["depart"] < w["depart_after"]:
+    after = w["depart_after"] if leg == "out" else _get(w, "ret_depart_after")
+    before = w["depart_before"] if leg == "out" else _get(w, "ret_depart_before")
+    if after and r["depart"] < after:
         return False
-    if w["depart_before"] and r["depart"] > w["depart_before"]:
+    if before and r["depart"] > before:
         return False
+    return True
+
+
+def price_ok(cash, points, cpp, w):
     max_price = w["max_price"] if w["max_price"] is not None else float("inf")
     max_points = w["max_points"] if w["max_points"] is not None else float("inf")
-    cash_ok = r["cash"] is not None and r["cash"] <= max_price
-    pts_ok = (
-        r["points"] is not None
-        and r["points"] <= max_points
-        and (r["cpp"] is None or r["cpp"] >= (w["min_cpp"] or 0))
-    )
+    cash_ok = cash is not None and cash <= max_price
+    pts_ok = points is not None and points <= max_points and (cpp is None or cpp >= (w["min_cpp"] or 0))
     return cash_ok or pts_ok
+
+
+def passes(r, w, leg="out"):
+    return passes_leg(r, w, leg) and price_ok(r["cash"], r["points"], r["cpp"], w)
 
 
 def recommend(r, w):
@@ -139,11 +198,79 @@ def recommend(r, w):
     return "Points" if r["cpp"] >= (w["min_cpp"] or 0) else "Cash"
 
 
-def booking_url(origin, dest, date, adults=1):
-    return f"{SEARCH_URL}?" + urlencode({
-        "originationAirportCode": origin, "destinationAirportCode": dest,
-        "departureDate": date, "tripType": "oneway", "adultPassengersCount": adults,
-    })
+def _cpp(cash, points, taxes):
+    return round((cash - (taxes or 0)) / points * 100, 2) if cash and points else None
+
+
+def roundtrips(w, legs):
+    """Best round trips from per-leg results. legs = {"out": {date: [flight rows]}, "ret": {...}}.
+
+    Southwest prices each direction on its own, so a round trip costs exactly the sum of two
+    one-ways: for each date pair the cheapest round trip is the cheapest eligible flight each way.
+    Returns one dict per date pair, cheapest cash first:
+      cash: total with the cheapest cash flight each way (out_cash / ret_cash rows)
+      points, taxes, cpp: the same with the cheapest points flight each way
+      mix: when mix_payment is on, the best payment per leg (points where that leg's ¢/pt
+           clears the minimum, else cash), e.g. cash out and points back
+    """
+    min_cpp = w["min_cpp"] or 0
+    out = []
+    for o, r in trip_pairs(w):
+        o_rows = [x for x in legs.get("out", {}).get(o, []) if passes_leg(x, w, "out")]
+        r_rows = [x for x in legs.get("ret", {}).get(r, []) if passes_leg(x, w, "ret")]
+        if not o_rows or not r_rows:
+            continue
+
+        def cheapest(rows, field):
+            rows = [x for x in rows if x[field] is not None]
+            return min(rows, key=lambda x: x[field]) if rows else None
+
+        oc, rc = cheapest(o_rows, "cash"), cheapest(r_rows, "cash")
+        op, rp = cheapest(o_rows, "points"), cheapest(r_rows, "points")
+        cash = oc["cash"] + rc["cash"] if oc and rc else None
+        points = op["points"] + rp["points"] if op and rp else None
+        taxes = (op["points_taxes"] or 0) + (rp["points_taxes"] or 0) if op and rp else None
+        trip = {
+            "out_date": o, "ret_date": r,
+            "nights": (dt.date.fromisoformat(r) - dt.date.fromisoformat(o)).days,
+            "out_cash": oc, "ret_cash": rc, "out_points": op, "ret_points": rp,
+            "cash": cash, "points": points, "taxes": taxes, "cpp": _cpp(cash, points, taxes),
+        }
+        mix = []
+        for leg, c, pt in (("out", oc, op), ("ret", rc, rp)):
+            leg_cpp = _cpp(c["cash"], pt["points"], pt["points_taxes"]) if c and pt else None
+            use_points = pt is not None and (c is None or (leg_cpp is not None and leg_cpp >= min_cpp))
+            mix.append({"leg": leg, "pay": "points" if use_points else "cash",
+                        "flight": pt if use_points else c, "cpp": leg_cpp})
+        trip["mix"] = mix
+        trip["mix_cash"] = sum(m["flight"]["cash"] for m in mix if m["pay"] == "cash" and m["flight"])
+        trip["mix_points"] = sum(m["flight"]["points"] for m in mix if m["pay"] == "points" and m["flight"])
+        trip["mix_taxes"] = sum(m["flight"]["points_taxes"] or 0 for m in mix if m["pay"] == "points" and m["flight"])
+        trip["use"] = use_label(trip, w)
+        trip["matched"] = price_ok(cash, points, trip["cpp"], w)
+        out.append(trip)
+    return sorted(out, key=lambda t: (t["cash"] if t["cash"] is not None else 1e9,
+                                      t["points"] if t["points"] is not None else 1e9))
+
+
+def use_label(trip, w):
+    """How to pay: whole trip in cash or points, or, with mix_payment, per leg."""
+    if _get(w, "mix_payment", 1):
+        pays = [m["pay"] for m in trip["mix"]]
+        if pays[0] != pays[1]:
+            return f"{pays[0].capitalize()} out, {pays[1]} back"
+        return pays[0].capitalize()
+    if trip["cpp"] is None:
+        return "Cash" if trip["cash"] is not None else "Points"
+    return "Points" if trip["cpp"] >= (w["min_cpp"] or 0) else "Cash"
+
+
+def booking_url(origin, dest, date, adults=1, return_date=None):
+    q = {"originationAirportCode": origin, "destinationAirportCode": dest,
+         "departureDate": date, "tripType": "oneway", "adultPassengersCount": adults}
+    if return_date:
+        q.update(tripType="roundtrip", returnDate=return_date)
+    return f"{SEARCH_URL}?" + urlencode(q)
 
 
 # ---------- Southwest session import ----------
@@ -356,7 +483,7 @@ class BrowserSearcher:
             self.human.read(self.human.rng.uniform(3, 7))
         except Exception as e:
             applog.warn(f"Home page visit failed ({e.__class__.__name__}: {str(e).splitlines()[0][:150]})",
-                        source="browser", user_id=self._uid())
+                        source="browser", user_id=self._uid(), attachment=self.capture("home-failed"))
 
     def ensure_signed_in(self, username, password, allowed, code_provider=None, log=None):
         """Open the home page (this doubles as the warm-up). If the session has lapsed and an
@@ -373,6 +500,7 @@ class BrowserSearcher:
         try:
             blocked = swa_login.open_home(self.page, self.human, rec, settings.home_url)
             if blocked:
+                blocked.screenshot = rec.last
                 return blocked
             if swa_login.is_signed_in(self.page):
                 rec.log("Session still valid")
@@ -381,12 +509,15 @@ class BrowserSearcher:
             if not allowed:
                 rec.log("Signed out, but no sign-in attempt allowed now")
                 return swa_login.LoginResult("skipped", "signed out; attempt limit reached")
-            return swa_login.login(self.page, self.human, username, password, rec,
-                                   code_provider=code_provider, home_url=settings.home_url,
-                                   home_opened=True)
+            res = swa_login.login(self.page, self.human, username, password, rec,
+                                  code_provider=code_provider, home_url=settings.home_url,
+                                  home_opened=True)
+            if not res.ok:
+                res.screenshot = rec.last
+            return res
         except Exception as e:
-            rec.shot("exception")
-            return swa_login.LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}")
+            return swa_login.LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}",
+                                         screenshot=rec.shot("exception"))
 
     def search(self, origin, dest, date, adults, fare_type):
         q = {
@@ -408,8 +539,8 @@ class BrowserSearcher:
             payload = info.value.json()
         except Exception as e:
             applog.warn(f"{tag}: no fare data ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
-                        f"page {self.page.url[:120]}", source="search", user_id=self._uid())
-            self._dump(tag)
+                        f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag))
             return None
         if self.humanize:
             try:
@@ -418,22 +549,31 @@ class BrowserSearcher:
                 pass
         flights = parse_flights(payload)
         if flights is None:
-            applog.warn(f"{tag}: unrecognized response shape; saved to debug/", source="search", user_id=self._uid())
-            self._dump(tag, payload)
+            self._save_json(tag, payload)
+            applog.warn(f"{tag}: Southwest's fare data has a shape the parser doesn't know; raw JSON saved "
+                        "to debug/", source="search", user_id=self._uid(), attachment=self.capture(tag))
         return flights
 
     def _uid(self):
         return self.profile_key if isinstance(self.profile_key, int) else None
 
-    def _dump(self, tag, payload=None):
-        d = settings.debug_dir
-        d.mkdir(parents=True, exist_ok=True)
-        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    def capture(self, tag):
+        """Screenshot what the browser shows right now, for the log. Returns the file (or None)."""
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        d = settings.debug_dir / "shots" / dt.date.today().isoformat()
         try:
-            if payload is not None:
-                (d / f"{stamp}-{tag}.json").write_text(json.dumps(payload, indent=2))
-            else:
-                self.page.screenshot(path=str(d / f"{stamp}-{tag}.png"), full_page=True)
+            d.mkdir(parents=True, exist_ok=True)
+            path = d / f"{stamp}-{''.join(c if c.isalnum() or c in '-_' else '-' for c in tag)[:60]}.png"
+            self.page.screenshot(path=str(path), full_page=False, timeout=10_000)
+            return path
+        except Exception:
+            return None
+
+    def _save_json(self, tag, payload):
+        d = settings.debug_dir
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{dt.datetime.now():%Y%m%d-%H%M%S}-{tag}.json").write_text(json.dumps(payload, indent=2))
         except Exception:
             pass
 

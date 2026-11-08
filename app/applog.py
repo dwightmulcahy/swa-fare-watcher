@@ -8,6 +8,7 @@ import logging
 import sys
 import threading
 import traceback
+from pathlib import Path
 
 from . import db
 
@@ -18,8 +19,32 @@ _count = 0
 _lock = threading.Lock()
 
 
-def log(message, level="info", user_id=None, watch_id=None, source="app", exc=False):
-    """Record one event. exc=True appends the current exception's traceback."""
+def _rel(path):
+    """Store attachments relative to the data directory (so the volume can move)."""
+    if not path:
+        return None
+    from .config import settings
+    try:
+        return str(Path(path).resolve().relative_to(settings.data_dir.resolve()))
+    except ValueError:
+        return None
+
+
+def attachment_path(rel):
+    """Absolute path of a stored attachment, refusing anything outside the data directory."""
+    from .config import settings
+    if not rel:
+        return None
+    root = settings.data_dir.resolve()
+    p = (root / rel).resolve()
+    if root not in p.parents or not p.is_file():
+        return None
+    return p
+
+
+def log(message, level="info", user_id=None, watch_id=None, source="app", exc=False, attachment=None):
+    """Record one event. exc=True appends the current exception's traceback; attachment is a
+    screenshot of what the browser showed."""
     global _count
     level = level if level in LEVELS else "info"
     text = str(message)
@@ -28,11 +53,13 @@ def log(message, level="info", user_id=None, watch_id=None, source="app", exc=Fa
         if tb and tb.strip() != "NoneType: None":
             text = f"{text}\n{tb.rstrip()}"
     who = f" user={user_id}" if user_id is not None else ""
-    print(f"[{source}] {level.upper()}{who}: {text}", file=sys.stderr, flush=True)
+    rel = _rel(attachment)
+    shot = f" [screenshot: {rel}]" if rel else ""
+    print(f"[{source}] {level.upper()}{who}: {text}{shot}", file=sys.stderr, flush=True)
     try:
         with db.tx() as con:
-            con.execute("INSERT INTO logs(ts, level, source, user_id, watch_id, message) VALUES (?,?,?,?,?,?)",
-                        (db.now(), level, source, user_id, watch_id, text[:8000]))
+            con.execute("INSERT INTO logs(ts, level, source, user_id, watch_id, message, attachment)"
+                        " VALUES (?,?,?,?,?,?,?)", (db.now(), level, source, user_id, watch_id, text[:8000], rel))
         with _lock:
             _count += 1
             prune = _count % 500 == 1
@@ -43,10 +70,23 @@ def log(message, level="info", user_id=None, watch_id=None, source="app", exc=Fa
 
 
 def _prune():
+    from .config import settings
     cutoff = (dt.datetime.now() - dt.timedelta(days=RETENTION_DAYS)).isoformat(timespec="seconds")
     with db.tx() as con:
         con.execute("DELETE FROM logs WHERE ts < ?", (cutoff,))
         con.execute("DELETE FROM logs WHERE id <= (SELECT MAX(id) FROM logs) - ?", (MAX_ROWS,))
+        keep = {r[0] for r in con.execute("SELECT attachment FROM logs WHERE attachment IS NOT NULL")}
+    # screenshots and sign-in recordings older than the log retention, unless still referenced
+    old = dt.date.today() - dt.timedelta(days=RETENTION_DAYS)
+    for folder in (settings.debug_dir / "shots", settings.debug_dir / "signin"):
+        if not folder.is_dir():
+            continue
+        for f in folder.rglob("*"):
+            try:
+                if f.is_file() and dt.date.fromtimestamp(f.stat().st_mtime) < old and _rel(f) not in keep:
+                    f.unlink()
+            except OSError:
+                pass
 
 
 def info(msg, **kw):

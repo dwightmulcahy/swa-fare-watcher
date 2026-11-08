@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS logs(
   source TEXT NOT NULL,
   user_id INTEGER,
   watch_id INTEGER,
-  message TEXT NOT NULL
+  message TEXT NOT NULL,
+  attachment TEXT
 );
 CREATE INDEX IF NOT EXISTS logs_user ON logs(user_id, id);
 CREATE TABLE IF NOT EXISTS runs(
@@ -162,6 +163,21 @@ MIGRATIONS = {
         "auto_login_day": "TEXT",                # day of the attempt counter below
         "auto_login_attempts": "INTEGER NOT NULL DEFAULT 0",
         "auto_login_failures": "INTEGER NOT NULL DEFAULT 0",   # consecutive
+    },
+    "logs": {
+        "attachment": "TEXT",                    # screenshot, relative to the data directory
+    },
+    "watches": {
+        "trip_type": "TEXT NOT NULL DEFAULT 'oneway'",   # oneway | roundtrip
+        "ret_dates": "TEXT",                     # explicit return dates, or ...
+        "nights_min": "INTEGER",                 # ... stay length range after each outbound date
+        "nights_max": "INTEGER",
+        "ret_depart_after": "TEXT",
+        "ret_depart_before": "TEXT",
+        "mix_payment": "INTEGER NOT NULL DEFAULT 1",     # pick cash or points per leg
+    },
+    "fares": {
+        "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret
     },
 }
 

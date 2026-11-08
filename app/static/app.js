@@ -15,6 +15,18 @@ document.addEventListener("DOMContentLoaded", () => {
   radios.forEach((r) => r.addEventListener("change", sync));
   if (radios.length) sync();
 
+  // data-when="radioName:value" shows an element only while that radio choice is selected
+  const whens = document.querySelectorAll("[data-when]");
+  const syncWhen = () => whens.forEach((el) => {
+    const [name, value] = el.dataset.when.split(":");
+    const picked = document.querySelector(`input[name="${name}"]:checked`);
+    el.hidden = !picked || picked.value !== value;
+  });
+  if (whens.length) {
+    document.addEventListener("change", (e) => { if (e.target.type === "radio") syncWhen(); });
+    syncWhen();
+  }
+
   // Show/hide a password field. The saved password is never sent to the page, so this only
   // reveals what's being typed now.
   document.querySelectorAll("[data-reveal]").forEach((btn) => {
@@ -119,6 +131,13 @@ document.addEventListener("DOMContentLoaded", () => {
                Object.assign(document.createElement("pre"), { textContent: lines.slice(1).join("\n") }));
       msg.append(d);
     } else msg.textContent = r.message;
+    if (r.shot_url) {
+      const d = Object.assign(document.createElement("details"), { className: "shot" });
+      const a = Object.assign(document.createElement("a"), { href: r.shot_url, target: "_blank", rel: "noopener" });
+      a.append(Object.assign(document.createElement("img"), { src: r.shot_url, alt: "What the browser showed", loading: "lazy" }));
+      d.append(Object.assign(document.createElement("summary"), { textContent: "Screenshot" }), a);
+      msg.append(d);
+    }
     tr.append(msg);
     return tr;
   }

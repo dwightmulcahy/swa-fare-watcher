@@ -34,11 +34,13 @@
   <tbody>
   {% for w in watches %}{% set b = best[w.id] %}
   <tr class="{{ '' if w.active else 'paused' }}">
-    <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin }} → {{ w.destination }}</span>
+    <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin }} {{ '⇄' if w.trip_type == 'roundtrip' else '→' }} {{ w.destination }}</span>
+      {% if w.trip_type == 'roundtrip' %}<span class="pill trip">Round trip</span>{% endif %}
       {% if not w.active %}<span class="pill">Paused</span>{% endif %}</td>
     <td class="small">{% if w.dates %}{{ w.dates.split(',')|length }} date(s)<br><span class="muted">{{ w.dates.split(',')[0] }}{% if w.dates.split(',')|length > 1 %} … {{ w.dates.split(',')[-1] }}{% endif %}</span>
       {% else %}Next {{ w.days_from }}–{{ w.days_to }} days{% endif %}
       {% if w.weekdays %}<br><span class="muted">{{ w.weekdays.replace(',', ', ')|title }}</span>{% endif %}
+      {% if w.trip_type == 'roundtrip' %}<br><span class="muted">{% if w.ret_dates %}back on {{ w.ret_dates.split(',')|length }} date(s){% else %}stay {{ w.nights_min }}–{{ w.nights_max }} nights{% endif %}</span>{% endif %}
       <br><span class="muted">{{ est[w.id] }} searches/run</span></td>
     <td class="small">{% if w.max_stops == 0 %}Nonstop{% elif w.max_stops is not none %}≤ {{ w.max_stops }} stop{{ '' if w.max_stops == 1 else 's' }}{% else %}Any stops{% endif %}
       {% if w.max_duration_min %}· ≤ {{ w.max_duration_min|dur }}{% endif %}

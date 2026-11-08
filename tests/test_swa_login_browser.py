@@ -173,3 +173,8 @@ def test_worker_wrong_password_turns_off(site, monkeypatch, sent):
     w = _worker(site, "ok", monkeypatch)
     assert w.run_user(uid, signin_only=True)["signin"] == "bad_credentials"
     assert db.one("SELECT auto_login FROM users WHERE id=?", (uid,))[0] == 0
+    # the failed sign-in is logged with a real screenshot of the page
+    from app import applog
+    row = db.one("SELECT * FROM logs WHERE source='signin' AND message LIKE 'Sign-in result%'")
+    shot = applog.attachment_path(row["attachment"])
+    assert shot is not None and shot.read_bytes()[:4] == b"\x89PNG"

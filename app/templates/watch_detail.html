@@ -6,7 +6,7 @@
 <div class="head">
   <div>
     <h1>{{ w.name }} {% if not w.active %}<span class="pill">Paused</span>{% endif %}</h1>
-    <p class="route big">{{ w.origin }} → {{ w.destination }} <span class="muted">· {{ w.adults }} adult{{ '' if w.adults == 1 else 's' }}</span></p>
+    <p class="route big">{{ w.origin }} {{ '⇄' if rt else '→' }} {{ w.destination }} <span class="muted">· {{ 'Round trip' if rt else 'One-way' }} · {{ w.adults }} adult{{ '' if w.adults == 1 else 's' }}</span></p>
   </div>
   <div class="buttons">
     <a class="button" href="/watches/{{ w.id }}/edit">Edit</a>
@@ -16,30 +16,68 @@
 </div>
 
 <div class="stats">
-  <div class="stat"><span class="label">Upcoming dates searched</span><span class="value">{{ dates|length }}</span>
-    <span class="muted small">{{ dates|length * 2 }} searches per run</span></div>
+  <div class="stat"><span class="label">Upcoming dates searched</span>
+    {% if rt %}<span class="value">{{ dates|length }} out · {{ ret_dates|length }} back</span>
+      <span class="muted small">{{ pairs }} date pair{{ '' if pairs == 1 else 's' }} · {{ (dates|length + ret_dates|length) * 2 }} searches per run</span>
+    {% else %}<span class="value">{{ dates|length }}</span>
+      <span class="muted small">{{ dates|length * 2 }} searches per run</span>{% endif %}</div>
   <div class="stat"><span class="label">Filters</span><span class="value small">
     {% if w.max_stops == 0 %}Nonstop{% elif w.max_stops is not none %}≤ {{ w.max_stops }} stop{{ '' if w.max_stops == 1 else 's' }}{% else %}Any stops{% endif %}
     {% if w.max_duration_min %} · ≤ {{ w.max_duration_min|dur }}{% endif %}
-    {% if w.depart_after or w.depart_before %} · departs {{ w.depart_after or '00:00' }}–{{ w.depart_before or '23:59' }}{% endif %}</span></div>
+    {% if w.depart_after or w.depart_before %} · {{ 'out ' if rt }}departs {{ w.depart_after or '00:00' }}–{{ w.depart_before or '23:59' }}{% endif %}
+    {% if rt and (w.ret_depart_after or w.ret_depart_before) %} · back departs {{ w.ret_depart_after or '00:00' }}–{{ w.ret_depart_before or '23:59' }}{% endif %}
+    {% if rt %}<br>{% if w.ret_dates %}Return on listed dates{% else %}Stay {{ w.nights_min }}–{{ w.nights_max }} nights{% endif %}{% if w.mix_payment %} · cash/points per leg{% endif %}{% endif %}</span></div>
   <div class="stat"><span class="label">Price target</span><span class="value small">
     {% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %} · ≥ {{ w.min_cpp }}¢/pt</span></div>
   <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
 </div>
 
+{% macro leg_flight(f) %}{% if f %}<span class="nowrap">{{ f.depart }}–{{ f.arrive }}</span> <span class="muted small">{{ f.flights }} · {% if f.stops == 0 %}nonstop{% else %}{{ f.stops }} stop{{ 's' if f.stops > 1 }}{% endif %} · {{ f.duration|dur }}</span>{% else %}—{% endif %}{% endmacro %}
+{% if rt %}
+<h2>Best round trips</h2>
+{% if not trips %}
+<p class="muted">No round trips priced yet. They appear once both directions have been searched{% if w.active %}; use <em>Search now</em>{% endif %}.</p>
+{% else %}
+<p class="muted small">Each direction is the cheapest flight that passes your filters, so totals are the lowest price for that date pair. Highlighted rows match your price target. Cheapest cash first.</p>
+<div class="table-wrap">
+<table class="list fares trips">
+  <thead><tr><th>Dates</th><th>Outbound (cheapest cash)</th><th>Return (cheapest cash)</th>
+    <th class="num">Cash total</th><th class="num">Points total</th><th class="num">¢/pt</th><th>Pay with</th></tr></thead>
+  <tbody>
+  {% for t in trips %}
+  <tr class="{{ 'match' if t.matched }}">
+    <td class="nowrap"><a href="{{ book_rt(t.out_date, t.ret_date) }}" target="_blank" rel="noopener">{{ t.out_date }} → {{ t.ret_date }}</a>
+      <br><span class="muted small">{{ t.nights }} night{{ '' if t.nights == 1 else 's' }}</span></td>
+    <td>{{ leg_flight(t.out_cash) }}</td>
+    <td>{{ leg_flight(t.ret_cash) }}</td>
+    <td class="num"><span class="price">{{ t.cash|money }}</span></td>
+    <td class="num">{{ t.points|pts }}{% if t.taxes %}<span class="muted small"> + ${{ '%.2f'|format(t.taxes) }}</span>{% endif %}</td>
+    <td class="num">{{ '%.2f'|format(t.cpp) if t.cpp else '—' }}</td>
+    <td>{% if t.matched %}<span class="pill {{ 'good' if 'oints' in t.use else '' }}">{{ t.use }}</span>{% endif %}
+      {% if w.mix_payment and t.mix[0].pay != t.mix[1].pay %}<br><span class="muted small">{{ t.mix_cash|money }} + {{ t.mix_points|pts }} pts</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+<h2>Fares by direction</h2>
+{% else %}
 <h2>Latest fares</h2>
+{% endif %}
 {% if not fares %}
 <p class="muted">No results yet. Results appear after the daily run{% if w.active %}, or use <em>Search now</em>{% endif %}.</p>
 {% else %}
-<p class="muted small">Highlighted rows match your filters. Most recent result for each date.</p>
+<p class="muted small">{% if rt %}Every flight found each way, most recent search per date.{% else %}Highlighted rows match your filters. Most recent result for each date.{% endif %}</p>
 <div class="table-wrap">
 <table class="list fares">
-  <thead><tr><th>Date</th><th>Flights</th><th>Depart–Arrive</th><th class="num">Stops</th><th class="num">Duration</th>
+  <thead><tr>{% if rt %}<th>Direction</th>{% endif %}<th>Date</th><th>Flights</th><th>Depart–Arrive</th><th class="num">Stops</th><th class="num">Duration</th>
     <th class="num">Cash</th><th class="num">Points</th><th class="num">¢/pt</th><th>Use</th></tr></thead>
   <tbody>
   {% for f in fares %}
-  <tr class="{{ 'match' if f.matched }}">
-    <td><a href="{{ book(f.date) }}" target="_blank" rel="noopener">{{ f.date }}</a></td>
+  <tr class="{{ 'match' if f.matched and not rt }}">
+    {% if rt %}<td class="small nowrap">{{ (w.origin ~ '→' ~ w.destination) if f.leg == 'out' else (w.destination ~ '→' ~ w.origin) }}</td>{% endif %}
+    <td><a href="{{ book(f.date, f.leg) }}" target="_blank" rel="noopener">{{ f.date }}</a></td>
     <td class="small">{{ f.flights }}</td>
     <td>{{ f.depart }}–{{ f.arrive }}</td>
     <td class="num">{{ f.stops }}</td>
@@ -47,7 +85,7 @@
     <td class="num">{{ f.cash|money }}</td>
     <td class="num">{{ f.points|pts }}{% if f.points_taxes %}<span class="muted small"> + ${{ '%.2f'|format(f.points_taxes) }}</span>{% endif %}</td>
     <td class="num">{{ '%.2f'|format(f.cpp) if f.cpp else '—' }}</td>
-    <td>{% if f.matched %}<span class="pill {{ 'good' if recommend(f) == 'Points' else '' }}">{{ recommend(f) }}</span>{% endif %}</td>
+    <td>{% if f.matched and not rt %}<span class="pill {{ 'good' if recommend(f) == 'Points' else '' }}">{{ recommend(f) }}</span>{% elif rt and not f.matched %}<span class="muted small">filtered out</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

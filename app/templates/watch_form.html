@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ 'New watch' if new else 'Edit watch' }}{% endblock %}
 {% set window = not w.dates and w.days_to is not none %}
+{% set rt = w.trip_type == 'roundtrip' %}
+{% set ret_by_dates = w.ret_dates and w.ret_dates|length > 0 %}
 {% block content %}
 <p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
 <h1>{{ 'New watch' if new else 'Edit watch' }}</h1>
@@ -18,7 +20,15 @@
   </fieldset>
 
   <fieldset>
-    <legend>Dates <span class="hint">one-way; each date costs 2 searches (cash + points)</span></legend>
+    <legend>Trip</legend>
+    <div class="seg trip-type">
+      <label><input type="radio" name="trip_type" value="oneway" {{ '' if rt else 'checked' }}> One-way</label>
+      <label><input type="radio" name="trip_type" value="roundtrip" {{ 'checked' if rt }}> Round trip</label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Departure dates <span class="hint">each date costs 2 searches (cash + points)</span></legend>
     <div class="seg">
       <label><input type="radio" name="date_mode" value="dates" {{ '' if window else 'checked' }}> Specific dates</label>
       <label><input type="radio" name="date_mode" value="window" {{ 'checked' if window }}> Rolling window</label>
@@ -39,8 +49,34 @@
     </div>
   </fieldset>
 
+  <fieldset data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}>
+    <legend>Return <span class="hint">each return date costs 2 more searches</span></legend>
+    <div class="seg">
+      <label><input type="radio" name="return_mode" value="nights" {{ '' if ret_by_dates else 'checked' }}> Stay length</label>
+      <label><input type="radio" name="return_mode" value="dates" {{ 'checked' if ret_by_dates }}> Specific return dates</label>
+    </div>
+    <div class="row" data-when="return_mode:nights">
+      <label>At least <span class="hint">nights</span><input name="nights_min" type="number" min="0" max="60" value="{{ w.nights_min if w.nights_min is not none else 2 }}"></label>
+      <label>At most <span class="hint">nights</span><input name="nights_max" type="number" min="0" max="60" value="{{ w.nights_max if w.nights_max is not none else 5 }}"></label>
+    </div>
+    <div data-when="return_mode:dates">
+      <label>Return dates <input name="ret_dates" value="{{ (w.ret_dates or '').replace(',', ', ') }}" placeholder="2026-12-26, 2026-12-27">
+        <span class="hint">YYYY-MM-DD, separated by commas. Every departure date is paired with every later return date.</span></label>
+    </div>
+    <div class="row">
+      <label>Return departs after <input name="ret_depart_after" type="time" value="{{ w.ret_depart_after or '' }}"></label>
+      <label>Return departs before <input name="ret_depart_before" type="time" value="{{ w.ret_depart_before or '' }}"></label>
+    </div>
+    <input type="hidden" name="mix_payment" value="">
+    <label class="check"><input type="checkbox" name="mix_payment" value="1" {{ 'checked' if w.mix_payment }}>
+      Book as two one-ways: pick the cheapest flight and the best way to pay (cash or points) for each direction</label>
+    <p class="hint">Southwest prices each direction on its own, so a round trip always costs the same as two one-ways.
+      The watcher searches each direction once and combines them, which finds the cheapest round trip for every date pair.
+      With this on, it may suggest paying cash one way and points the other when that's better value.</p>
+  </fieldset>
+
   <fieldset>
-    <legend>Flight filters</legend>
+    <legend>Flight filters <span class="hint">apply to both directions</span></legend>
     <div class="row">
       <label>Max stops
         <select name="max_stops">
@@ -51,16 +87,18 @@
       <label>Max duration <span class="hint">hours</span><input name="max_duration_h" type="number" step="0.5" min="0.5" max="24" value="{{ (w.max_duration_min / 60)|round(1) if w.max_duration_min else '' }}"></label>
     </div>
     <div class="row">
-      <label>Depart after <input name="depart_after" type="time" value="{{ w.depart_after or '' }}"></label>
-      <label>Depart before <input name="depart_before" type="time" value="{{ w.depart_before or '' }}"></label>
+      <label><span data-when="trip_type:oneway">Depart after</span><span data-when="trip_type:roundtrip">Outbound departs after</span>
+        <input name="depart_after" type="time" value="{{ w.depart_after or '' }}"></label>
+      <label><span data-when="trip_type:oneway">Depart before</span><span data-when="trip_type:roundtrip">Outbound departs before</span>
+        <input name="depart_before" type="time" value="{{ w.depart_before or '' }}"></label>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>Price</legend>
-    <p class="hint">A flight matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
+    <p class="hint">A <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip (both directions together)</span> matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
     <div class="row">
-      <label>Max cash <span class="hint">USD, total</span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
+      <label>Max cash <span class="hint">USD, <span data-when="trip_type:roundtrip">round-trip</span> total</span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
       <label>Max points <input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
       <label>Min ¢/point <input name="min_cpp" type="number" step="0.05" min="0" max="10" value="{{ w.min_cpp }}"></label>
     </div>

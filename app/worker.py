@@ -186,8 +186,9 @@ class Worker:
             try:
                 self.run_user(uid, ids, signin_only=only)
             except Exception as e:
-                applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=uid,
-                             source="run", exc=True)
+                if not getattr(e, "logged", False):
+                    applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=uid,
+                                 source="run", exc=True)
             finally:
                 self.running_user = None
                 self.progress.pop(uid, None)
@@ -240,7 +241,7 @@ class Worker:
         signin = None
 
         watches = random.sample(watches, len(watches))  # different watch order each day
-        plan = [(w, search_order(swa.watch_dates(w))) for w in watches]
+        plan = [(w, search_order(swa.search_legs(w))) for w in watches]  # [(leg, date)], legs mixed
         total = sum(2 * len(d) for _, d in plan)
         done = 0
         self.phase(user_id, "Sign-in check only" if signin_only else
@@ -250,80 +251,117 @@ class Worker:
         try:
             self.phase(user_id, "Starting the browser")
             with self.searcher_factory(state, profile_key=user_id) as searcher:
-                if creds and hasattr(searcher, "ensure_signed_in"):
-                    self.phase(user_id, "Opening southwest.com and checking you're signed in")
-                    signin = self._sign_in(user, creds, searcher, manual=signin_only)
-                elif plan:
-                    self.phase(user_id, "Opening southwest.com")
-                for w, dates in plan:
-                    route = f'{w["name"]} ({w["origin"]}→{w["destination"]})'
-                    with db.tx() as con:
-                        open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
-                                                         (w["id"], db.now())).lastrowid
-                    with db.tx() as con:
-                        con.execute("UPDATE watches SET last_status=? WHERE id=?", ("Running…", w["id"]))
-                    self.phase(user_id, f"{route}: {len(dates)} date(s) to search", watch_id=w["id"])
-                    w_s = w_f = w_m = 0
-                    note = None
-                    for date in dates:
-                        if cap is not None and db.searches_today(user_id) + 2 > cap:
-                            note, limited = "Daily search limit reached", True
-                            self.phase(user_id, f"{route}: daily search limit reached, stopping",
-                                       watch_id=w["id"], level="warn")
-                            break
-                        res = {}
-                        for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
-                            done += 1
-                            self.phase(user_id, f"{route}: searching {date} ({'cash' if ft == 'USD' else 'points'})",
-                                       watch_id=w["id"], done=done, total=total)
-                            res[ft] = searcher.search(w["origin"], w["destination"], date, w["adults"], ft)
-                            with db.tx() as con:
-                                db.add_searches(con, user_id, 1)
-                            attempts += 1
-                            w_s += 1
-                            if res[ft] is None:
-                                failures += 1
-                                w_f += 1
-                                self.phase(user_id, f"{route}: {date} {ft.lower()} search returned no fares",
-                                           watch_id=w["id"], level="warn")
-                            pause = search_pause(*settings.search_delay)
-                            self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
-                                       watch_id=w["id"], log=False)
-                            self.sleep(pause)
-                        ts = db.now()
-                        n_flights = n_match = 0
+                try:
+                    if creds and hasattr(searcher, "ensure_signed_in"):
+                        self.phase(user_id, "Opening southwest.com and checking you're signed in")
+                        signin = self._sign_in(user, creds, searcher, manual=signin_only)
+                    elif plan:
+                        self.phase(user_id, "Opening southwest.com")
+                    for w, dates in plan:
+                        route = f'{w["name"]} ({w["origin"]}→{w["destination"]})'
                         with db.tx() as con:
-                            for r in swa.combine(res["USD"], res["POINTS"]):
-                                n_flights += 1
-                                matched = swa.passes(r, w)
-                                con.execute(
-                                    "INSERT INTO fares(watch_id, ts, date, flight_key, flights, depart, arrive,"
-                                    " stops, duration, cash, points, points_taxes, cpp, matched)"
-                                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                                    (w["id"], ts, date, r["key"], r["flights"], r["depart"], r["arrive"],
-                                     r["stops"], r["duration"], r["cash"], r["points"], r["points_taxes"],
-                                     r["cpp"], int(matched)))
-                                if not matched:
-                                    continue
-                                w_m += 1
-                                n_match += 1
-                                key = f"{date}|{r['key']}"
-                                if _is_new_low(con, w["id"], key, r):
-                                    hits.append({
-                                        "watch_id": w["id"], "key": key, "row": r, "date": date,
-                                        "watch": route, "use": swa.recommend(r, w),
-                                        "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
-                                    })
-                        applog.info(f"{route}: {date}: {n_flights} flight(s), {n_match} matching",
-                                    user_id=user_id, watch_id=w["id"], source="run")
-                    if note is None:
-                        note = ("All searches failed" if w_s and w_f == w_s
-                                else f"{w_m} matching flight(s)" if w_s else "No upcoming dates")
-                    self._finish_run(open_runs.pop(w["id"]), w["id"], note, w_s, w_f, w_m)
-                    self.phase(user_id, f"{route}: done, {note.lower()}", watch_id=w["id"])
-                self.phase(user_id, "Closing the browser")
+                            open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
+                                                             (w["id"], db.now())).lastrowid
+                        with db.tx() as con:
+                            con.execute("UPDATE watches SET last_status=? WHERE id=?", ("Running…", w["id"]))
+                        rt = swa.is_roundtrip(w)
+                        n_out = sum(1 for leg, _ in dates if leg == "out")
+                        self.phase(user_id, f"{route}: {n_out} outbound" + (f" and {len(dates) - n_out} return"
+                                   if rt else "") + " date(s) to search", watch_id=w["id"])
+                        w_s = w_f = w_m = 0
+                        note = None
+                        legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
+                        for leg, date in dates:
+                            if cap is not None and db.searches_today(user_id) + 2 > cap:
+                                note, limited = "Daily search limit reached", True
+                                self.phase(user_id, f"{route}: daily search limit reached, stopping",
+                                           watch_id=w["id"], level="warn")
+                                break
+                            frm, to = (w["origin"], w["destination"]) if leg == "out" else (w["destination"], w["origin"])
+                            res = {}
+                            for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
+                                done += 1
+                                self.phase(user_id, f"{route}: searching {frm}→{to} {date} "
+                                           f"({'cash' if ft == 'USD' else 'points'})",
+                                           watch_id=w["id"], done=done, total=total)
+                                res[ft] = searcher.search(frm, to, date, w["adults"], ft)
+                                with db.tx() as con:
+                                    db.add_searches(con, user_id, 1)
+                                attempts += 1
+                                w_s += 1
+                                if res[ft] is None:
+                                    failures += 1
+                                    w_f += 1
+                                    self.phase(user_id, f"{route}: {frm}→{to} {date} {ft.lower()} search returned no fares",
+                                               watch_id=w["id"], level="warn")
+                                pause = search_pause(*settings.search_delay)
+                                self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
+                                           watch_id=w["id"], log=False)
+                                self.sleep(pause)
+                            ts = db.now()
+                            n_flights = n_match = 0
+                            rows = swa.combine(res["USD"], res["POINTS"])
+                            legs[leg][date] = rows
+                            with db.tx() as con:
+                                for r in rows:
+                                    n_flights += 1
+                                    # one-way: the flight must match on its own; round trip: totals decide below
+                                    matched = swa.passes(r, w) if not rt else swa.passes_leg(r, w, leg)
+                                    con.execute(
+                                        "INSERT INTO fares(watch_id, ts, date, leg, flight_key, flights, depart, arrive,"
+                                        " stops, duration, cash, points, points_taxes, cpp, matched)"
+                                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                        (w["id"], ts, date, leg, r["key"], r["flights"], r["depart"], r["arrive"],
+                                         r["stops"], r["duration"], r["cash"], r["points"], r["points_taxes"],
+                                         r["cpp"], int(matched)))
+                                    if not matched or rt:
+                                        continue
+                                    w_m += 1
+                                    n_match += 1
+                                    key = f"{date}|{r['key']}"
+                                    if _is_new_low(con, w["id"], key, r):
+                                        hits.append({
+                                            "watch_id": w["id"], "key": key, "row": r, "date": date,
+                                            "watch": route, "use": swa.recommend(r, w),
+                                            "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
+                                        })
+                            applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)"
+                                        + ("" if rt else f", {n_match} matching"),
+                                        user_id=user_id, watch_id=w["id"], source="run")
+                        if rt:
+                            trips = swa.roundtrips(w, legs)
+                            with db.tx() as con:
+                                for t in trips:
+                                    if not t["matched"]:
+                                        continue
+                                    w_m += 1
+                                    key = f"rt|{t['out_date']}|{t['ret_date']}"
+                                    if _is_new_low(con, w["id"], key, {"cash": t["cash"], "points": t["points"]}):
+                                        hits.append({
+                                            "watch_id": w["id"], "key": key, "trip": t, "date": t["out_date"],
+                                            "row": {"cash": t["cash"], "points": t["points"]},
+                                            "watch": route, "use": t["use"],
+                                            "url": swa.booking_url(w["origin"], w["destination"], t["out_date"],
+                                                                   w["adults"], t["ret_date"]),
+                                        })
+                            applog.info(f"{route}: {len(trips)} round trip(s) priced, {w_m} matching",
+                                        user_id=user_id, watch_id=w["id"], source="run")
+                        if note is None:
+                            note = ("All searches failed" if w_s and w_f == w_s
+                                    else f"{w_m} matching {'round trip' if rt else 'flight'}(s)" if w_s
+                                    else "No upcoming dates")
+                        self._finish_run(open_runs.pop(w["id"]), w["id"], note, w_s, w_f, w_m)
+                        self.phase(user_id, f"{route}: done, {note.lower()}", watch_id=w["id"])
+                    self.phase(user_id, "Closing the browser")
+                except Exception as e:
+                    # what the page looked like when it broke, before the browser closes
+                    e.screenshot = searcher.capture("error") if hasattr(searcher, "capture") else None
+                    raise
         except Exception as e:
             reason = f"Error: {e.__class__.__name__}: {str(e).splitlines()[0][:160] if str(e) else ''}".rstrip(": ")
+            applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=user_id, source="run",
+                         exc=True, attachment=getattr(e, "screenshot", None))
+            e.logged = True
             for wid, rid in open_runs.items():
                 self._finish_run(rid, wid, reason, 0, 0, 0)
             if not open_runs and plan and searcher is None:  # browser never started
@@ -432,7 +470,8 @@ class Worker:
             mailer.send(user["email"], "SWA fare watcher: automatic sign-in turned off",
                         f"<p>{notify}</p><p><a href='{settings.base_url}/settings'>Open Settings</a></p>")
         applog.log(f"Sign-in result: {res.status.replace('_', ' ')} ({res.detail})",
-                   "info" if res.ok or res.status == "skipped" else "warn", user_id=uid, source="signin")
+                   "info" if res.ok or res.status == "skipped" else "warn", user_id=uid, source="signin",
+                   attachment=getattr(res, "screenshot", None))
         return res
 
     def _wait_for_code(self, user):

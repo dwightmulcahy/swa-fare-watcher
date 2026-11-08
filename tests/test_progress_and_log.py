@@ -127,3 +127,49 @@ def test_dashboard_shows_running_watch(client, worker):
     page = client.get("/").text
     assert "Running now" in page and "searching 2026-12-18 (cash)" in page
     assert client.get("/api/status").json()["done"] == 1
+
+
+def test_screenshots_attached_to_log_and_scoped(client, tmp_path):
+    from app.config import settings
+    token = admin_client(client)
+    temp = create_user(client, token, "bob")
+    bob = db.one("SELECT id FROM users WHERE username='bob'")["id"]
+    shot = settings.debug_dir / "shots" / "x.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(b"\\x89PNG fake")
+    applog.warn("search failed", user_id=bob, attachment=shot)
+    applog.warn("admin-only failure", attachment=shot)
+    lid = db.one("SELECT id FROM logs WHERE message='search failed'")["id"]
+    sys_id = db.one("SELECT id FROM logs WHERE message='admin-only failure'")["id"]
+    assert db.one("SELECT attachment FROM logs WHERE id=?", (lid,))[0] == "debug/shots/x.png"
+
+    assert f"/log/shot/{lid}" in client.get("/log").text  # admin sees it
+    assert client.get(f"/log/shot/{lid}").headers["content-type"] == "image/png"
+
+    activate(client, "bob", temp)
+    rows = client.get("/api/log").json()["rows"]
+    assert rows[0]["shot_url"] == f"/log/shot/{lid}" and "attachment" not in rows[0]
+    assert client.get(f"/log/shot/{lid}").status_code == 200
+    assert client.get(f"/log/shot/{sys_id}").status_code == 404  # not bob's
+
+
+def test_attachment_outside_data_dir_is_refused(tmp_path):
+    assert applog.attachment_path("../../etc/passwd") is None
+    assert applog._rel("/etc/passwd") is None
+
+
+def test_error_mid_run_logs_a_screenshot(worker, sent, monkeypatch, tmp_path):
+    uid = make_user()
+    make_watch(uid)
+    shot = tmp_path / "debug" / "err.png"
+    shot.parent.mkdir(parents=True, exist_ok=True)
+    shot.write_bytes(b"png")
+    monkeypatch.setattr(FakeSearcher, "capture", lambda self, tag: shot, raising=False)
+    monkeypatch.setattr(FakeSearcher, "search", lambda self, *a: (_ for _ in ()).throw(RuntimeError("page died")))
+    try:
+        worker.run_user(uid)
+    except RuntimeError:
+        pass
+    row = db.one("SELECT * FROM logs WHERE level='error' AND user_id=?", (uid,))
+    assert "page died" in row["message"] and row["attachment"] == "debug/err.png"
+    assert db.one("SELECT COUNT(*) FROM logs WHERE level='error'")[0] == 1  # logged once

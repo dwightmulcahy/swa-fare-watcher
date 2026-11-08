@@ -38,7 +38,8 @@
     <td><span class="pill {{ {'error': 'bad', 'warn': 'warn'}.get(r.level, '') }}">{{ r.level }}</span></td>
     <td class="small">{{ r.source }}</td>
     {% if user.is_admin %}<td class="small">{{ r.username or '—' }}</td>{% endif %}
-    <td class="msg">{% set lines = r.message.split('\n') %}{% if lines|length > 1 %}<details><summary>{{ lines[0] }}</summary><pre>{{ lines[1:]|join('\n') }}</pre></details>{% else %}{{ r.message }}{% endif %}</td>
+    <td class="msg">{% set lines = r.message.split('\n') %}{% if lines|length > 1 %}<details><summary>{{ lines[0] }}</summary><pre>{{ lines[1:]|join('\n') }}</pre></details>{% else %}{{ r.message }}{% endif %}
+      {%- if r.shot_url %}<details class="shot"><summary>Screenshot</summary><a href="{{ r.shot_url }}" target="_blank" rel="noopener"><img src="{{ r.shot_url }}" alt="What the browser showed" loading="lazy"></a></details>{% endif %}</td>
   </tr>
   {% else %}
   <tr class="empty-row"><td colspan="5" class="muted">Nothing logged yet.</td></tr>

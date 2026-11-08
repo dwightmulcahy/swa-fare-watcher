@@ -16,6 +16,7 @@ A small multi-user web app that searches Southwest fares once a day for each use
 **Users**
 - Sign in with a username and password; a temporary password from the admin must be changed at first sign-in.
 - Create, edit, pause and delete watches: route, specific dates or a rolling window (e.g. next 14–45 days, Fridays and Saturdays), adults, max stops, max duration, departure window, max cash, max points, minimum ¢/point.
+- **One-way or round trip.** Round trips take return dates, or a stay length (e.g. 3–5 nights after each departure), and an optional return departure window. Southwest prices each direction on its own, so a round trip always costs exactly two one-ways: the watcher searches each direction once and pairs them, giving the cheapest round trip for every date pair. Price targets apply to the round-trip total. With **Book as two one-ways** on, it also picks the best payment per direction, e.g. *cash out, points back* when one leg's ¢/pt clears your minimum and the other doesn't.
 - See the latest fares per date (matches highlighted, with a Cash/Points recommendation), price history and recent runs; trigger **Search now**.
 - Upload their own Southwest session so searches run as their Rapid Rewards account. Stored encrypted.
 
@@ -27,6 +28,7 @@ A small multi-user web app that searches Southwest fares once a day for each use
 **Live status and log**
 - While a search runs, every page shows what it's doing right now: starting the browser, opening southwest.com, each sign-in step, waiting for a verification code, which date and fare type is being searched ("search 3 of 8") and pauses between searches. The watch's row shows **Running now**, and the dashboard and watch pages reload with the results when it finishes.
 - The **Log** tab lists everything the watcher did, newest first, with live updates and filters (level, watch, text; admins also filter by user, including system events). Users see their own entries; admins see everything, including scheduler, email and errors with tracebacks. Entries are kept for 14 days and never contain passwords, codes or cookies.
+- **Screenshots of what went wrong:** when a search returns no fares or data the parser doesn't recognise, a sign-in fails or is blocked, the home page won't load, or an error stops a run, the log entry carries a screenshot of the browser at that moment (open it from the Log tab; visible to the user it belongs to and admins). They're deleted with the log after 14 days.
 - Runs can't get stuck on "Running…": an error mid-run closes the run with the error as its result, and runs cut off by a restart are marked *Interrupted*.
 
 **How limits work**

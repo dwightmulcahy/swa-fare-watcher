@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -185,7 +185,23 @@ def create_app(worker=None, start_worker=True):
             args.append(int(wid))
         rows = db.query(f"SELECT l.*, u.username FROM logs l LEFT JOIN users u ON u.id = l.user_id "
                         f"WHERE {' AND '.join(where)} ORDER BY l.id DESC LIMIT ?", (*args, limit))
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["shot_url"] = f"/log/shot/{d['id']}" if d.pop("attachment", None) else None
+            out.append(d)
+        return out
+
+    @app.get("/log/shot/{log_id}")
+    def log_shot(request: Request, log_id: int):
+        u, _ = require(request)
+        row = db.one("SELECT user_id, attachment FROM logs WHERE id=?", (log_id,))
+        if not row or not (u["is_admin"] or row["user_id"] == u["id"]):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        path = applog.attachment_path(row["attachment"])
+        if not path:
+            return JSONResponse({"error": "screenshot no longer available"}, status_code=404)
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/log", response_class=HTMLResponse)
     def log_page(request: Request):
@@ -376,9 +392,58 @@ def create_app(worker=None, start_worker=True):
                 if not parsed:
                     errs.append("Enter at least one travel date.")
                 w["dates"] = ",".join(d.isoformat() for d in parsed) or None
+        # round trip: searched as two one-ways (Southwest prices each direction separately)
+        w["trip_type"] = "roundtrip" if f.get("trip_type") == "roundtrip" else "oneway"
+        w["ret_dates"] = w["nights_min"] = w["nights_max"] = None
+        w["ret_depart_after"] = str(f.get("ret_depart_after", "")).strip() or None
+        w["ret_depart_before"] = str(f.get("ret_depart_before", "")).strip() or None
+        w["mix_payment"] = 1 if f.get("mix_payment") else 0
+        if w["trip_type"] == "roundtrip":
+            for k in ("ret_depart_after", "ret_depart_before"):
+                if w[k] and not TIME.match(w[k]):
+                    errs.append("Return departure times must be HH:MM.")
+            if f.get("return_mode") == "dates":
+                raw = [d.strip() for d in re.split(r"[,\s]+", str(f.get("ret_dates", ""))) if d.strip()]
+                try:
+                    parsed = sorted({dt.date.fromisoformat(d) for d in raw})
+                    if not parsed:
+                        errs.append("Enter at least one return date.")
+                    w["ret_dates"] = ",".join(d.isoformat() for d in parsed) or None
+                except ValueError:
+                    errs.append("Return dates must be YYYY-MM-DD, separated by commas.")
+            else:
+                w["nights_min"] = opt_int("nights_min", 0, 60)
+                w["nights_max"] = opt_int("nights_max", 0, 60)
+                if w["nights_min"] is None or w["nights_max"] is None or w["nights_max"] < w["nights_min"]:
+                    errs.append("Stay length needs a minimum and maximum number of nights, with max ≥ min.")
+            if not errs and not swa.trip_pairs(w):
+                errs.append("No return date falls on or after an outbound date. Check the return dates or stay length.")
+        else:
+            w["ret_depart_after"] = w["ret_depart_before"] = None
         if w["max_price"] is None and w["max_points"] is None:
             errs.append("Set a max cash price, a max points price, or both.")
         return w, errs
+
+    def latest_legs(wid, day=None):
+        """Most recent flights per leg and date, as {"out": {date: [rows]}, "ret": {...}}
+        (optionally as they stood at the end of `day`)."""
+        cond, args = ("AND substr(ts,1,10) <= ?", (wid, day, wid)) if day else ("", (wid, wid))
+        rows = db.query(
+            "SELECT f.* FROM fares f JOIN (SELECT leg, date, MAX(ts) ts FROM fares WHERE watch_id=? "
+            + cond + " GROUP BY leg, date) l ON f.leg=l.leg AND f.date=l.date AND f.ts=l.ts WHERE f.watch_id=?",
+            args)
+        legs = {"out": {}, "ret": {}}
+        for r in rows:
+            legs.setdefault(r["leg"], {}).setdefault(r["date"], []).append(dict(r))
+        return legs
+
+    def best_roundtrip(w):
+        trips = swa.roundtrips(w, latest_legs(w["id"]))
+        matched = [t for t in trips if t["matched"]]
+        cash = min((t["cash"] for t in matched if t["cash"] is not None), default=None)
+        points = min((t["points"] for t in matched if t["points"] is not None), default=None)
+        return {"cash": cash, "points": points, "any_cash": min((t["cash"] for t in trips if t["cash"]), default=None),
+                "n": len(trips)}
 
     def watch_ctx(w):
         return {"w": w, "weekdays": WEEKDAY_LABELS,
@@ -390,6 +455,9 @@ def create_app(worker=None, start_worker=True):
         watches = db.query("SELECT * FROM watches WHERE user_id=? ORDER BY active DESC, id", (u["id"],))
         best = {}
         for w in watches:
+            if swa.is_roundtrip(w):
+                best[w["id"]] = best_roundtrip(w)
+                continue
             best[w["id"]] = db.one(
                 "SELECT MIN(CASE WHEN matched=1 THEN cash END) AS cash,"
                 " MIN(CASE WHEN matched=1 THEN points END) AS points,"
@@ -407,7 +475,9 @@ def create_app(worker=None, start_worker=True):
         u, s = require(request)
         w = {"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
-             "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1}
+             "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
+             "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,
+             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1}
         return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True, limits=limits_for(u))
 
     @app.post("/watches")
@@ -433,17 +503,37 @@ def create_app(worker=None, start_worker=True):
         last = db.one("SELECT MAX(ts) AS ts FROM fares WHERE watch_id=?", (wid,))["ts"]
         # latest results per date (dates can be searched in different runs)
         fares = db.query(
-            "SELECT f.* FROM fares f JOIN (SELECT date, MAX(ts) ts FROM fares WHERE watch_id=? GROUP BY date) l"
-            " ON f.date=l.date AND f.ts=l.ts WHERE f.watch_id=? ORDER BY f.date, f.matched DESC, f.cash",
-            (wid, wid))
-        trend = db.query(
-            "SELECT substr(ts,1,10) AS day, MIN(CASE WHEN matched=1 THEN cash END) AS cash,"
-            " MIN(CASE WHEN matched=1 THEN points END) AS points, MIN(cash) AS any_cash"
-            " FROM fares WHERE watch_id=? GROUP BY day ORDER BY day DESC LIMIT 30", (wid,))
+            "SELECT f.* FROM fares f JOIN (SELECT leg, date, MAX(ts) ts FROM fares WHERE watch_id=? GROUP BY leg, date) l"
+            " ON f.leg=l.leg AND f.date=l.date AND f.ts=l.ts WHERE f.watch_id=?"
+            " ORDER BY CASE f.leg WHEN 'out' THEN 0 ELSE 1 END, f.date, f.matched DESC, f.cash", (wid, wid))
+        rt = swa.is_roundtrip(w)
+        trips = swa.roundtrips(w, latest_legs(wid))[:40] if rt else []
+        if rt:  # best matching round trip as it stood at the end of each day
+            days = [r["day"] for r in db.query("SELECT DISTINCT substr(ts,1,10) day FROM fares WHERE watch_id=?"
+                                               " ORDER BY day DESC LIMIT 30", (wid,))]
+            trend = []
+            for d in days:
+                t = swa.roundtrips(w, latest_legs(wid, d))
+                m = [x for x in t if x["matched"]]
+                trend.append({"day": d, "cash": min((x["cash"] for x in m if x["cash"]), default=None),
+                              "points": min((x["points"] for x in m if x["points"]), default=None),
+                              "any_cash": min((x["cash"] for x in t if x["cash"]), default=None)})
+        else:
+            trend = db.query(
+                "SELECT substr(ts,1,10) AS day, MIN(CASE WHEN matched=1 THEN cash END) AS cash,"
+                " MIN(CASE WHEN matched=1 THEN points END) AS points, MIN(cash) AS any_cash"
+                " FROM fares WHERE watch_id=? GROUP BY day ORDER BY day DESC LIMIT 30", (wid,))
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
+        legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      runs=runs, dates=swa.watch_dates(w), run_status=app.state.worker.status(u["id"]),
-                      book=lambda d: swa.booking_url(w["origin"], w["destination"], d, w["adults"]),
+                      runs=runs, dates=[d for leg, d in legs if leg == "out"],
+                      ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
+                      pairs=len(swa.trip_pairs(w)) if rt else 0,
+                      run_status=app.state.worker.status(u["id"]),
+                      book=lambda d, leg="out": (swa.booking_url(w["origin"], w["destination"], d, w["adults"])
+                                                 if leg == "out" else
+                                                 swa.booking_url(w["destination"], w["origin"], d, w["adults"])),
+                      book_rt=lambda o, r: swa.booking_url(w["origin"], w["destination"], o, w["adults"], r),
                       recommend=lambda r: swa.recommend(r, w))
 
     @app.get("/watches/{wid}/edit", response_class=HTMLResponse)
