@@ -714,7 +714,7 @@ class BrowserSearcher:
         want = settings.browser_channel
         if want in ("auto", "chrome"):
             err = None
-            for attempt in range(2):  # Chrome occasionally exits during start-up; try once more
+            for attempt in range(3):  # Chrome occasionally exits during start-up; try again
                 try:
                     ctx = self._pw.chromium.launch_persistent_context(channel="chrome", **kw)
                     self.channel = "chrome"
@@ -723,7 +723,13 @@ class BrowserSearcher:
                     err = e
                     if "is not found" in str(e) or "Executable doesn't exist" in str(e):
                         break  # not installed: retrying won't help
-                    time.sleep(1.5)
+                    time.sleep(1.5 * (attempt + 1))
+                    # a Chrome that was still closing can leave the profile locked
+                    for lock in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                        try:
+                            os.unlink(os.path.join(str(kw.get("user_data_dir", "")), lock))
+                        except OSError:
+                            pass
             if want == "chrome" or not Path(self._pw.chromium.executable_path).exists():
                 raise err  # no fallback browser: report the real Chrome error
             applog.warn(f"Google Chrome unavailable ({str(err).splitlines()[0][:120]}); using bundled Chromium",
