@@ -60,6 +60,9 @@ jobs:
           context: .
           load: true
           tags: ${{ env.IMAGE }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            REPOSITORY=${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Start hardened container
@@ -69,6 +72,7 @@ jobs:
             --cap-drop ALL --security-opt no-new-privileges:true \
             --pids-limit 512 --memory 1g --shm-size 512m \
             -e ADMIN_PASSWORD=ci-admin-password -e SWA_SCHEDULER=false \
+            -e SWA_SKIP_TZ_CHECK=true \
             "$IMAGE"
       - name: Check /health
         run: |
@@ -77,6 +81,13 @@ jobs:
             sleep 1
           done
           echo "::error::/health never became ready"; exit 1
+      - name: Build info and About endpoint
+        run: |
+          set -euo pipefail
+          docker exec app cat /app/app/build.json
+          docker exec app python3 -c "import json,sys; b=json.load(open('/app/app/build.json')); assert (b['version'], b['commit'], b['repository']) == ('dev', sys.argv[1], 'https://github.com/${{ github.repository }}'), b" "$(git rev-parse --short=7 HEAD)"
+          curl -fsS "http://localhost:${PORT}/api/about" | grep -q started_at
+          curl -fsS "http://localhost:${PORT}/login" | grep -q 'id="buildVersion"'
       - name: Sign in as admin and load the admin panel
         run: |
           set -euo pipefail

@@ -49,3 +49,6 @@ secret.key
 storage_state.json
 debug/
 .ruff_cache/
+
+# Generated at image build time (app/buildinfo.py)
+app/build.json

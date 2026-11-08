@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# Empty unless compose.yaml supplies the checkout's .git as the "git" build context
+FROM scratch AS git
+
 FROM python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -12,6 +15,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=UTC
 
 ARG TARGETARCH
+# Set by the release workflow (tag without "v", commit, owner/repo); empty = "dev" build
+ARG APP_VERSION=
+ARG GIT_SHA=
+ARG REPOSITORY=
 WORKDIR /app
 COPY requirements.txt ./
 # Browser + its OS libraries, and Xvfb so it runs headed (far less likely to be blocked).
@@ -35,6 +42,10 @@ RUN apt-get update \
 
 # Files owned by root, process runs as non-root: app cannot modify itself
 COPY app ./app
+# Build metadata for the version label / About dialog
+RUN --mount=type=bind,from=git,target=/git \
+    APP_VERSION="${APP_VERSION}" GIT_SHA="${GIT_SHA}" REPOSITORY="${REPOSITORY}" GIT_DIR=/git \
+    python -m app.buildinfo /app/app/build.json
 USER app
 VOLUME ["/data"]
 EXPOSE 8080

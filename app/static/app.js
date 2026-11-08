@@ -15,6 +15,23 @@ document.addEventListener("DOMContentLoaded", () => {
   radios.forEach((r) => r.addEventListener("change", sync));
   if (radios.length) sync();
 
+  // Show/hide a password field. The saved password is never sent to the page, so this only
+  // reveals what's being typed now.
+  document.querySelectorAll("[data-reveal]").forEach((btn) => {
+    const input = document.getElementById(btn.dataset.reveal);
+    if (!input) return;
+    btn.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.textContent = show ? "Hide" : "Show";
+      btn.setAttribute("aria-pressed", String(show));
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      input.focus();
+    });
+    // never submit or leave the page with the password showing
+    input.form && input.form.addEventListener("submit", () => { input.type = "password"; });
+  });
+
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const text = document.getElementById(btn.dataset.copy).textContent.trim();

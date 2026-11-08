@@ -63,8 +63,12 @@
       <label>Rapid Rewards number or username
         <input name="swa_username" value="{{ creds_username or '' }}" autocomplete="off" required></label>
       <label>Southwest password
-        <input name="swa_password" type="password" autocomplete="new-password"
-          placeholder="{{ '•••••••• saved (leave blank to keep)' if creds_username else '' }}"></label>
+        <span class="password-field">
+          <input name="swa_password" id="swa_password" type="password" autocomplete="new-password"
+            placeholder="{{ '•••••••• saved (leave blank to keep)' if creds_username else '' }}">
+          <button type="button" class="reveal" data-reveal="swa_password" aria-controls="swa_password"
+            aria-pressed="false" aria-label="Show password">Show</button>
+        </span></label>
     </div>
     <label class="check"><input type="checkbox" name="auto_login" value="1" {{ 'checked' if user.auto_login or not creds_username }}>
       Sign in automatically when my session expires</label>

@@ -113,6 +113,21 @@ Guard rails, so automation never locks an account:
 
 While a sign-in waits for a code, the worker holds that user's browser open, so other users' runs wait too (at most the code timeout).
 
+## Time zone check
+
+Every site can read the browser's time zone, and bot detection compares it with the location of the IP address the request comes from. A server in Texas whose browser says `UTC` (Docker's default) looks like a bot or a proxy.
+
+On start, `serve` and `login-test` look up this machine's public IP time zone (ipinfo.io, falling back to ipapi.co and worldtimeapi.org) and compare it with the browser's time zone (`SWA_TIMEZONE`, else `TZ`, else the system zone). The UTC offsets must match now and six months from now, so both standard and daylight time agree; a different zone name with identical offsets is fine.
+
+- **Mismatch:** the app refuses to start and prints the fix, e.g. `Set TZ=America/Chicago`. The container waits 60 s before exiting so a restart policy doesn't hammer the lookup services.
+- **Lookup unavailable:** a warning; the app starts.
+- **Admin page** shows the result. `python -m app check-tz` runs the check on its own (exit code 2 on a mismatch).
+- `SWA_SKIP_TZ_CHECK=true` turns it off.
+
+## Version and About
+
+The header shows the build next to the app name: `v1.2.3` for releases, `dev <commit>` for local builds. Clicking it opens the About dialog (version, commit, build time, server start time, release notes, "Report a problem", Copy details), the same as the other repos from the template. The release workflow passes `APP_VERSION`, `GIT_SHA` and `REPOSITORY` to the Docker build; local `docker compose` builds read the commit from `.git`.
+
 ## Test automated sign-in on your machine
 
 `python -m app login-test` signs in to southwest.com with your credentials using exactly what the app uses: real Chrome with the hardened launch settings, a persistent profile, and human-like mouse, typing and reading behaviour. Run it on your own computer to see whether Southwest lets an automated sign-in through.
@@ -155,7 +170,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `COOKIE_SECURE` | `false` | Set `true` behind HTTPS |
 | `SECRET_KEY` | auto (`/data/secret.key`) | Encrypts stored Southwest sessions; keep stable |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | — | Alert sender ([app password](https://myaccount.google.com/apppasswords), needs 2FA) |
-| `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time |
+| `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time. **`TZ` must match where the server's internet connection is** (checked at start) |
+| `SWA_SKIP_TZ_CHECK` | `false` | Skip the start-up time zone check (e.g. behind a VPN you trust) |
 | `SWA_DAILY_JITTER_MINUTES` | `45` | Each day starts at a random time within ± this of `SWA_DAILY_AT`; users run in a shuffled order |
 | `SWA_SCHEDULER` | `true` | `false` disables the daily run (manual runs still work) |
 | `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |

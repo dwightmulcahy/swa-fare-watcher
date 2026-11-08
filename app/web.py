@@ -2,6 +2,7 @@
 import datetime as dt
 import hmac
 import json
+import mimetypes
 import re
 import sys
 import time
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, swa
+from . import buildinfo, db, swa
 from .config import settings
 from .mailer import fmt_dur
 from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
@@ -23,12 +24,16 @@ from .security import (decrypt_json, encrypt_json, hash_password, new_token, tem
 from .worker import worker as default_worker
 
 HERE = Path(__file__).parent
+mimetypes.add_type("text/javascript", ".mjs")  # module scripts must be served as JavaScript
 COOKIE = "swa_session"
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
 templates.env.filters["pts"] = lambda v: "—" if v is None else f"{int(v):,}"
 templates.env.filters["when"] = lambda s: (s or "")[:16].replace("T", " ") or "—"
+# Version label / About dialog: build info embedded in every page; "<" escaped so it can't close the tag
+templates.env.globals["build_info_json"] = json.dumps(buildinfo.load()).replace("<", "\\u003c")
+STARTED_AT = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 WEEKDAY_LABELS = list(zip(swa.WEEKDAYS, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]))
 IATA = re.compile(r"^[A-Z]{3}$")
 TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -143,6 +148,11 @@ def create_app(worker=None, start_worker=True):
     def health():
         db.one("SELECT 1")
         return JSONResponse({"status": "ok"})
+
+    @app.get("/api/about")
+    def about():
+        # server start time for the About dialog (no dependency versions)
+        return JSONResponse({"started_at": STARTED_AT}, headers={"Cache-Control": "no-store"})
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
@@ -591,8 +601,9 @@ def create_app(worker=None, start_worker=True):
             "SELECT u.*, (SELECT COUNT(*) FROM watches w WHERE w.user_id=u.id AND w.active=1) AS n_watches,"
             " (SELECT searches FROM usage g WHERE g.user_id=u.id AND g.day=?) AS today"
             " FROM users u ORDER BY u.active DESC, u.username", (db.today(),))
+        from . import tzcheck
         return render(request, "admin_users.html", u, s, users=users, today=db.today(),
-                      worker=app.state.worker)
+                      worker=app.state.worker, tz=tzcheck.last_result)
 
     @app.get("/admin/users/new", response_class=HTMLResponse)
     def admin_new(request: Request):

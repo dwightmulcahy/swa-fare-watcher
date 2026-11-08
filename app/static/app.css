@@ -177,3 +177,28 @@ details li { margin-bottom: .5rem; }
   .head > .button { justify-content: center; }
 }
 p.hint { margin-left: 0; }
+
+/* version label + About dialog (from repo-template) */
+.brand-row { display: flex; align-items: center; gap: .6rem; }
+.build-version {
+  font: inherit; font-size: 12px; font-weight: 500; line-height: 1; color: var(--muted); background: transparent; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; min-height: 24px;
+}
+.build-version:hover, .build-version:focus-visible { color: var(--ink); background: var(--bg); border-color: var(--line); }
+.build-version[hidden] { display: none; }
+dialog.about { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 10px; padding: 20px; color: var(--ink); background: var(--surface); }
+dialog.about::backdrop { background: rgb(0 0 0 / .45); }
+dialog.about h2 { margin: 0 0 12px; font-size: 20px; }
+.about-kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 14px; }
+.about-kv dt { color: var(--muted); }
+.about-kv dd { margin: 0; overflow-wrap: anywhere; }
+.about-links, .about-status { font-size: 14px; margin: 0 0 12px; }
+.about-status:empty { display: none; }
+dialog.about a { color: var(--accent); }
+.about-actions { display: flex; justify-content: end; gap: 8px; }
+.about-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* password with show/hide */
+.password-field { display: flex; gap: .4rem; margin-top: .3rem; }
+.password-field input { margin-top: 0; flex: 1; }
+.password-field .reveal { flex: none; min-width: 4.2rem; font-weight: 500; }

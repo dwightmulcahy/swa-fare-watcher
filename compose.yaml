@@ -2,6 +2,9 @@ services:
   watcher:
     build:
       context: .
+      # Local builds read the commit and GitHub repo from .git, so the UI shows "dev <commit>"
+      additional_contexts:
+        git: ./.git
     image: ${IMAGE:-swa-fare-watcher:local}
     env_file:
       - path: .env

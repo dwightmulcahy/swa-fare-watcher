@@ -9,6 +9,8 @@
     <a class="button primary" href="/admin/users/new">New user</a>
   </div>
 </div>
+{% if tz %}<p class="small"><span class="pill {{ 'good' if tz.level == 'ok' else 'warn' if tz.level == 'warn' else 'bad' }}">Time zone</span>
+  <span class="muted">{{ tz.message }}</span></p>{% endif %}
 <div class="table-wrap">
 <table class="list">
   <thead><tr><th>User</th><th>Status</th><th class="num">Active watches</th><th class="num">Searches today</th><th>Expires</th><th>Southwest session</th><th>Last sign-in</th><th></th></tr></thead>

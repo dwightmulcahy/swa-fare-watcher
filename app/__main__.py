@@ -137,6 +137,7 @@ def main():
     sub.add_parser("selftest")
     lg = sub.add_parser("swa-login")
     lg.add_argument("out", nargs="?", default="storage_state.json")
+    sub.add_parser("check-tz", help="check the browser time zone matches this machine's internet location")
     lt = sub.add_parser("login-test", help="try an automated Southwest sign-in")
     lt.add_argument("--username", help="default: SWA_USERNAME")
     lt.add_argument("--profile", default="login-test", help="browser profile name under data/profiles/")
@@ -152,17 +153,30 @@ def main():
     if a.cmd == "selftest":
         from .swa import selftest
         return selftest()
+    if a.cmd == "check-tz":
+        from .tzcheck import enforce
+        sys.exit(0 if enforce() else 2)
     if a.cmd == "swa-login":
         return swa_login(a.out)
     if a.cmd == "login-test":
+        from .tzcheck import enforce
+        if a.home_url is None and not enforce():
+            sys.exit(2)
         if a.home_url is None:
             from .swa_login import HOME_URL
             a.home_url = HOME_URL
         sys.exit(login_test(a))
 
+    import time
+
     import uvicorn
 
+    from .tzcheck import enforce
     from .web import create_app
+    if not enforce(log=lambda m: print(m, file=sys.stderr, flush=True)):
+        print("[tz-check] Not starting. Fix the time zone (see above) and restart.", file=sys.stderr, flush=True)
+        time.sleep(60)  # with restart: unless-stopped, don't hammer the lookup services in a tight loop
+        sys.exit(2)
     uvicorn.run(create_app(), host=getattr(a, "host", "0.0.0.0"), port=getattr(a, "port", 8080),
                 proxy_headers=True, forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
                 log_level=os.environ.get("LOG_LEVEL", "info"))
