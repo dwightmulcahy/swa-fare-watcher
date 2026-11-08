@@ -45,7 +45,8 @@ code { font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; background: va
   display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
   padding: .7rem max(16px, calc((100vw - 1180px) / 2)); background: var(--surface); border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; color: var(--ink); letter-spacing: -.01em; }
+.brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; font-size: 1.3rem; color: var(--ink); letter-spacing: -.015em; }
+.brand img { width: 28px; height: 28px; }
 .brand:hover { text-decoration: none; }
 nav { display: flex; align-items: center; gap: .25rem; flex-wrap: wrap; }
 nav a { color: var(--muted); padding: .35rem .65rem; border-radius: 6px; }
@@ -202,3 +203,43 @@ dialog.about a { color: var(--accent); }
 .password-field { display: flex; gap: .4rem; margin-top: .3rem; }
 .password-field input { margin-top: 0; flex: 1; }
 .password-field .reveal { flex: none; min-width: 4.2rem; font-weight: 500; }
+
+/* live run status */
+.live { background: var(--accent-soft); color: var(--ink); border-radius: 8px; padding: .7rem 1rem; margin-bottom: 1rem; }
+.live-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.live-state { color: var(--accent); }
+.live-bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: .55rem; overflow: hidden; }
+.live-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .6s ease; }
+.live.queued .live-bar { display: none; }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
+.live.queued .spinner { animation: none; border-right-color: var(--accent); opacity: .5; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* log */
+.filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+.filters select, .filters input { width: auto; min-width: 9rem; }
+.filters input { flex: 1 1 12rem; }
+.live-toggle { margin-top: .4rem; }
+table.list.log { min-width: 760px; }
+.list.log td { padding: .45rem .8rem; font-size: .88rem; }
+.list.log td.msg { white-space: pre-wrap; overflow-wrap: anywhere; width: 100%; }
+.list.log pre { margin: .4rem 0 0; font-size: .78rem; white-space: pre-wrap; color: var(--muted); }
+.list.log summary { cursor: pointer; }
+.list.log tr.lvl-error td { background: var(--bad-soft); }
+.list.log tr.fresh td { animation: fresh 2s ease; }
+@keyframes fresh { from { background: var(--match); } }
+.nowrap { white-space: nowrap; }
+@media (max-width: 700px) {
+  /* log as stacked entries: time · level · source · user on one line, message below */
+  .table-wrap:has(table.list.log) { overflow-x: visible; }
+  table.list.log { min-width: 0; }
+  table.list.log thead { display: none; }
+  table.list.log, table.list.log tbody { display: block; }
+  table.list.log tr { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .6rem; padding: .55rem .8rem; border-bottom: 1px solid var(--line); }
+  table.list.log tr:last-child { border-bottom: 0; }
+  .list.log td { display: block; padding: 0; border: 0; width: auto; }
+  .list.log td.msg { flex-basis: 100%; }
+  .list.log tr.lvl-error { background: var(--bad-soft); }
+  .list.log tr.lvl-error td { background: none; }
+}

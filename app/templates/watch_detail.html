@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ w.name }}{% endblock %}
+{% block body_attrs %} data-reload-on-finish{% endblock %}
 {% block content %}
 <p class="crumbs"><a href="/">Watches</a> / {{ w.name }}</p>
 <div class="head">
@@ -66,7 +67,7 @@
     {% else %}<p class="muted">No history yet.</p>{% endif %}
   </section>
   <section>
-    <h2>Recent runs</h2>
+    <h2>Recent runs <a class="small" href="/log?watch={{ w.id }}">log</a></h2>
     {% if runs %}
     <table class="list compact">
       <thead><tr><th>Started</th><th class="num">Searches</th><th class="num">Failed</th><th>Result</th></tr></thead>

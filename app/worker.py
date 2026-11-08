@@ -3,12 +3,10 @@ import datetime as dt
 import math
 import queue
 import random
-import sys
 import threading
 import time
-import traceback
 
-from . import db, mailer, swa
+from . import applog, db, mailer, swa
 from .config import settings
 from .security import decrypt_json, encrypt_json
 
@@ -95,6 +93,7 @@ class Worker:
         self.pending = {}          # user_id -> set(watch_ids) or None (all)
         self.signin_only = set()   # users queued just to test sign-in (no searches)
         self.running_user = None
+        self.progress = {}         # user_id -> what the running search is doing right now
         self.next_window = None    # (start, end) of the next daily window
         self.planned = {}          # user_id -> start time within today's window
         self._threads = []
@@ -119,6 +118,24 @@ class Worker:
             self.signin_only.add(user_id)
         self.q.put(user_id)
 
+    # ----- live progress (shown in the UI while a run is going) -----
+    def phase(self, user_id, text, watch_id=None, done=None, total=None, log=True, level="info", source="run"):
+        p = self.progress.setdefault(user_id, {"started": db.now()})
+        p.update(phase=text, at=db.now())
+        if watch_id is not None:
+            p["watch_id"] = watch_id
+        if total is not None:
+            p["done"], p["total"] = done or 0, total
+        if log:
+            applog.log(text, level, user_id=user_id, watch_id=watch_id or p.get("watch_id"), source=source)
+
+    def snapshot(self, user_id):
+        """JSON-friendly view of this user's run for the live status display."""
+        state = self.status(user_id)
+        p = dict(self.progress.get(user_id) or {})
+        return {"state": state, **({k: p.get(k) for k in ("phase", "done", "total", "watch_id", "started", "at")}
+                                   if state == "running" else {})}
+
     def status(self, user_id):
         if self.running_user == user_id:
             return "running"
@@ -137,7 +154,19 @@ class Worker:
             self.enqueue(uid)
         return len(ids)
 
+    @staticmethod
+    def close_interrupted_runs():
+        """Runs left unfinished by a crash or restart would show "Running…" forever."""
+        with db.tx() as con:
+            n = con.execute("UPDATE runs SET finished=?, note='Interrupted (the app restarted mid-run)' "
+                            "WHERE finished IS NULL", (db.now(),)).rowcount
+            con.execute("UPDATE watches SET last_status='Interrupted (the app restarted mid-run)' "
+                        "WHERE last_status='Running…'")
+        if n:
+            applog.warn(f"Marked {n} unfinished run(s) from before the restart as interrupted", source="run")
+
     def start(self, scheduler=True):
+        self.close_interrupted_runs()
         t = threading.Thread(target=self._loop, name="swa-worker", daemon=True)
         t.start()
         self._threads.append(t)
@@ -156,10 +185,12 @@ class Worker:
                 self.running_user = uid
             try:
                 self.run_user(uid, ids, signin_only=only)
-            except Exception:
-                traceback.print_exc()
+            except Exception as e:
+                applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=uid,
+                             source="run", exc=True)
             finally:
                 self.running_user = None
+                self.progress.pop(uid, None)
 
     def _sleep_until(self, when):
         while (wait := (when - dt.datetime.now()).total_seconds()) > 0:
@@ -170,12 +201,13 @@ class Worker:
         while True:
             day, lo, hi = day_window(settings.daily_at, settings.daily_jitter_min, last_day=last_day)
             self.next_window = (lo, hi)
-            print(f"[scheduler] next window {lo:%Y-%m-%d %H:%M}-{hi:%H:%M}", file=sys.stderr, flush=True)
+            applog.info(f"Next daily run window {lo:%a %Y-%m-%d %H:%M}-{hi:%H:%M}", source="scheduler")
             self._sleep_until(lo)
             plan = plan_day(self.eligible_users(), dt.datetime.now(), hi)
             self.planned = {uid: t for t, uid in plan}
-            print(f"[scheduler] {len(plan)} user(s): "
-                  + ", ".join(f"{uid}@{t:%H:%M:%S}" for t, uid in plan), file=sys.stderr, flush=True)
+            applog.info(f"Today's plan, {len(plan)} user(s): "
+                        + (", ".join(f"user {uid} at {t:%H:%M:%S}" for t, uid in plan) or "nobody to run"),
+                        source="scheduler")
             for t, uid in plan:
                 self._sleep_until(t)
                 self.enqueue(uid)
@@ -208,61 +240,98 @@ class Worker:
         signin = None
 
         watches = random.sample(watches, len(watches))  # different watch order each day
-        with self.searcher_factory(state, profile_key=user_id) as searcher:
-            if creds and hasattr(searcher, "ensure_signed_in"):
-                signin = self._sign_in(user, creds, searcher, manual=signin_only)
-            for w in watches:
-                run_id = None
-                with db.tx() as con:
-                    run_id = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
-                                         (w["id"], db.now())).lastrowid
-                w_s = w_f = w_m = 0
-                note = None
-                for date in search_order(swa.watch_dates(w)):
-                    if cap is not None and db.searches_today(user_id) + 2 > cap:
-                        note, limited = "Daily search limit reached", True
-                        break
-                    res = {}
-                    for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
-                        res[ft] = searcher.search(w["origin"], w["destination"], date, w["adults"], ft)
-                        with db.tx() as con:
-                            db.add_searches(con, user_id, 1)
-                        attempts += 1
-                        w_s += 1
-                        if res[ft] is None:
-                            failures += 1
-                            w_f += 1
-                        self.sleep(search_pause(*settings.search_delay))
-                    ts = db.now()
+        plan = [(w, search_order(swa.watch_dates(w))) for w in watches]
+        total = sum(2 * len(d) for _, d in plan)
+        done = 0
+        self.phase(user_id, "Sign-in check only" if signin_only else
+                   f"Starting a run: {len(plan)} watch(es), up to {total} searches", done=0, total=total)
+        open_runs = {}  # watch_id -> run_id not yet finished (closed even if something breaks)
+        searcher = None
+        try:
+            self.phase(user_id, "Starting the browser")
+            with self.searcher_factory(state, profile_key=user_id) as searcher:
+                if creds and hasattr(searcher, "ensure_signed_in"):
+                    self.phase(user_id, "Opening southwest.com and checking you're signed in")
+                    signin = self._sign_in(user, creds, searcher, manual=signin_only)
+                elif plan:
+                    self.phase(user_id, "Opening southwest.com")
+                for w, dates in plan:
+                    route = f'{w["name"]} ({w["origin"]}→{w["destination"]})'
                     with db.tx() as con:
-                        for r in swa.combine(res["USD"], res["POINTS"]):
-                            matched = swa.passes(r, w)
-                            con.execute(
-                                "INSERT INTO fares(watch_id, ts, date, flight_key, flights, depart, arrive,"
-                                " stops, duration, cash, points, points_taxes, cpp, matched)"
-                                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                                (w["id"], ts, date, r["key"], r["flights"], r["depart"], r["arrive"],
-                                 r["stops"], r["duration"], r["cash"], r["points"], r["points_taxes"],
-                                 r["cpp"], int(matched)))
-                            if not matched:
-                                continue
-                            w_m += 1
-                            key = f"{date}|{r['key']}"
-                            if _is_new_low(con, w["id"], key, r):
-                                hits.append({
-                                    "watch_id": w["id"], "key": key, "row": r, "date": date,
-                                    "watch": f'{w["name"]} ({w["origin"]}→{w["destination"]})',
-                                    "use": swa.recommend(r, w),
-                                    "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
-                                })
-                if note is None:
-                    note = ("All searches failed" if w_s and w_f == w_s
-                            else f"{w_m} matching flight(s)" if w_s else "No upcoming dates")
+                        open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
+                                                         (w["id"], db.now())).lastrowid
+                    with db.tx() as con:
+                        con.execute("UPDATE watches SET last_status=? WHERE id=?", ("Running…", w["id"]))
+                    self.phase(user_id, f"{route}: {len(dates)} date(s) to search", watch_id=w["id"])
+                    w_s = w_f = w_m = 0
+                    note = None
+                    for date in dates:
+                        if cap is not None and db.searches_today(user_id) + 2 > cap:
+                            note, limited = "Daily search limit reached", True
+                            self.phase(user_id, f"{route}: daily search limit reached, stopping",
+                                       watch_id=w["id"], level="warn")
+                            break
+                        res = {}
+                        for ft in random.sample(("USD", "POINTS"), 2):  # cash or points first
+                            done += 1
+                            self.phase(user_id, f"{route}: searching {date} ({'cash' if ft == 'USD' else 'points'})",
+                                       watch_id=w["id"], done=done, total=total)
+                            res[ft] = searcher.search(w["origin"], w["destination"], date, w["adults"], ft)
+                            with db.tx() as con:
+                                db.add_searches(con, user_id, 1)
+                            attempts += 1
+                            w_s += 1
+                            if res[ft] is None:
+                                failures += 1
+                                w_f += 1
+                                self.phase(user_id, f"{route}: {date} {ft.lower()} search returned no fares",
+                                           watch_id=w["id"], level="warn")
+                            pause = search_pause(*settings.search_delay)
+                            self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
+                                       watch_id=w["id"], log=False)
+                            self.sleep(pause)
+                        ts = db.now()
+                        n_flights = n_match = 0
+                        with db.tx() as con:
+                            for r in swa.combine(res["USD"], res["POINTS"]):
+                                n_flights += 1
+                                matched = swa.passes(r, w)
+                                con.execute(
+                                    "INSERT INTO fares(watch_id, ts, date, flight_key, flights, depart, arrive,"
+                                    " stops, duration, cash, points, points_taxes, cpp, matched)"
+                                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                    (w["id"], ts, date, r["key"], r["flights"], r["depart"], r["arrive"],
+                                     r["stops"], r["duration"], r["cash"], r["points"], r["points_taxes"],
+                                     r["cpp"], int(matched)))
+                                if not matched:
+                                    continue
+                                w_m += 1
+                                n_match += 1
+                                key = f"{date}|{r['key']}"
+                                if _is_new_low(con, w["id"], key, r):
+                                    hits.append({
+                                        "watch_id": w["id"], "key": key, "row": r, "date": date,
+                                        "watch": route, "use": swa.recommend(r, w),
+                                        "url": swa.booking_url(w["origin"], w["destination"], date, w["adults"]),
+                                    })
+                        applog.info(f"{route}: {date}: {n_flights} flight(s), {n_match} matching",
+                                    user_id=user_id, watch_id=w["id"], source="run")
+                    if note is None:
+                        note = ("All searches failed" if w_s and w_f == w_s
+                                else f"{w_m} matching flight(s)" if w_s else "No upcoming dates")
+                    self._finish_run(open_runs.pop(w["id"]), w["id"], note, w_s, w_f, w_m)
+                    self.phase(user_id, f"{route}: done, {note.lower()}", watch_id=w["id"])
+                self.phase(user_id, "Closing the browser")
+        except Exception as e:
+            reason = f"Error: {e.__class__.__name__}: {str(e).splitlines()[0][:160] if str(e) else ''}".rstrip(": ")
+            for wid, rid in open_runs.items():
+                self._finish_run(rid, wid, reason, 0, 0, 0)
+            if not open_runs and plan and searcher is None:  # browser never started
                 with db.tx() as con:
-                    con.execute("UPDATE runs SET finished=?, searches=?, failures=?, matches=?, note=? WHERE id=?",
-                                (db.now(), w_s, w_f, w_m, note, run_id))
-                    con.execute("UPDATE watches SET last_run_at=?, last_status=? WHERE id=?",
-                                (db.now(), note, w["id"]))
+                    for w, _ in plan:
+                        con.execute("UPDATE watches SET last_run_at=?, last_status=? WHERE id=?",
+                                    (db.now(), reason, w["id"]))
+            raise
         new_state = searcher.state  # refreshed cookies, read after the browser context closes
 
         all_failed = attempts > 0 and failures == attempts
@@ -276,8 +345,11 @@ class Worker:
                 con.execute("UPDATE users SET swa_status=?, swa_status_at=? WHERE id=?",
                             (status, db.now(), user_id))
 
+        applog.info(f"Run finished: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
+                    + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
         if hits:
+            self.phase(user_id, f"Emailing {len(hits)} fare alert(s)", log=False)
             sent = mailer.send(user["email"], f"SWA fare alert: {len(hits)} match(es)",
                                mailer.render_hits(hits))
             if sent:
@@ -296,6 +368,13 @@ class Worker:
             out["signin"] = signin.status
         return out
 
+    @staticmethod
+    def _finish_run(run_id, watch_id, note, searches, failures, matches):
+        with db.tx() as con:
+            con.execute("UPDATE runs SET finished=?, searches=COALESCE(NULLIF(?, 0), searches), failures=?,"
+                        " matches=?, note=? WHERE id=?", (db.now(), searches, failures, matches, note, run_id))
+            con.execute("UPDATE watches SET last_run_at=?, last_status=? WHERE id=?", (db.now(), note, watch_id))
+
     # ----- automatic Southwest sign-in -----
     MANUAL_ATTEMPTS_PER_DAY = 3
     MAX_CONSECUTIVE_FAILURES = 2
@@ -309,8 +388,11 @@ class Worker:
         uid = user["id"]
         limit = self.MANUAL_ATTEMPTS_PER_DAY if manual else 1
         allowed = self._attempts_today(user) < limit
+        def step(msg):  # sign-in steps from swa_login ("Clicking Log in", "Typing username", ...)
+            self.phase(uid, "Sign-in: " + msg.split("] ", 1)[-1], source="signin")
+
         res = searcher.ensure_signed_in(creds["username"], creds["password"], allowed=allowed,
-                                        code_provider=lambda: self._wait_for_code(user))
+                                        code_provider=lambda: self._wait_for_code(user), log=step)
         attempted = res.status not in ("already_signed_in", "skipped")
         now = db.now()
         status, disable, notify = None, False, None
@@ -349,7 +431,8 @@ class Worker:
         if notify:
             mailer.send(user["email"], "SWA fare watcher: automatic sign-in turned off",
                         f"<p>{notify}</p><p><a href='{settings.base_url}/settings'>Open Settings</a></p>")
-        print(f"[signin] user {uid}: {res.status} ({res.detail})", file=sys.stderr, flush=True)
+        applog.log(f"Sign-in result: {res.status.replace('_', ' ')} ({res.detail})",
+                   "info" if res.ok or res.status == "skipped" else "warn", user_id=uid, source="signin")
         return res
 
     def _wait_for_code(self, user):
@@ -362,6 +445,7 @@ class Worker:
             con.execute("UPDATE code_requests SET status='expired' WHERE user_id=? AND status='waiting'", (uid,))
             rid = con.execute("INSERT INTO code_requests(user_id, created_at, expires_at) VALUES (?,?,?)",
                               (uid, db.now(), expires)).lastrowid
+        self.phase(uid, "Waiting for your verification code (enter it on the Verify page)", level="warn")
         mailer.send(user["email"], "Southwest verification code needed",
                     f"<p>Southwest sent you a verification code while the fare watcher was signing in. "
                     f"Enter it within {wait // 60} minutes:</p>"

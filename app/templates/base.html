@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body{% block body_attrs %}{% endblock %}>
   <header class="top">
     <div class="brand-row">
       <a class="brand" href="/">
@@ -22,6 +22,7 @@
     <nav>
       <a href="/" class="{{ 'on' if request.url.path == '/' or request.url.path.startswith('/watches') }}">Watches</a>
       <a href="/settings" class="{{ 'on' if request.url.path.startswith('/settings') }}">Settings</a>
+      <a href="/log" class="{{ 'on' if request.url.path.startswith('/log') }}">Log</a>
       {% if user.is_admin %}<a href="/admin" class="{{ 'on' if request.url.path.startswith('/admin') }}">Admin</a>{% endif %}
       <form method="post" action="/logout" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -34,6 +35,15 @@
     {% if code_request and request.url.path != '/verify' %}
     <div class="flash warn" role="alert"><strong>Southwest sent you a verification code.</strong>
       The fare watcher is waiting for it to finish signing in. <a href="/verify">Enter the code</a></div>
+    {% endif %}
+    {% if user and not user.must_change_pw %}
+    <!-- Live run status: filled and kept current by static/app.js polling /api/status -->
+    <div class="live" id="live" role="status" aria-live="polite" hidden>
+      <div class="live-row"><span class="spinner" aria-hidden="true"></span>
+        <strong class="live-state"></strong> <span class="live-phase"></span>
+        <span class="live-count muted"></span></div>
+      <div class="live-bar"><span></span></div>
+    </div>
     {% endif %}
     {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
     {% if err %}<div class="flash err" role="alert">{{ err }}</div>{% endif %}

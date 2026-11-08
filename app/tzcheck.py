@@ -132,4 +132,13 @@ def enforce(log=print):
         return True
     last_result = check()
     log(f"[tz-check] {last_result.level.upper()}: {last_result.message}")
+    try:
+        from . import db
+        db.init()
+        with db.tx() as con:
+            con.execute("INSERT INTO logs(ts, level, source, message) VALUES (?,?,?,?)",
+                        (db.now(), {"ok": "info"}.get(last_result.level, last_result.level), "tz-check",
+                         last_result.message))
+    except Exception:
+        pass
     return last_result.ok

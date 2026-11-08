@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Log{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Log</h1>
+    <p class="muted">{{ 'Everything the app does, newest first.' if user.is_admin else 'What the watcher did for your account, newest first.' }}
+      Kept for 14 days.</p></div>
+  <label class="check live-toggle"><input type="checkbox" id="log-live" checked> Live</label>
+</div>
+<form method="get" action="/log" class="filters" id="log-filters">
+  <select name="level" aria-label="Level">
+    <option value="" {{ 'selected' if not params.level }}>All levels</option>
+    <option value="warn" {{ 'selected' if params.level == 'warn' }}>Warnings and errors</option>
+    <option value="error" {{ 'selected' if params.level == 'error' }}>Errors only</option>
+  </select>
+  {% if user.is_admin %}
+  <select name="user" aria-label="User">
+    <option value="">All users</option>
+    <option value="system" {{ 'selected' if params.user == 'system' }}>System only</option>
+    {% for o in users %}<option value="{{ o.id }}" {{ 'selected' if params.user == o.id|string }}>{{ o.username }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <select name="watch" aria-label="Watch">
+    <option value="">All watches</option>
+    {% for o in watches %}<option value="{{ o.id }}" {{ 'selected' if params.watch == o.id|string }}>{{ o.name }}</option>{% endfor %}
+  </select>
+  <input name="q" value="{{ params.q or '' }}" placeholder="Search messages" aria-label="Search messages">
+  <button type="submit">Filter</button>
+  {% if params.level or params.user or params.watch or params.q %}<a href="/log">Clear</a>{% endif %}
+</form>
+<div class="table-wrap">
+<table class="list log" id="log-table" data-admin="{{ 1 if user.is_admin else 0 }}">
+  <thead><tr><th>Time</th><th>Level</th><th>Source</th>{% if user.is_admin %}<th>User</th>{% endif %}<th>Message</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr data-id="{{ r.id }}" class="lvl-{{ r.level }}">
+    <td class="nowrap small">{{ r.ts|when }}<span class="muted">{{ r.ts[16:19] }}</span></td>
+    <td><span class="pill {{ {'error': 'bad', 'warn': 'warn'}.get(r.level, '') }}">{{ r.level }}</span></td>
+    <td class="small">{{ r.source }}</td>
+    {% if user.is_admin %}<td class="small">{{ r.username or '—' }}</td>{% endif %}
+    <td class="msg">{% set lines = r.message.split('\n') %}{% if lines|length > 1 %}<details><summary>{{ lines[0] }}</summary><pre>{{ lines[1:]|join('\n') }}</pre></details>{% else %}{{ r.message }}{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr class="empty-row"><td colspan="5" class="muted">Nothing logged yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

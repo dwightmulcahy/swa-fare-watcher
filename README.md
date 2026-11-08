@@ -24,6 +24,11 @@ A small multi-user web app that searches Southwest fares once a day for each use
 - Per-user limits: **max active watches**, **max searches per day**, **account expiry date**. Blank means no limit.
 - See each user's status, usage today, Southwest session health and last sign-in; run everyone's watches now.
 
+**Live status and log**
+- While a search runs, every page shows what it's doing right now: starting the browser, opening southwest.com, each sign-in step, waiting for a verification code, which date and fare type is being searched ("search 3 of 8") and pauses between searches. The watch's row shows **Running now**, and the dashboard and watch pages reload with the results when it finishes.
+- The **Log** tab lists everything the watcher did, newest first, with live updates and filters (level, watch, text; admins also filter by user, including system events). Users see their own entries; admins see everything, including scheduler, email and errors with tracebacks. Entries are kept for 14 days and never contain passwords, codes or cookies.
+- Runs can't get stuck on "Running…": an error mid-run closes the run with the error as its result, and runs cut off by a restart are marked *Interrupted*.
+
 **How limits work**
 - Each date in a watch costs 2 searches (cash + points). Creating or resuming a watch is refused if the user's active watches would need more searches per day than their limit.
 - The worker also stops a user's run when the daily count is reached ("Daily search limit reached"), which covers **Search now**.

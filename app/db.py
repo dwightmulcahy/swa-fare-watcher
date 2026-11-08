@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS code_requests(
   code TEXT,
   status TEXT NOT NULL DEFAULT 'waiting'   -- waiting, submitted, used, expired
 );
+CREATE TABLE IF NOT EXISTS logs(
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  level TEXT NOT NULL,
+  source TEXT NOT NULL,
+  user_id INTEGER,
+  watch_id INTEGER,
+  message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS logs_user ON logs(user_id, id);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY,
   watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,

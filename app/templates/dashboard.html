@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Watches{% endblock %}
+{% block body_attrs %} data-reload-on-finish{% endblock %}
 {% macro limit(used, cap) %}{{ used }}{% if cap is not none %} / {{ cap }}{% else %} <span class="muted">(no limit)</span>{% endif %}{% endmacro %}
 {% block content %}
 <div class="head">
@@ -18,7 +19,6 @@
   <div class="stat"><span class="label">Southwest session</span>
     <span class="value small">{% if user.auto_login and user.swa_creds and not user.swa_state %}<span class="pill good">Auto sign-in on</span>{% elif user.swa_state %}<span class="pill {{ 'good' if user.swa_status == 'OK' else 'warn' if user.swa_status and user.swa_status.startswith('Searches failed') else '' }}">{{ user.swa_status or 'Uploaded' }}</span>{% else %}<a href="/settings">Not set</a>{% endif %}</span></div>
 </div>
-{% if run_status %}<div class="flash info">Your search is {{ run_status }}. Refresh in a few minutes for results.</div>{% endif %}
 {% if user.expires_at %}<p class="muted small">Your account is active until {{ user.expires_at }}.</p>{% endif %}
 
 {% if not watches %}
@@ -48,7 +48,9 @@
         {% if b.cash or b.points %}<span class="price">{{ b.cash|money }}</span><br><span class="muted small">{{ b.points|pts }} pts</span>
         {% else %}<span class="muted small">No match<br>lowest {{ b.any_cash|money }}</span>{% endif %}
       {% else %}<span class="muted">—</span>{% endif %}</td>
-    <td class="small">{{ w.last_run_at|when }}<br><span class="muted">{{ w.last_status or 'Not run yet' }}</span></td>
+    <td class="small" data-watch-status="{{ w.id }}">{% if live.state == 'running' and live.watch_id == w.id %}<span class="pill">Running now</span><br><span class="muted">{{ live.phase }}</span>
+      {% elif live.state and (not w.last_run_at) %}<span class="pill">{{ live.state|capitalize }}</span>
+      {% else %}{{ w.last_run_at|when }}<br><span class="muted">{{ w.last_status or 'Not run yet' }}</span>{% endif %}</td>
     <td class="actions">
       <form method="post" action="/watches/{{ w.id }}/toggle" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="link" type="submit">{{ 'Pause' if w.active else 'Resume' }}</button></form>

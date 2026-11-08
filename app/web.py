@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import buildinfo, db, swa
+from . import applog, buildinfo, db, swa
 from .config import settings
 from .mailer import fmt_dur
 from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
@@ -55,8 +55,10 @@ def bootstrap_admin():
             (settings.admin_username, settings.gmail_user or "", hash_password(pw),
              0 if settings.admin_password else 1, db.now()))
     if not settings.admin_password:
+        # printed to the container log only, never stored in the Log tab
         print(f"[setup] Created admin user '{settings.admin_username}' with temporary password: {pw}",
               file=sys.stderr, flush=True)
+    applog.info(f"Created admin user '{settings.admin_username}'", source="setup")
 
 
 def create_app(worker=None, start_worker=True):
@@ -65,6 +67,7 @@ def create_app(worker=None, start_worker=True):
     @asynccontextmanager
     async def lifespan(app):
         db.init()
+        applog.install_python_logging()
         bootstrap_admin()
         if start_worker:
             worker.start(scheduler=settings.scheduler)
@@ -148,6 +151,61 @@ def create_app(worker=None, start_worker=True):
     def health():
         db.one("SELECT 1")
         return JSONResponse({"status": "ok"})
+
+    @app.get("/api/status")
+    def api_status(request: Request):
+        u, _ = session(request)
+        if not u:
+            return JSONResponse({"error": "signed out"}, status_code=401)
+        return JSONResponse(app.state.worker.snapshot(u["id"]), headers={"Cache-Control": "no-store"})
+
+    # ---------- log ----------
+    def log_query(u, params, after=0, limit=300):
+        where, args = ["l.id > ?"], [after]
+        if not u["is_admin"]:
+            where.append("l.user_id = ?")
+            args.append(u["id"])
+        else:
+            who = params.get("user", "")
+            if who == "system":
+                where.append("l.user_id IS NULL")
+            elif who.isdigit():
+                where.append("l.user_id = ?")
+                args.append(int(who))
+        level = params.get("level", "")
+        if level in ("warn", "error"):
+            where.append("l.level IN ('warn','error')" if level == "warn" else "l.level = 'error'")
+        q = params.get("q", "").strip()
+        if q:
+            where.append("l.message LIKE ? ESCAPE '\\'")
+            args.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        wid = params.get("watch", "")
+        if wid.isdigit():
+            where.append("l.watch_id = ?")
+            args.append(int(wid))
+        rows = db.query(f"SELECT l.*, u.username FROM logs l LEFT JOIN users u ON u.id = l.user_id "
+                        f"WHERE {' AND '.join(where)} ORDER BY l.id DESC LIMIT ?", (*args, limit))
+        return [dict(r) for r in rows]
+
+    @app.get("/log", response_class=HTMLResponse)
+    def log_page(request: Request):
+        u, s = require(request)
+        params = dict(request.query_params)
+        users = db.query("SELECT id, username FROM users ORDER BY username") if u["is_admin"] else []
+        watches = db.query("SELECT id, name FROM watches WHERE user_id=? ORDER BY name", (u["id"],)) \
+            if not u["is_admin"] else db.query("SELECT id, name FROM watches ORDER BY name")
+        return render(request, "log.html", u, s, rows=log_query(u, params), params=params, users=users,
+                      watches=watches)
+
+    @app.get("/api/log")
+    def api_log(request: Request):
+        u, _ = session(request)
+        if not u:
+            return JSONResponse({"error": "signed out"}, status_code=401)
+        params = dict(request.query_params)
+        after = int(params.get("after", "0") or 0) if str(params.get("after", "0")).isdigit() else 0
+        return JSONResponse({"rows": log_query(u, params, after=after, limit=200)},
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/api/about")
     def about():
@@ -340,6 +398,7 @@ def create_app(worker=None, start_worker=True):
         return render(request, "dashboard.html", u, s, watches=watches, best=best,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
+                      live=app.state.worker.snapshot(u["id"]),
                       daily_at=settings.daily_at, jitter=settings.daily_jitter_min,
                       next_run=app.state.worker.next_run_for(u["id"]))
 

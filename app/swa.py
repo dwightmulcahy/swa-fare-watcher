@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlencode
 
+from . import applog
 from .config import settings
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
@@ -315,8 +316,8 @@ class BrowserSearcher:
                     time.sleep(1.5)
             if want == "chrome" or not Path(self._pw.chromium.executable_path).exists():
                 raise err  # no fallback browser: report the real Chrome error
-            print(f"[browser] Google Chrome unavailable ({str(err).splitlines()[0][:120]}); "
-                  "using bundled Chromium", file=sys.stderr)
+            applog.warn(f"Google Chrome unavailable ({str(err).splitlines()[0][:120]}); using bundled Chromium",
+                        source="browser", user_id=self._uid())
         elif want and want != "chromium":
             ctx = self._pw.chromium.launch_persistent_context(channel=want, **kw)
             self.channel = want
@@ -354,7 +355,8 @@ class BrowserSearcher:
             self.page.goto(settings.home_url, wait_until="domcontentloaded", timeout=60_000)
             self.human.read(self.human.rng.uniform(3, 7))
         except Exception as e:
-            print(f"[warn] warm-up visit failed ({e.__class__.__name__})", file=sys.stderr)
+            applog.warn(f"Home page visit failed ({e.__class__.__name__}: {str(e).splitlines()[0][:150]})",
+                        source="browser", user_id=self._uid())
 
     def ensure_signed_in(self, username, password, allowed, code_provider=None, log=None):
         """Open the home page (this doubles as the warm-up). If the session has lapsed and an
@@ -365,7 +367,8 @@ class BrowserSearcher:
         self._warmed = True
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         rec = swa_login.Recorder(self.page, settings.debug_dir / "signin" / f"{self.profile_key}-{stamp}",
-                                 log=log or (lambda m: print(f"[signin {self.profile_key}] {m}", file=sys.stderr)))
+                                 log=log or (lambda m: applog.info(m.split("] ", 1)[-1], source="signin",
+                                                                   user_id=self._uid())))
         swa_login.watch_network(self.page, rec)
         try:
             blocked = swa_login.open_home(self.page, self.human, rec, settings.home_url)
@@ -404,7 +407,8 @@ class BrowserSearcher:
                 self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded")
             payload = info.value.json()
         except Exception as e:
-            print(f"[warn] {tag}: no fare data ({e.__class__.__name__})", file=sys.stderr)
+            applog.warn(f"{tag}: no fare data ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
+                        f"page {self.page.url[:120]}", source="search", user_id=self._uid())
             self._dump(tag)
             return None
         if self.humanize:
@@ -414,9 +418,12 @@ class BrowserSearcher:
                 pass
         flights = parse_flights(payload)
         if flights is None:
-            print(f"[warn] {tag}: unrecognized response shape", file=sys.stderr)
+            applog.warn(f"{tag}: unrecognized response shape; saved to debug/", source="search", user_id=self._uid())
             self._dump(tag, payload)
         return flights
+
+    def _uid(self):
+        return self.profile_key if isinstance(self.profile_key, int) else None
 
     def _dump(self, tag, payload=None):
         d = settings.debug_dir

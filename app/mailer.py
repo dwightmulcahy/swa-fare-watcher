@@ -1,7 +1,6 @@
 """Gmail SMTP alerts."""
 import html
 import smtplib
-import sys
 from email.mime.text import MIMEText
 
 from .config import settings
@@ -11,7 +10,8 @@ def send(to, subject, body_html) -> bool:
     if not to:
         return False
     if not (settings.gmail_user and settings.gmail_password):
-        print(f"[mail] Gmail not configured; skipped '{subject}' to {to}", file=sys.stderr)
+        from . import applog
+        applog.warn(f"Gmail not configured; email '{subject}' to {to} not sent", source="mail")
         return False
     msg = MIMEText(body_html, "html")
     msg["Subject"], msg["From"], msg["To"] = subject, settings.gmail_user, to
@@ -19,9 +19,12 @@ def send(to, subject, body_html) -> bool:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
             s.login(settings.gmail_user, settings.gmail_password)
             s.sendmail(settings.gmail_user, [to], msg.as_string())
+        from . import applog
+        applog.info(f"Email sent to {to}: {subject}", source="mail")
         return True
     except Exception as e:
-        print(f"[mail] send failed: {e!r}", file=sys.stderr)
+        from . import applog
+        applog.error(f"Email to {to} failed: {e!r}", source="mail")
         return False
 
 
