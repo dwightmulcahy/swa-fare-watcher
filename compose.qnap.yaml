@@ -3,8 +3,10 @@ services:
   watcher:
     image: ${IMAGE:?set IMAGE in .env}
     env_file:
+      # relative to this file's folder. Container Station keeps pasted compose files in its own
+      # folder, so use the full path to your .env there (e.g. /share/Container/swa-fare-watcher/.env)
       - path: .env
-        required: false
+        required: true
     ports:
       - "${HOST_PORT:-8080}:8080"
     volumes:
