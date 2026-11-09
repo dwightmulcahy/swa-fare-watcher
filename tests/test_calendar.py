@@ -107,10 +107,35 @@ def test_worker_falls_back_when_calendar_unreadable(worker, sent):
 
 def test_best_calendar_ignores_build_manifest():
     manifest = {"artifact": "spa-air-low-fare-calendar-v2", "created": "Tuesday, 27 October 2026 at 09:46"}
-    fares = {"days": [{"date": "2026-11-09", "lowestPrice": {"price": "481"}}]}
-    url, _, days = swa.best_calendar([(".../low-fare-calendar/manifest.json", manifest), ("/api/cal", fares)])
-    assert url == "/api/cal" and days == {"2026-11-09": 481.0}
+    real = _fixture("calendar-LIR-JAX-2027-03-USD.json")
+    url, _, days, exact = swa.best_calendar([(".../low-fare-calendar/manifest.json", manifest), ("/api/cal", real)])
+    assert url == "/api/cal" and exact and days["2027-03-01"] == 368.52
     assert swa.best_calendar([("m", manifest)]) is None
+
+
+# shaped like Southwest's account-info response (made-up values): one date, numbers named "points"
+ACCOUNT_INFO = {"customers.UserInformation.tierAchievedDate": "2026-01-01",
+                "customers.UserInformation.nextTierQualifyingPointsRequired": 35000,
+                "customers.UserInformation.redeemablePoints": 1234,
+                "customers.UserInformation.primaryEmail": "someone@example.com"}
+
+
+def test_account_info_is_never_a_calendar():
+    url = "https://www.southwest.com/api/security/v4/security/userinfo"
+    assert swa.is_private(url)
+    assert swa.best_calendar([(url, ACCOUNT_INFO)]) is None
+    # even from an innocent-looking URL, one guessed day isn't a calendar
+    assert swa.best_calendar([("/api/other", ACCOUNT_INFO)]) is None
+    real = _fixture("calendar-LIR-JAX-2027-03-USD.json")
+    assert swa.best_calendar([(url, ACCOUNT_INFO), ("/cal", real)])[0] == "/cal"
+
+
+def test_guessing_needs_several_days_and_only_when_final():
+    guess = {"days": [{"date": f"2026-11-{d:02d}", "price": 100 + d} for d in range(1, 8)]}
+    assert swa.best_calendar([("/x", guess)], final=False) is None   # keep waiting for the real one
+    url, _, days, exact = swa.best_calendar([("/x", guess)])
+    assert not exact and len(days) == 7
+
 
 
 def _fixture(name):
