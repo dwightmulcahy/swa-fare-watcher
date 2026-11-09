@@ -119,7 +119,25 @@ class DBHandler(logging.Handler):
             pass
 
 
+# Polled every few seconds by open pages (live status, log tail) and by Docker's health check:
+# successful requests to these aren't worth an access-log line each
+QUIET_PATHS = ("/api/status", "/api/log", "/health")
+
+
+class QuietPolling(logging.Filter):
+    """Drop uvicorn access-log lines for successful polling requests; errors still show."""
+
+    def filter(self, record):
+        args = record.args if isinstance(record.args, tuple) else ()
+        if len(args) >= 5:   # (client, method, path, http version, status)
+            path, status = str(args[2]).split("?")[0], args[4]
+            if path in QUIET_PATHS and isinstance(status, int) and status < 400:
+                return False
+        return True
+
+
 def install_python_logging():
+    logging.getLogger("uvicorn.access").addFilter(QuietPolling())
     h = DBHandler(level=logging.WARNING)
     for name in ("uvicorn.error", "uvicorn", "fastapi", "asyncio"):
         logging.getLogger(name).addHandler(h)

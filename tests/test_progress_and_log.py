@@ -183,3 +183,17 @@ def test_pause_reports_when_it_ends(worker):
     assert 11 < s["until"] - time.time() <= 12
     worker.phase(1, "searching")
     assert worker.snapshot(1)["until"] is None
+
+
+def test_access_log_hides_successful_polling():
+    import logging
+
+    from app.applog import QuietPolling
+
+    def rec(path, status):
+        return logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                                 ("1.2.3.4:5", "GET", path, "1.1", status), None)
+    f = QuietPolling()
+    assert not f.filter(rec("/api/status", 200)) and not f.filter(rec("/health", 200))
+    assert not f.filter(rec("/api/log?after=5", 200))
+    assert f.filter(rec("/api/status", 500)) and f.filter(rec("/watches", 200))
