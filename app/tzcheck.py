@@ -129,8 +129,10 @@ def _not_passed_hint(var):
     # The image defaults to UTC; seeing it usually means the .env never reached the container
     if not in_docker():
         return ""
-    return (f" In Docker, UTC means {var} isn't reaching the container: a .env next to the compose file only "
-            "fills in ${...} in that file. Give the service `env_file: .env`, or `environment:` with "
+    return (f" In Docker, UTC means {var} isn't reaching the container. Check the service has `env_file:` "
+            "pointing at your .env by a path that exists from the compose file's folder (with "
+            "`required: false` a missing file is skipped silently; Container Station keeps pasted compose "
+            "files in its own folder, so use the full path), or set `environment:` with "
             f"`{var}: ...`. The NAS's own time zone setting doesn't matter.")
 
 
