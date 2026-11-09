@@ -298,9 +298,9 @@ th[aria-sort="ascending"] .sort-arrow::after { content: "▲"; opacity: .9; }
 th[aria-sort="descending"] .sort-arrow::after { content: "▼"; opacity: .9; }
 
 /* airport names under From/To */
-.airport-names { display: grid; gap: .1rem; margin-top: .3rem; font-size: .85rem; font-weight: 400; color: var(--muted); }
-.airport-names:empty { display: none; }
-.airport-names b { color: var(--ink); font-weight: 600; letter-spacing: .04em; }
+/* readable line under a field (airport names, dates, times...), like Southwest's form */
+.readable { display: grid; gap: .1rem; margin-top: .3rem; font-size: .85rem; font-weight: 400; color: var(--muted); }
+.readable:empty { display: none; }
 .airport-names .unknown { color: var(--bad); }
 
 /* airport suggestions */

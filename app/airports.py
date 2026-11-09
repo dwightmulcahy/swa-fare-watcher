@@ -15,9 +15,11 @@ def table():
 
 
 def place(code):
-    """"Dallas, TX" for DAL, or None if the code isn't known."""
+    """Southwest-style place for a code, e.g. "Houston (Hobby), TX" for HOU; None if unknown."""
     a = table().get((code or "").upper())
-    return f"{a[0]}, {a[1]}" if a else None
+    if not a:
+        return None
+    return a[4] if len(a) > 4 else f"{a[0]}, {a[1]}"
 
 
 def describe(codes):
