@@ -1,7 +1,15 @@
 <!doctype html><title>Low fare calendar</title>
 <body><h1>Low fare calendar</h1>
+<div id="shop"><b>Shop in</b>
+  <button type="button" data-ft="USD">Dollars</button>
+  <button type="button" data-ft="POINTS">Points</button>
+</div>
 <script>
 // like the real page: its build manifest first, then the fares
-fetch("v2/air/low-fare-calendar/manifest.json").then(() =>
-  setTimeout(() => fetch("calendar-data.json" + location.search), 300));
+const q = new URLSearchParams(location.search);
+window.calendarFetches = [];
+const load = (ft) => { window.calendarFetches.push(ft);
+  return fetch("calendar-data-" + ft + ".json" + location.search); };
+document.querySelectorAll("#shop button").forEach((b) => b.addEventListener("click", () => load(b.dataset.ft)));
+fetch("v2/air/low-fare-calendar/manifest.json").then(() => setTimeout(() => load(q.get("fareType") || "USD"), 300));
 </script>

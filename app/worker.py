@@ -477,11 +477,14 @@ class Worker:
             if not leg_dates:
                 continue
             months = list(swa.calendar_months(leg_dates).items())
-            jobs = [(rt_, m, first, ft) for rt_ in swa.routes(w, leg) for m, first in months
-                    for ft in ("USD", "POINTS")]
+            # each route and month: both currencies back to back (the second can be a click on the
+            # same page), in random order; the pairs themselves in random order
+            pairs = [(rt_, m, first) for rt_ in swa.routes(w, leg) for m, first in months]
+            jobs = [(rt_, m, first, ft) for rt_, m, first in random.sample(pairs, len(pairs))
+                    for ft in random.sample(("USD", "POINTS"), 2)]
             lows = {rt_: {} for rt_ in swa.routes(w, leg)}
             broken = set()
-            for (frm, to), month, first, ft in random.sample(jobs, len(jobs)):
+            for j, ((frm, to), month, first, ft) in enumerate(jobs):
                 if cap is not None and db.searches_today(user_id) + 1 > cap:
                     self.phase(user_id, f"{route}: daily search limit reached, stopping",
                                watch_id=w["id"], level="warn")
@@ -498,6 +501,8 @@ class Worker:
                     field = "cash" if ft == "USD" else "points"
                     for d, v in days.items():
                         lows[(frm, to)].setdefault(d, {"cash": None, "points": None})[field] = v
+                if j % 2 == 0 and getattr(searcher, "calendar_switches_currency", False):
+                    continue   # the other currency is a click on this calendar page
                 pause = search_pause(*settings.search_delay)
                 self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                            watch_id=w["id"], log=False, until=time.time() + pause)

@@ -1,0 +1,18 @@
+{
+ "notifications": {
+  "empty": false,
+  "fieldErrors": [
+   {
+    "code": "VALIDATION__CURRENCY_CODE__REQUIRED",
+    "errorDetail": "",
+    "formError": false,
+    "infoList": [],
+    "infoSize": 0,
+    "severity": "ERROR",
+    "target": "currencyCode",
+    "trackingCode": "400301993"
+   }
+  ]
+ },
+ "success": false
+}

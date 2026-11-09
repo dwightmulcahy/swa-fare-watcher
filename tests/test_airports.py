@@ -80,3 +80,16 @@ def test_worker_calendar_per_pair(worker, sent):
     worker.run_user(uid)
     assert {(c[0], c[1]) for c in CalendarSearcher.cal_calls} == {("AUS", "BWI"), ("DAL", "BWI")}
     assert len(CalendarSearcher.cal_calls) == 4
+
+
+def test_calendar_loads_both_currencies_back_to_back(worker, sent):
+    d = future(10)
+    CalendarSearcher.cal_calls = []
+    CalendarSearcher.lows = {"USD": {d: 190}, "POINTS": {d: 12000}}
+    worker.searcher_factory = CalendarSearcher
+    uid = make_user()
+    make_watch(uid, origin="AUS,DAL", destination="BWI", dates=d)
+    worker.run_user(uid)
+    calls = CalendarSearcher.cal_calls
+    for a, b in zip(calls[::2], calls[1::2]):       # same route and month, cash and points
+        assert a[:3] == b[:3] and {a[3], b[3]} == {"USD", "POINTS"}
