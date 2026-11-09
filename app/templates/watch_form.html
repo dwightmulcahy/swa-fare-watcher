@@ -7,16 +7,16 @@
 {% block content %}
 <p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
 <h1>{{ 'New watch' if new else 'Edit watch' }}</h1>
-<form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid">
+<form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid watch-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
 
   <fieldset>
     <legend>Route</legend>
     <div class="row">
       <label>From <span class="hint">code, city or airport</span><input name="origin" value="{{ w.origin|airports|replace('/', ', ') }}" maxlength="60" data-airport-suggest placeholder="SJO, LIR" required class="code" autocapitalize="characters" spellcheck="false">
-        <span class="airport-names" data-airport-names="origin" aria-live="polite">{% for code, place in w.origin|airport_names %}<span class="{{ '' if place else 'unknown' }}"><b>{{ code }}</b>: {{ place or 'airport not found' }}</span>{% endfor %}</span></label>
+        <span class="airport-names readable" data-airport-names="origin" aria-live="polite">{% for code, place in w.origin|airport_names %}<span class="{{ '' if place else 'unknown' }}">{{ place or 'Airport not found' }} - {{ code }}</span>{% endfor %}</span></label>
       <label>To <span class="hint">code, city or airport</span><input name="destination" value="{{ w.destination|airports|replace('/', ', ') }}" maxlength="60" data-airport-suggest placeholder="HOU, AUS" required class="code" autocapitalize="characters" spellcheck="false">
-        <span class="airport-names" data-airport-names="destination" aria-live="polite">{% for code, place in w.destination|airport_names %}<span class="{{ '' if place else 'unknown' }}"><b>{{ code }}</b>: {{ place or 'airport not found' }}</span>{% endfor %}</span></label>
+        <span class="airport-names readable" data-airport-names="destination" aria-live="polite">{% for code, place in w.destination|airport_names %}<span class="{{ '' if place else 'unknown' }}">{{ place or 'Airport not found' }} - {{ code }}</span>{% endfor %}</span></label>
       <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>
     </div>
     <p class="hint">Separate airports with commas (up to 3 each). Every From × To pair is searched, so each extra airport adds searches; the low-fare calendar keeps the extra cost down.</p>
@@ -100,7 +100,7 @@
           <option value="{{ v }}" {{ 'selected' if (w.max_stops|string if w.max_stops is not none else '') == v }}>{{ l }}</option>
           {% endfor %}
         </select></label>
-      <label>Max duration <span class="hint">hours</span><input name="max_duration_h" type="number" step="0.5" min="0.5" max="24" value="{{ (w.max_duration_min / 60)|round(1) if w.max_duration_min else '' }}"></label>
+      <label>Max duration <span class="hint">hours</span><input name="max_duration_h" data-readable="hours" type="number" step="0.5" min="0.5" max="24" value="{{ (w.max_duration_min / 60)|round(1) if w.max_duration_min else '' }}"></label>
     </div>
     <div class="row">
       <label><span data-when="trip_type:oneway">Depart after</span><span data-when="trip_type:roundtrip">Outbound departs after</span>
@@ -115,7 +115,7 @@
     <p class="hint">Optional. Leave both empty to get the cheapest <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip</span> found each time it gets cheaper. With a target, a <span data-when="trip_type:oneway">flight</span><span data-when="trip_type:roundtrip">round trip (both directions together)</span> matches if it's under your cash price, <em>or</em> under your points price at a good enough value.</p>
     <div class="row">
       <label>Max cash <span class="hint">optional, USD per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_price" type="number" min="1" value="{{ w.max_price|int if w.max_price else '' }}" placeholder="250"></label>
-      <label>Max points <span class="hint">optional, per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
+      <label>Max points <span class="hint">optional, per person<span data-when="trip_type:roundtrip">, round-trip total</span></span><input name="max_points" data-readable="points" type="number" min="1" value="{{ w.max_points or '' }}" placeholder="15000"></label>
       <label>Min ¢/point <input name="min_cpp" type="number" step="0.05" min="0" max="10" value="{{ w.min_cpp }}"></label>
     </div>
     <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>

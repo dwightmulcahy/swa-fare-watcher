@@ -4,9 +4,10 @@
 
 Without a path the three CSVs are downloaded from the ourairports-data GitHub mirror.
 Keeps airports with an IATA code and scheduled passenger service. Output:
-    {"DFW": ["Dallas-Fort Worth", "TX", "Dallas Fort Worth International Airport", 1], ...}
-city, region (US/Canadian state or province code, else the country name), airport name, and
-1 if Southwest flies there (listed first in autocomplete).
+    {"HOU": ["Houston", "TX", "William P Hobby Airport", 1, "Houston (Hobby), TX"], ...}
+city, region (US/Canadian state or province code, else the country name), airport name,
+1 if Southwest flies there (listed first in autocomplete), and a Southwest-style label: the
+city, plus a short airport name when the city has more than one sizeable airport.
 """
 import csv
 import io
@@ -36,6 +37,20 @@ def read(name, base):
         return list(csv.DictReader(io.StringIO(r.read().decode("utf-8"))))
 
 
+_DROP = {"international", "intl", "airport", "regional", "municipal", "intercontinental", "county",
+         "metropolitan", "metro", "national", "the"}
+
+
+def short_name(name, city):
+    """"William P Hobby Airport" -> "Hobby", "Chicago Midway International Airport" -> "Midway"."""
+    city_words = {w.lower() for w in city.replace("-", " ").split()}
+    words = [w for w in name.replace("-", " ").split()
+             if w.lower().strip(".,") not in _DROP and w.lower().strip(".,") not in city_words]
+    if len(words) >= 3:
+        words = words[-1:]          # "William P Hobby" -> "Hobby"
+    return " ".join(words)          # "" for the city's namesake airport (Miami International)
+
+
 def main(base=None):
     countries = {c["code"]: c["name"] for c in read("countries", base)}
     out = {}
@@ -59,7 +74,17 @@ def main(base=None):
         keys = {k.strip().upper() for k in (a["keywords"] or "").split(",")}
         for code in (SOUTHWEST - out.keys()) & keys:
             if a["name"] in by_name:
-                out[code] = ([*by_name[a["name"]][:3], 1], 0)
+                out[code] = ([*by_name[a["name"]][:3], 1], 1)
+    # cities with more than one sizeable airport get "(Short name)" in their label
+    sizeable = {}
+    for code, (e, rank) in out.items():
+        if rank >= 1 or e[3]:
+            sizeable.setdefault((e[0], e[1]), []).append(code)
+    for code, (e, rank) in out.items():
+        city, region, name = e[0], e[1], e[2]
+        many = len(sizeable.get((city, region), [])) > 1
+        short = short_name(name, city) if many else ""
+        e.append(f"{city} ({short}), {region}" if short else f"{city}, {region}")
     data = {k: v[0] for k, v in sorted(out.items())}
     missing = sorted(SOUTHWEST - data.keys())
     if missing:

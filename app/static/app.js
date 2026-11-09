@@ -136,7 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const a = t[c];
           const line = document.createElement("span");
           if (!a) line.className = "unknown";
-          line.append(Object.assign(document.createElement("b"), { textContent: c }), `: ${a ? `${a[0]}, ${a[1]}` : "airport not found"}`);
+          line.textContent = `${a ? (a[4] || `${a[0]}, ${a[1]}`) : "Airport not found"} - ${c}`;   // like Southwest
           if (a) line.title = a[2];
           return line;
         }));
@@ -151,8 +151,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("input[data-airport-suggest]").forEach((input, n) => {
     let table = null;
     const load = () => table || (table = fetch("/static/airports.json").then((r) => r.json())
-      .then((t) => Object.entries(t).map(([code, [city, region, name, swa]]) => ({
-        code, city, region, name, swa, low: fold(city), hay: fold(`${city} ${region} ${name}`) })))
+      .then((t) => Object.entries(t).map(([code, [city, region, name, swa, label]]) => ({
+        code, city, region, name, swa, label: label || `${city}, ${region}`,
+        low: fold(city), hay: fold(`${city} ${region} ${name} ${label || ""}`) })))
       .catch(() => []));
     const list = document.createElement("ul");
     list.id = `airport-list-${n}`;
@@ -210,7 +211,7 @@ document.addEventListener("DOMContentLoaded", () => {
         li.setAttribute("role", "option");
         li.className = a.swa ? "" : "not-swa";
         li.append(Object.assign(document.createElement("b"), { textContent: a.code }),
-          Object.assign(document.createElement("span"), { textContent: `${a.city}, ${a.region}` }),
+          Object.assign(document.createElement("span"), { textContent: a.label }),
           Object.assign(document.createElement("small"), { textContent: a.swa ? a.name : `${a.name} · not Southwest` }));
         li.addEventListener("mousedown", (e) => { e.preventDefault(); choose(a); });
         return li;
@@ -230,6 +231,59 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (e.key === "Escape") { e.preventDefault(); close(); }
     });
   });
+
+  // A readable line under fields whose raw value is hard to read, like Southwest's form shows
+  // "Tue, Nov 10, 2026" under a date: dates, times, durations and what points are worth.
+  const form = document.querySelector("form.watch-form") || document;
+  const fmtDate = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+  const cppInput = form.querySelector('input[name="min_cpp"]');
+  const pointsInput = form.querySelector('input[name="max_points"]');
+  const todayISO = (document.querySelector("[data-ahead-hint]") || {}).dataset?.today;
+  const describe = (input) => {
+    const v = input.value;
+    if (!v) return "";
+    const kind = input.dataset.readable || input.type;
+    if (kind === "date") {
+      const d = new Date(v + "T00:00:00Z");
+      if (Number.isNaN(+d)) return "";
+      let text = fmtDate.format(d);
+      if (input.dataset.ahead && todayISO) {
+        const n = Math.round((d - new Date(todayISO + "T00:00:00Z")) / 864e5);
+        text += n === 0 ? " · today" : ` · ${n} day${n === 1 ? "" : "s"} ahead`;
+      }
+      return text;
+    }
+    if (kind === "time") {
+      const [h, m] = v.split(":").map(Number);
+      return Number.isFinite(h) ? fmtTime.format(Date.UTC(2000, 0, 1, h, m || 0)) : "";
+    }
+    if (kind === "hours") {
+      const mins = Math.round(Number(v) * 60);
+      if (!(mins > 0)) return "";
+      return `${Math.floor(mins / 60)} h${mins % 60 ? ` ${mins % 60} min` : ""} or less`;
+    }
+    if (kind === "points") {
+      const pts = Number(v), cpp = Number(cppInput?.value);
+      if (!(pts > 0 && cpp > 0)) return "";
+      const usd = (pts * cpp / 100).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+      return `${pts.toLocaleString()} pts ≈ ${usd} at ${cpp}¢ a point`;
+    }
+    return "";
+  };
+  const readables = [];
+  form.querySelectorAll('input[type="date"], input[type="time"], input[data-readable]').forEach((input) => {
+    if (input.closest(".date-add")) return;      // the multi-date picker shows chips instead
+    const out = Object.assign(document.createElement("span"), { className: "readable" });
+    out.setAttribute("aria-live", "polite");
+    (input.closest("label") || input).append(out);
+    const show = () => { out.textContent = describe(input); };
+    readables.push(show);
+    input.addEventListener("input", show);
+    input.addEventListener("change", show);
+    show();
+  });
+  [cppInput, pointsInput].forEach((i) => i && i.addEventListener("input", () => readables.forEach((f) => f())));
 
   // Rolling window: show how far ahead the picked dates are, since that's what's kept
   const aheadHint = document.querySelector("[data-ahead-hint]");
