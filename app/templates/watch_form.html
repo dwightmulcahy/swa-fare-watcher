@@ -13,9 +13,9 @@
   <fieldset>
     <legend>Route</legend>
     <div class="row">
-      <label>From <span class="hint">one or more</span><input name="origin" value="{{ w.origin|airports|replace('/', ', ') }}" maxlength="20" placeholder="SJO, LIR" required class="code" autocapitalize="characters" spellcheck="false">
+      <label>From <span class="hint">code, city or airport</span><input name="origin" value="{{ w.origin|airports|replace('/', ', ') }}" maxlength="60" data-airport-suggest placeholder="SJO, LIR" required class="code" autocapitalize="characters" spellcheck="false">
         <span class="airport-names" data-airport-names="origin" aria-live="polite">{% for code, place in w.origin|airport_names %}<span class="{{ '' if place else 'unknown' }}"><b>{{ code }}</b>: {{ place or 'airport not found' }}</span>{% endfor %}</span></label>
-      <label>To <span class="hint">one or more</span><input name="destination" value="{{ w.destination|airports|replace('/', ', ') }}" maxlength="20" placeholder="HOU, AUS" required class="code" autocapitalize="characters" spellcheck="false">
+      <label>To <span class="hint">code, city or airport</span><input name="destination" value="{{ w.destination|airports|replace('/', ', ') }}" maxlength="60" data-airport-suggest placeholder="HOU, AUS" required class="code" autocapitalize="characters" spellcheck="false">
         <span class="airport-names" data-airport-names="destination" aria-live="polite">{% for code, place in w.destination|airport_names %}<span class="{{ '' if place else 'unknown' }}"><b>{{ code }}</b>: {{ place or 'airport not found' }}</span>{% endfor %}</span></label>
       <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>
     </div>

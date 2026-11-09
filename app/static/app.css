@@ -302,3 +302,14 @@ th[aria-sort="descending"] .sort-arrow::after { content: "▼"; opacity: .9; }
 .airport-names:empty { display: none; }
 .airport-names b { color: var(--ink); font-weight: 600; letter-spacing: .04em; }
 .airport-names .unknown { color: var(--bad); }
+
+/* airport suggestions */
+label:has(> .suggest) { position: relative; }
+.suggest { position: absolute; z-index: 20; left: 0; right: 0; top: 4.2rem; margin: 0; padding: .25rem; list-style: none;
+  min-width: 17rem; max-height: 19rem; overflow-y: auto; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / .15); font-weight: 400; }
+.suggest li { display: grid; grid-template-columns: 3.2rem 1fr; column-gap: .5rem; padding: .4rem .5rem; border-radius: 6px; cursor: pointer; }
+.suggest li b { grid-row: span 2; align-self: center; letter-spacing: .05em; }
+.suggest li small { color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest li[aria-selected="true"], .suggest li:hover { background: var(--accent-soft); }
+.suggest li.not-swa { opacity: .7; }

@@ -145,6 +145,92 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Airport autocomplete on From/To: type a code, city or airport name; suggestions apply to the
+  // code being typed (the fields hold several, comma-separated). Southwest airports first.
+  const fold = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();   // José -> jose
+  document.querySelectorAll("input[data-airport-suggest]").forEach((input, n) => {
+    let table = null;
+    const load = () => table || (table = fetch("/static/airports.json").then((r) => r.json())
+      .then((t) => Object.entries(t).map(([code, [city, region, name, swa]]) => ({
+        code, city, region, name, swa, low: fold(city), hay: fold(`${city} ${region} ${name}`) })))
+      .catch(() => []));
+    const list = document.createElement("ul");
+    list.id = `airport-list-${n}`;
+    list.className = "suggest";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+    input.after(list);
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-controls", list.id);
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("autocomplete", "off");
+    let items = [], active = -1;
+
+    const parts = () => {   // [earlier codes, the token being typed]
+      const v = input.value, cut = v.lastIndexOf(",");
+      return [v.slice(0, cut + 1), v.slice(cut + 1).trim()];
+    };
+    const score = (a, q) => {
+      const qc = q.toUpperCase();
+      if (a.code === qc) return 0;
+      if (a.code.startsWith(qc)) return 1;
+      if (q.length < 2) return -1;
+      if (a.low.startsWith(q)) return 2;
+      if (a.hay.includes(` ${q}`) || a.hay.startsWith(q)) return 3;
+      return a.hay.includes(q) ? 4 : -1;
+    };
+    const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); active = -1; };
+    const highlight = (i) => {
+      active = i;
+      [...list.children].forEach((li, j) => li.setAttribute("aria-selected", String(j === i)));
+      if (i >= 0) { input.setAttribute("aria-activedescendant", list.children[i].id); list.children[i].scrollIntoView({ block: "nearest" }); }
+    };
+    const choose = (a) => {
+      const [before] = parts();
+      const codes = before.split(",").map((c) => c.trim()).filter(Boolean);
+      input.value = [...codes, a.code].join(", ") + (codes.length + 1 < 3 ? ", " : "");
+      close();
+      input.dispatchEvent(new Event("input", { bubbles: true }));   // refresh names, without reopening
+      close();
+      input.focus();
+    };
+    const update = async () => {
+      const q = fold(parts()[1]);
+      if (!q) return close();
+      const taken = new Set(parts()[0].toUpperCase().split(/[\s,]+/));
+      const all = await load();
+      items = all.map((a) => [score(a, q), a]).filter(([sc, a]) => sc >= 0 && !taken.has(a.code))
+        .sort((x, y) => x[0] - y[0] || y[1].swa - x[1].swa || x[1].code.localeCompare(y[1].code))
+        .slice(0, 8).map(([, a]) => a);
+      if (!items.length) return close();
+      list.replaceChildren(...items.map((a, i) => {
+        const li = document.createElement("li");
+        li.id = `${list.id}-${i}`;
+        li.setAttribute("role", "option");
+        li.className = a.swa ? "" : "not-swa";
+        li.append(Object.assign(document.createElement("b"), { textContent: a.code }),
+          Object.assign(document.createElement("span"), { textContent: `${a.city}, ${a.region}` }),
+          Object.assign(document.createElement("small"), { textContent: a.swa ? a.name : `${a.name} · not Southwest` }));
+        li.addEventListener("mousedown", (e) => { e.preventDefault(); choose(a); });
+        return li;
+      }));
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      highlight(0);
+    };
+    input.addEventListener("input", (e) => { if (e.isTrusted) update(); });
+    input.addEventListener("focus", () => load());
+    input.addEventListener("blur", () => setTimeout(close, 100));
+    input.addEventListener("keydown", (e) => {
+      if (list.hidden) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); highlight((active + 1) % items.length); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); highlight((active - 1 + items.length) % items.length); }
+      else if ((e.key === "Enter" || e.key === "Tab") && active >= 0) { if (e.key === "Enter" || parts()[1]) { e.preventDefault(); choose(items[active]); } }
+      else if (e.key === "Escape") { e.preventDefault(); close(); }
+    });
+  });
+
   // Rolling window: show how far ahead the picked dates are, since that's what's kept
   const aheadHint = document.querySelector("[data-ahead-hint]");
   if (aheadHint) {
