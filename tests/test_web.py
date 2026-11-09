@@ -215,3 +215,12 @@ def test_dashboard_has_delete(client):
     assert f'action="/watches/{wid}/delete"' in page and "data-confirm" in page
     assert client.post(f"/watches/{wid}/delete", data={"csrf": token}, follow_redirects=False).status_code == 303
     assert db.one("SELECT id FROM watches WHERE id=?", (wid,)) is None
+
+
+def test_too_many_specific_dates_rejected(client):
+    token = admin_client(client)
+    many = ", ".join(future(n) for n in range(5, 5 + 40))
+    r = client.post("/watches", data=watch_form(token, dates=many), follow_redirects=False)
+    assert r.status_code == 400 and "At most 31 departure dates (40 picked)" in r.text
+    page = client.get("/watches/new").text
+    assert page.count('data-max="31"') == 2      # both date pickers know the limit

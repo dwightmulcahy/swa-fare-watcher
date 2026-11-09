@@ -36,7 +36,7 @@
     </div>
     <div data-mode="dates">
       <label>Dates <input name="dates" value="{{ (w.dates or '').replace(',', ', ') }}" placeholder="2026-12-18, 2026-12-19"
-        data-date-list data-min="{{ today_str }}">
+        data-date-list data-min="{{ today_str }}" data-max="{{ max_dates }}">
         <span class="hint" data-date-list-hint>YYYY-MM-DD, separated by commas.</span></label>
     </div>
     <div data-mode="window" class="row">
@@ -64,7 +64,7 @@
     </div>
     <div data-when="return_mode:dates">
       <label>Return dates <input name="ret_dates" value="{{ (w.ret_dates or '').replace(',', ', ') }}" placeholder="2026-12-26, 2026-12-27"
-        data-date-list data-min="{{ today_str }}">
+        data-date-list data-min="{{ today_str }}" data-max="{{ max_dates }}">
         <span class="hint">YYYY-MM-DD, separated by commas. Every departure date is paired with every later return date.</span></label>
     </div>
     <div class="row">

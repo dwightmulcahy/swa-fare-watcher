@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
 templates.env.filters["pts"] = lambda v: "—" if v is None else f"{int(v):,}"
+templates.env.globals["max_dates"] = settings.max_dates_per_watch
 templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
 templates.env.filters["when"] = lambda s: (s or "")[:16].replace("T", " ") or "—"
@@ -405,6 +406,8 @@ def create_app(worker=None, start_worker=True):
             if parsed is not None:
                 if not parsed:
                     errs.append("Enter at least one travel date.")
+                elif len(parsed) > settings.max_dates_per_watch:
+                    errs.append(f"At most {settings.max_dates_per_watch} departure dates ({len(parsed)} picked).")
                 w["dates"] = ",".join(d.isoformat() for d in parsed) or None
         # round trip: searched as two one-ways (Southwest prices each direction separately)
         w["trip_type"] = "roundtrip" if f.get("trip_type") == "roundtrip" else "oneway"
@@ -423,6 +426,8 @@ def create_app(worker=None, start_worker=True):
                     parsed = sorted({dt.date.fromisoformat(d) for d in raw})
                     if not parsed:
                         errs.append("Enter at least one return date.")
+                    elif len(parsed) > settings.max_dates_per_watch:
+                        errs.append(f"At most {settings.max_dates_per_watch} return dates ({len(parsed)} picked).")
                     w["ret_dates"] = ",".join(d.isoformat() for d in parsed) or None
                 except ValueError:
                     errs.append("Return dates must be YYYY-MM-DD, separated by commas.")

@@ -284,8 +284,8 @@ table.list.log { min-width: 760px; }
 .chip-x { border: 0; background: transparent; color: inherit; font-size: 1.1rem; line-height: 1; width: 1.6rem; height: 1.6rem;
   border-radius: 50%; cursor: pointer; }
 .chip-x:hover, .chip-x:focus-visible { background: color-mix(in srgb, var(--red) 20%, transparent); }
-.date-add { display: flex; gap: .5rem; align-items: center; }
-.date-add input[type=date] { max-width: 12rem; }
+.date-add { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.date-add input[type=date] { max-width: 11rem; }
 button.link.danger { color: var(--red); }
 
 /* sortable column titles */
