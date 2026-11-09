@@ -213,17 +213,42 @@ def _parse_calendar_guess(payload):
     return out if any(v is not None for v in out.values()) else None
 
 
-def best_calendar(payloads):
-    """(url, payload, days) for the response with the most priced days, or None.
-    payloads = [(url, parsed JSON)] in the order the page received them."""
+# Responses never read or saved: account and sign-in data (personal details, tokens)
+PRIVATE_API = ("/api/security/", "/userinfo", "/oauth", "/token", "/login", "/account", "/profile")
+MIN_GUESSED_DAYS = 5   # a guessed calendar must price at least this many days
+
+
+def is_private(url):
+    path = url.split("?")[0].lower()
+    return any(p in path for p in PRIVATE_API)
+
+
+def best_calendar(payloads, final=True):
+    """(url, payload, days, exact) for the best calendar among [(url, parsed JSON)], or None.
+    Southwest's own format (lowFareCalendarDays) always wins. The format guesser is only a last
+    resort (final=True, once nothing else is coming) and must find several priced days, so a
+    stray response with one date and a number in it isn't taken for a calendar."""
     best = None
     for url, payload in payloads:
-        days = parse_calendar(payload)
-        if days:
+        if is_private(url):
+            continue
+        days = _parse_low_fare_days(payload)
+        if days and any(v is not None for v in days.values()):
             n = sum(v is not None for v in days.values())
             if best is None or n > best[0]:
                 best = (n, url, payload, days)
-    return best[1:] if best else None
+    if best:
+        return (*best[1:], True)
+    if not final:
+        return None
+    for url, payload in payloads:
+        if is_private(url):
+            continue
+        days = _parse_calendar_guess(payload)
+        n = sum(v is not None for v in (days or {}).values())
+        if n >= MIN_GUESSED_DAYS and (best is None or n > best[0]):
+            best = (n, url, payload, days)
+    return (*best[1:], False) if best else None
 
 
 def calendar_months(dates):
@@ -1082,7 +1107,7 @@ class BrowserSearcher:
 
         def note(r):
             try:
-                if (r.request.resource_type in ("xhr", "fetch")
+                if (r.request.resource_type in ("xhr", "fetch") and not is_private(r.url)
                         and "json" in (r.headers.get("content-type") or "") and len(responses) < 60):
                     responses.append(r)
             except Exception:
@@ -1101,10 +1126,12 @@ class BrowserSearcher:
                     except Exception:
                         continue
                     payloads.append((r.url, payload))
-                    found = best_calendar(payloads)
+                    found = best_calendar(payloads, final=False)   # Southwest's own format only
                 if found:
                     break
                 self.page.wait_for_timeout(500)
+            if not found:
+                found = best_calendar(payloads, final=True)        # last resort: the guesser
         finally:
             self.page.remove_listener("response", note)
         if self.humanize:
@@ -1114,8 +1141,11 @@ class BrowserSearcher:
                 pass
         if not found:
             return None, payloads
-        url, payload, days = found
+        url, payload, days, exact = found
         self._save_json(tag, {"url": url, "data": payload}, sub="calendar")
+        if not exact:
+            applog.warn(f"{tag}: calendar read by guessing its format from {url.split('?')[0][-60:]}; "
+                        "check the saved data", source="search", user_id=self._uid())
         return days, payloads
 
     def capture(self, tag):

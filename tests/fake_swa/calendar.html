@@ -11,5 +11,8 @@ window.calendarFetches = [];
 const load = (ft) => { window.calendarFetches.push(ft);
   return fetch("calendar-data-" + ft + ".json" + location.search); };
 document.querySelectorAll("#shop button").forEach((b) => b.addEventListener("click", () => load(b.dataset.ft)));
-fetch("v2/air/low-fare-calendar/manifest.json").then(() => setTimeout(() => load(q.get("fareType") || "USD"), 300));
+// like the real page: build manifest and the signed-in user's account info first, then the fares
+fetch("v2/air/low-fare-calendar/manifest.json")
+  .then(() => fetch("api/security/userinfo.json"))
+  .then(() => setTimeout(() => load(q.get("fareType") || "USD"), 300));
 </script>

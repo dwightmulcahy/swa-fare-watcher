@@ -199,6 +199,7 @@ def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
     assert fetches == ["USD", "POINTS"]                                 # same page: both on its log
     saved = sorted(p.read_text() for p in (tmp_path / "debug" / "calendar").glob("*.json"))
     assert any("calendar-data-USD.json" in t for t in saved) and any("calendar-data-POINTS" in t for t in saved)
+    assert not any("someone@example.com" in t or "userinfo" in t for t in saved)   # account data never saved
 
 
 def shopping(b, seen):
