@@ -156,3 +156,12 @@ def test_api_errors_are_reported():
     assert swa.parse_calendar(err) is None
     assert "VALIDATION__CURRENCY_CODE__REQUIRED" in swa._api_errors([("u", err)])
     assert swa._api_errors([("u", {"success": True})]) == ""
+
+
+def test_parse_real_calendar_cells():
+    fx = _fixture("calendar-cells-SJO-JAX-2026-12.json")
+    days = swa.parse_calendar_cells(fx["month"], fx["cells"])
+    assert len(days) == 31 and days["2026-12-19"] == 342 and days["2026-12-20"] == 418
+    assert days["2026-12-01"] is None and days["2026-12-30"] == 639
+    assert swa.parse_calendar_cells("Smarch 2026", fx["cells"]) is None
+    assert swa.parse_calendar_cells("December 2026", ["Tuesday 1, Unavailable"]) is None   # nothing priced
