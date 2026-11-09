@@ -114,8 +114,13 @@ document.addEventListener("DOMContentLoaded", () => {
       draw();
       from.focus();
     };
-    // picking a start day suggests it as the range start so the "through" calendar opens near it
-    from.addEventListener("change", () => { if (from.value) thru.min = from.value; });
+    // picking a first day fills "through" with the same day (a one-day range until changed),
+    // and its calendar can't go earlier
+    from.addEventListener("change", () => {
+      if (!from.value) return;
+      thru.min = from.value;
+      thru.value = from.value;
+    });
     add.addEventListener("click", addPicked);
     [from, thru].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addPicked(); } }));
     draw();
@@ -284,6 +289,22 @@ document.addEventListener("DOMContentLoaded", () => {
     show();
   });
   [cppInput, pointsInput].forEach((i) => i && i.addEventListener("input", () => readables.forEach((f) => f())));
+
+  // Start/end date pairs: choosing a start fills the end with the same day, and the end's
+  // calendar starts there (Between dates: first/last day; Rolling window: start/end).
+  [["between_start", "between_end"], ["window_start", "window_end"]].forEach(([a, b]) => {
+    const start = document.querySelector(`input[name="${a}"]`), end = document.querySelector(`input[name="${b}"]`);
+    if (!start || !end) return;
+    const floor = end.min;
+    const sync = () => { end.min = start.value || floor; };
+    start.addEventListener("change", () => {
+      if (!start.value) return;
+      end.value = start.value;
+      sync();
+      end.dispatchEvent(new Event("input", { bubbles: true }));   // refresh its readable line / hints
+    });
+    sync();
+  });
 
   // Rolling window: show how far ahead the picked dates are, since that's what's kept
   const aheadHint = document.querySelector("[data-ahead-hint]");
