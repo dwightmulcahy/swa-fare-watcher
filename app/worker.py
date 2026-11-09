@@ -345,10 +345,17 @@ class Worker:
                                         w_f += 1
                                         self.phase(user_id, f"{route}: {frm}→{to} {date} {ft.lower()} search "
                                                    "returned no fares", watch_id=w["id"], level="warn")
+                                    no_flights = res[ft] == {} and len(res) == 1
+                                    if no_flights:   # nothing flies that day: the other currency won't either
+                                        res[order[1]] = {}
+                                        self.phase(user_id, f"{route}: no flights {frm}→{to} on {date}",
+                                                   watch_id=w["id"])
                                     pause = search_pause(*settings.search_delay)
                                     self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                                                watch_id=w["id"], log=False, until=time.time() + pause)
                                     self.sleep(pause)
+                                    if no_flights:
+                                        break
                                 n_flights = n_match = 0
                                 rows = swa.combine(res["USD"], res["POINTS"])
                                 for r in rows:

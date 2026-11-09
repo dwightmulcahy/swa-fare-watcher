@@ -957,16 +957,42 @@ class BrowserSearcher:
                 self.page.goto(f"{SEARCH_URL}?{urlencode(q)}", wait_until="domcontentloaded")
             payload = info.value.json()
         except Exception as e:
+            if self._no_flights_page(3_000):
+                return self._no_flights(tag)
             applog.warn(f"{tag}: no fare data ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
                         f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
                         attachment=self.capture(tag))
             return None
+        flights = parse_flights(payload)
+        if flights is None and self._no_flights_page(6_000):
+            return self._no_flights(tag)
         if self.humanize:
             try:
                 self.human.read()  # look over the results before moving on
             except Exception:
                 pass
-        return self._parse(payload, tag)
+        return self._parse(payload, tag) if flights is None else flights
+
+    def _no_flights_page(self, wait_ms):
+        """Southwest sends a day with no flights on that route to the Low Fare Calendar, with a
+        "Wanna look for another day?" banner ("We don't have any flights from ... on ...")."""
+        try:
+            self.page.wait_for_function(
+                "() => location.pathname.includes('low-fare-calendar') || "
+                "/we don.t have any flights/i.test(document.body ? document.body.innerText : '')",
+                timeout=wait_ms)
+            return True
+        except Exception:
+            return False
+
+    def _no_flights(self, tag):
+        applog.info(f"{tag}: Southwest has no flights that day", source="search", user_id=self._uid())
+        if self.humanize:
+            try:
+                self.human.read()
+            except Exception:
+                pass
+        return {}
 
     def _uid(self):
         return self.profile_key if isinstance(self.profile_key, int) else None

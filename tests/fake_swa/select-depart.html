@@ -1,0 +1,12 @@
+<!doctype html><title>Select departing flight</title>
+<body><h1>Select departing flight</h1>
+<script>
+// Asks for fares like the real page; on a day with no flights, Southwest sends you to the
+// Low Fare Calendar with a "Wanna look for another day?" banner.
+const q = new URLSearchParams(location.search);
+fetch("/api/air-booking/v1/air-booking/page/air/booking/shopping", {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ fareType: q.get("fareType") }) })
+  .then((r) => r.json())
+  .then((d) => { if (!d.data) location.replace("calendar.html?noflights=1&" + q.toString()); });
+</script>

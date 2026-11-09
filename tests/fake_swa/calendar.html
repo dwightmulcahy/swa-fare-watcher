@@ -1,5 +1,9 @@
 <!doctype html><title>Low fare calendar</title>
-<body><h1>Low fare calendar</h1>
+<body>
+<div id="banner" hidden><h2>Wanna look for another day?</h2>
+  <p>We don't have any flights from San Jose, Costa Rica - SJO to Jacksonville, FL - JAX on 12/16/2026.</p></div>
+<script>if (new URLSearchParams(location.search).get("noflights")) document.getElementById("banner").hidden = false;</script>
+<h1>Low fare calendar</h1>
 <!-- Southwest's real markup (trimmed) -->
 <div><div>Shop in</div><div aria-label="Shop in" role="group"><div>
   <button aria-label="Select dollars currency" role="button" type="button" aria-pressed="true" data-ft="USD"><div><span>Dollars</span></div></button>

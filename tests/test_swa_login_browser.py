@@ -201,3 +201,22 @@ def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
     assert not any("someone@example.com" in t or "userinfo" in t for t in saved)   # account data never saved
 
 
+
+
+def test_day_without_flights_is_empty_not_a_failure(site, monkeypatch, tmp_path):
+    import json
+
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with swa.BrowserSearcher(profile_key="t-noflights", human=False) as b:
+        b._warmed = True
+        b.page.route("**/air-booking/page/air/booking/shopping", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"success": False, "notifications": {"formErrors": [{"code": "ERROR__NO_FLIGHTS"}]}})))
+        assert b.search("SJO", "JAX", "2026-12-16", 1, "USD") == {}
+        assert "noflights=1" in b.page.url                       # Southwest's redirect happened
+    assert not (tmp_path / "debug").exists() or not list((tmp_path / "debug").glob("*.json"))   # nothing to debug
