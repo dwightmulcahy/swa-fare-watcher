@@ -16,6 +16,7 @@ A small multi-user web app that searches Southwest fares once a day for each use
 **Users**
 - Sign in with a username and password; a temporary password from the admin must be changed at first sign-in.
 - Create, edit, pause and delete watches: route, specific dates or a rolling window (e.g. next 14–45 days, Fridays and Saturdays), adults, max stops, max duration, departure window, max cash, max points, minimum ¢/point.
+- **Emails: first search, then only better deals.** A watch's first search that finds matches emails the cheapest (up to 5, plus the cheapest in points). After that it emails only fares cheaper, in cash or in points, than anything it has already sent you; the same prices, or new dates at the same price, stay quiet.
 - **Price targets are optional.** Leave both empty and the watch emails the single cheapest fare (or round trip) it finds, whenever that drops below the last one sent.
 - **Date pickers.** Specific dates are picked one at a time and shown as removable chips; a rolling window is picked as start and end dates and kept as days ahead, so it moves forward daily.
 - **Several airports.** From and To each take up to 3 airports (e.g. `SJO, LIR` → `HOU, AUS`); every pair is searched, and the cheapest wins. Round trips may fly into one airport and back from another unless *Return between the same airports* is ticked; booking links are then one per direction.
