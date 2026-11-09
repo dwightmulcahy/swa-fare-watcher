@@ -218,6 +218,7 @@ def _parse_calendar_guess(payload):
 # Responses never read or saved: account and sign-in data (personal details, tokens)
 PRIVATE_API = ("/api/security/", "/userinfo", "/oauth", "/token", "/login", "/account", "/profile")
 MIN_GUESSED_DAYS = 5   # a guessed calendar must price at least this many days
+CALENDAR_WAIT = 45     # seconds to wait for the calendar's fare data after loading it
 
 
 def is_private(url):
@@ -251,6 +252,41 @@ def best_calendar(payloads, final=True):
         if n >= MIN_GUESSED_DAYS and (best is None or n > best[0]):
             best = (n, url, payload, days)
     return (*best[1:], False) if best else None
+
+
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july",
+                                       "august", "september", "october", "november", "december"), 1)}
+_CELL = re.compile(r"^\s*[A-Za-z]+day\s+(\d{1,2}),\s*(.+?)\s*$")
+
+# What the Low Fare Calendar shows: the selected month tab ("December 2026") and a button per
+# day labelled "Sunday 20, $418" / "Wednesday 2, Unavailable" (+ "  Selected depart date").
+CALENDAR_DOM_JS = """() => {
+  const tab = document.querySelector('[role=tab][aria-selected=true][aria-label]');
+  const panel = tab && document.getElementById(tab.getAttribute('aria-controls')) || document;
+  return { month: tab ? tab.getAttribute('aria-label') : null,
+           cells: [...panel.querySelectorAll('[role=gridcell] button[aria-label]')].map(b => b.getAttribute('aria-label')) };
+}"""
+
+
+def parse_calendar_cells(month, cells):
+    """{YYYY-MM-DD: amount or None} from the calendar's month label and day-cell labels, or None."""
+    try:
+        name, year = (month or "").strip().rsplit(" ", 1)
+        m, y = _MONTHS[name.lower()], int(year)
+    except (ValueError, KeyError):
+        return None
+    out = {}
+    for label in cells or []:
+        hit = _CELL.match(str(label))
+        if not hit:
+            continue
+        try:
+            day = dt.date(y, m, int(hit.group(1))).isoformat()
+        except ValueError:
+            continue
+        rest = hit.group(2).split("  ")[0]          # drop "  Selected depart date"
+        out[day] = None if "unavailable" in rest.lower() else num(rest)
+    return out if any(v is not None for v in out.values()) else None
 
 
 def calendar_months(dates):
@@ -1057,7 +1093,7 @@ class BrowserSearcher:
         def go():
             self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
         try:
-            days, payloads = self._collect_calendar(go, tag, wait=45)
+            days, payloads = self._collect_calendar(go, tag, wait=CALENDAR_WAIT)
         except Exception as e:
             applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
                         f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
@@ -1104,6 +1140,8 @@ class BrowserSearcher:
                     break
                 self.page.wait_for_timeout(500)
             if not found:
+                found = self._calendar_from_page(tag)                # what the page itself shows
+            if not found:
                 found = best_calendar(payloads, final=True)        # last resort: the guesser
         finally:
             self.page.remove_listener("response", note)
@@ -1120,6 +1158,19 @@ class BrowserSearcher:
             applog.warn(f"{tag}: calendar read by guessing its format from {url.split('?')[0][-60:]}; "
                         "check the saved data", source="search", user_id=self._uid())
         return days, payloads
+
+    def _calendar_from_page(self, tag):
+        """Read the fares off the calendar page's day cells when its data response was missed."""
+        try:
+            got = self.page.evaluate(CALENDAR_DOM_JS)
+        except Exception:
+            return None
+        days = parse_calendar_cells(got.get("month"), got.get("cells"))
+        if not days:
+            return None
+        applog.info(f"{tag}: read the fares from the calendar page itself ({got.get('month')})",
+                    source="search", user_id=self._uid())
+        return ("page", {"month": got.get("month"), "cells": got.get("cells")}, days, True)
 
     def capture(self, tag):
         """Screenshot what the browser shows right now, for the log. Returns the file (or None)."""

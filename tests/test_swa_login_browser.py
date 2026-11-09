@@ -220,3 +220,16 @@ def test_day_without_flights_is_empty_not_a_failure(site, monkeypatch, tmp_path)
         assert b.search("SJO", "JAX", "2026-12-16", 1, "USD") == {}
         assert "noflights=1" in b.page.url                       # Southwest's redirect happened
     assert not (tmp_path / "debug").exists() or not list((tmp_path / "debug").glob("*.json"))   # nothing to debug
+
+def test_calendar_read_from_page_cells_when_data_is_missed(site, monkeypatch, tmp_path):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar-cells.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    monkeypatch.setattr(swa, "CALENDAR_WAIT", 1)
+    with swa.BrowserSearcher(profile_key="t-cal-cells", human=False) as b:
+        b._warmed = True
+        days = b.calendar("SJO", "JAX", "2026-12-19", 1, "USD")
+    assert days == {"2026-12-01": None, "2026-12-19": 342.0, "2026-12-20": 418.0}   # selected month only
