@@ -334,6 +334,10 @@ def watch_dates(w, today=None):
     today = today or dt.date.today()
     if w["dates"]:
         ds = sorted({dt.date.fromisoformat(d.strip()) for d in w["dates"].split(",") if d.strip()})
+    elif _get(w, "date_from") and _get(w, "date_to"):
+        a = max(dt.date.fromisoformat(w["date_from"]), today)
+        b = dt.date.fromisoformat(w["date_to"])
+        ds = [a + dt.timedelta(days=i) for i in range((b - a).days + 1)]
     else:
         a, b = w["days_from"] or 0, w["days_to"] or 0
         ds = [today + dt.timedelta(days=i) for i in range(a, b + 1)]

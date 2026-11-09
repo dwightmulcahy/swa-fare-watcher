@@ -348,7 +348,7 @@ def create_app(worker=None, start_worker=True):
             "name": str(f.get("name", "")).strip()[:60],
             "origin": ",".join(swa.airports(str(f.get("origin", "")))),
             "destination": ",".join(swa.airports(str(f.get("destination", "")))),
-            "dates": None, "days_from": None, "days_to": None,
+            "dates": None, "days_from": None, "days_to": None, "date_from": None, "date_to": None,
             "weekdays": ",".join(d for d in swa.WEEKDAYS if f.get(f"wd_{d}")) or None,
             "adults": opt_int("adults", 1, 8) or 1,
             "max_stops": opt_int("max_stops", 0, 3),
@@ -383,7 +383,21 @@ def create_app(worker=None, start_worker=True):
         for k in ("depart_after", "depart_before"):
             if w[k] and not TIME.match(w[k]):
                 errs.append("Departure times must be HH:MM.")
-        if f.get("date_mode") == "window":
+        if f.get("date_mode") == "between":
+            try:
+                a = dt.date.fromisoformat(str(f.get("between_start", "")))
+                b = dt.date.fromisoformat(str(f.get("between_end", "")))
+            except ValueError:
+                errs.append("Between dates needs a first and last departure date.")
+            else:
+                if b < a:
+                    errs.append("Between dates: the last date must be on or after the first.")
+                elif b < dt.date.today():
+                    errs.append("Between dates: the last date has already passed.")
+                elif (b - a).days > 365:
+                    errs.append("Between dates: at most a year apart.")
+                w["date_from"], w["date_to"] = a.isoformat(), b.isoformat()
+        elif f.get("date_mode") == "window":
             # picked as calendar dates, stored as days ahead so the window rolls forward daily
             for k, src in (("days_from", "window_start"), ("days_to", "window_end")):
                 if f.get(src):
@@ -472,7 +486,7 @@ def create_app(worker=None, start_worker=True):
 
     def watch_ctx(w):
         return {"w": w, "weekdays": WEEKDAY_LABELS,
-                "estimate": swa.searches_per_run(w) if (w.get("dates") or w.get("days_to") is not None) else 0}
+                "estimate": swa.searches_per_run(w) if (w.get("dates") or w.get("date_from") or w.get("days_to") is not None) else 0}
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
@@ -499,6 +513,7 @@ def create_app(worker=None, start_worker=True):
     def new_watch(request: Request):
         u, s = require(request)
         w = {"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
+             "date_from": None, "date_to": None,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
              "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,

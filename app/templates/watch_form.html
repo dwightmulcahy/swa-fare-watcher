@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ 'New watch' if new else 'Edit watch' }}{% endblock %}
-{% set window = not w.dates and w.days_to is not none %}
+{% set between = not w.dates and w.date_from %}
+{% set window = not w.dates and not between and w.days_to is not none %}
 {% set rt = w.trip_type == 'roundtrip' %}
 {% set ret_by_dates = w.ret_dates and w.ret_dates|length > 0 %}
 {% block content %}
@@ -33,7 +34,8 @@
   <fieldset>
     <legend>Departure dates <span class="hint">each date costs 2 searches (cash + points)</span></legend>
     <div class="seg">
-      <label><input type="radio" name="date_mode" value="dates" {{ '' if window else 'checked' }}> Specific dates</label>
+      <label><input type="radio" name="date_mode" value="dates" {{ '' if (window or between) else 'checked' }}> Specific dates</label>
+      <label><input type="radio" name="date_mode" value="between" {{ 'checked' if between }}> Between dates</label>
       <label><input type="radio" name="date_mode" value="window" {{ 'checked' if window }}> Rolling window</label>
     </div>
     <div data-mode="dates">
@@ -41,6 +43,11 @@
         data-date-list data-min="{{ today_str }}" data-max="{{ max_dates }}">
         <span class="hint" data-date-list-hint>YYYY-MM-DD, separated by commas.</span></label>
     </div>
+    <div data-mode="between" class="row">
+      <label>First day <input name="between_start" type="date" min="{{ today_str }}" value="{{ w.date_from or 14|days_ahead }}"></label>
+      <label>Last day <input name="between_end" type="date" min="{{ today_str }}" value="{{ w.date_to or 45|days_ahead }}"></label>
+    </div>
+    <p class="hint" data-mode="between">Every day from the first to the last (on the weekdays below, if any), fixed: past days drop off and the watch ends after the last day. Up to {{ max_dates }} days are searched per run, earliest first.</p>
     <div data-mode="window" class="row">
       <label>Start <input name="window_start" type="date" min="{{ today_str }}" max="{{ 365|days_ahead }}" value="{{ (w.days_from if w.days_from is not none else 14)|days_ahead }}" data-ahead="ws"></label>
       <label>End <input name="window_end" type="date" min="{{ today_str }}" max="{{ 365|days_ahead }}" value="{{ (w.days_to if w.days_to is not none else 45)|days_ahead }}" data-ahead="we"></label>

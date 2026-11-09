@@ -186,6 +186,8 @@ MIGRATIONS = {
         "ret_depart_before": "TEXT",
         "mix_payment": "INTEGER NOT NULL DEFAULT 1",     # pick cash or points per leg
         "same_airports": "INTEGER NOT NULL DEFAULT 0",   # round trip must return between the same airports
+        "date_from": "TEXT",                     # "between dates": fixed first and last departure day
+        "date_to": "TEXT",
     },
     "fares": {
         "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret
