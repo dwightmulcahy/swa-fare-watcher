@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import applog, buildinfo, db, swa
+from . import airports, applog, buildinfo, db, swa
 from .config import settings
 from .mailer import fmt_dur
 from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
 templates.env.filters["pts"] = lambda v: "—" if v is None else f"{int(v):,}"
+templates.env.filters["airport_names"] = lambda v: airports.describe(swa.airports(v))
 templates.env.globals["max_dates"] = settings.max_dates_per_watch
 templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
