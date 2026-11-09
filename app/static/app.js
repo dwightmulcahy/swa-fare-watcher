@@ -121,6 +121,30 @@ document.addEventListener("DOMContentLoaded", () => {
     draw();
   });
 
+  // Airport names under the From/To codes, updated as you type
+  const nameBoxes = document.querySelectorAll("[data-airport-names]");
+  if (nameBoxes.length) {
+    let table = null;
+    const load = () => table || (table = fetch("/static/airports.json").then((r) => r.json()).catch(() => ({})));
+    nameBoxes.forEach((box) => {
+      const input = document.querySelector(`input[name="${box.dataset.airportNames}"]`);
+      if (!input) return;
+      const show = async () => {
+        const codes = [...new Set(input.value.toUpperCase().split(/[\s,/]+/).filter((c) => c.length === 3))];
+        const t = await load();
+        box.replaceChildren(...codes.map((c) => {
+          const a = t[c];
+          const line = document.createElement("span");
+          if (!a) line.className = "unknown";
+          line.append(Object.assign(document.createElement("b"), { textContent: c }), `: ${a ? `${a[0]}, ${a[1]}` : "airport not found"}`);
+          if (a) line.title = a[2];
+          return line;
+        }));
+      };
+      input.addEventListener("input", show);
+    });
+  }
+
   // Rolling window: show how far ahead the picked dates are, since that's what's kept
   const aheadHint = document.querySelector("[data-ahead-hint]");
   if (aheadHint) {
