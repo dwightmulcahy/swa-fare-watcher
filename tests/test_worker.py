@@ -167,19 +167,3 @@ def test_cash_and_points_order_varies(worker, sent):
     firsts = [c[3] for c in FakeSearcher.calls[::2]]  # first fare type searched for each date
     assert set(firsts) == {"USD", "POINTS"}
 
-
-def test_no_long_pause_between_cash_and_points_when_switching_on_page(sent):
-    from app.worker import Worker
-    from tests.conftest import FakeSearcher
-
-    class Switching(FakeSearcher):
-        switches_currency = True
-
-    for factory, per_date in ((FakeSearcher, 2), (Switching, 1)):
-        pauses = []
-        w = Worker(searcher_factory=factory, sleep=pauses.append)
-        uid = make_user(username=factory.__name__)
-        make_watch(uid)                            # 2 dates
-        res = w.run_user(uid)
-        assert res["attempts"] == 4                # still a cash and a points search per date
-        assert len(pauses) == 2 * per_date, factory

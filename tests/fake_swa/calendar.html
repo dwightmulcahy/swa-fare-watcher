@@ -1,16 +1,22 @@
 <!doctype html><title>Low fare calendar</title>
 <body><h1>Low fare calendar</h1>
-<div id="shop"><b>Shop in</b>
-  <button type="button" data-ft="USD">Dollars</button>
-  <button type="button" data-ft="POINTS">Points</button>
-</div>
+<!-- Southwest's real markup (trimmed) -->
+<div><div>Shop in</div><div aria-label="Shop in" role="group"><div>
+  <button aria-label="Select dollars currency" role="button" type="button" aria-pressed="true" data-ft="USD"><div><span>Dollars</span></div></button>
+  <button aria-label="Select points currency" role="button" type="button" aria-pressed="false" data-ft="POINTS"><div><span>Points</span></div></button>
+  <button aria-label="Select dollars plus points currency" role="button" type="button" aria-pressed="false" data-ft="MIX"><div><span>$ + Points</span></div></button>
+</div></div></div>
 <script>
 // like the real page: its build manifest first, then the fares
 const q = new URLSearchParams(location.search);
 window.calendarFetches = [];
 const load = (ft) => { window.calendarFetches.push(ft);
   return fetch("calendar-data-" + ft + ".json" + location.search); };
-document.querySelectorAll("#shop button").forEach((b) => b.addEventListener("click", () => load(b.dataset.ft)));
+const buttons = document.querySelectorAll("[role=group] button");
+buttons.forEach((b) => b.addEventListener("click", () => {
+  buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  load(b.dataset.ft);
+}));
 // like the real page: build manifest and the signed-in user's account info first, then the fares
 fetch("v2/air/low-fare-calendar/manifest.json")
   .then(() => fetch("api/security/userinfo.json"))
