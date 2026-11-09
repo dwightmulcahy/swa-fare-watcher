@@ -38,6 +38,7 @@
       {% if w.trip_type == 'roundtrip' %}<span class="pill trip">Round trip</span>{% endif %}
       {% if not w.active %}<span class="pill">Paused</span>{% endif %}</td>
     <td class="small">{% if w.dates %}{{ w.dates.split(',')|length }} date(s)<br><span class="muted">{{ w.dates.split(',')[0] }}{% if w.dates.split(',')|length > 1 %} … {{ w.dates.split(',')[-1] }}{% endif %}</span>
+      {% elif w.date_from %}Between<br><span class="muted">{{ w.date_from }} … {{ w.date_to }}</span>
       {% else %}Next {{ w.days_from }}–{{ w.days_to }} days{% endif %}
       {% if w.weekdays %}<br><span class="muted">{{ w.weekdays.replace(',', ', ')|title }}</span>{% endif %}
       {% if w.trip_type == 'roundtrip' %}<br><span class="muted">{% if w.ret_dates %}back on {{ w.ret_dates.split(',')|length }} date(s){% else %}stay {{ w.nights_min }}–{{ w.nights_max }} nights{% endif %}</span>{% endif %}
