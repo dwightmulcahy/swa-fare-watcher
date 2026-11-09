@@ -1,0 +1,26 @@
+<!doctype html><title>Select departing flight</title>
+<body>
+<h1>Select departing flight</h1>
+<div id="shop"><b>Shop in</b>
+  <button type="button" data-ft="USD">Dollars</button>
+  <button type="button" data-ft="POINTS">Points</button>
+  <button type="button" data-ft="MIX">$ + Points</button>
+</div>
+<div id="fares"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const mode = q.get("mode") || "ok";             // ok | static (switch doesn't fetch) | none (no switch)
+window.fetches = [];
+if (mode === "none") document.getElementById("shop").remove();
+async function load(ft) {
+  window.fetches.push(ft);
+  const r = await fetch("/api/air-booking/v1/air-booking/page/air/booking/shopping", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fareType: ft, origin: q.get("originationAirportCode") }) });
+  document.getElementById("fares").textContent = JSON.stringify(await r.json()).slice(0, 80);
+}
+document.querySelectorAll("#shop button").forEach((b) => b.addEventListener("click", () => {
+  if (mode !== "static") load(b.dataset.ft);
+}));
+load(q.get("fareType") || "USD");
+</script>

@@ -2,6 +2,7 @@
 launch settings and human input. Skipped where no browser is installed (e.g. the CI pytest job);
 the container smoke test covers the browser itself."""
 import functools
+import json
 import http.server
 import os
 import shutil
@@ -193,3 +194,42 @@ def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
     assert days == {"2026-11-09": 481.0, "2026-11-10": 256.0, "2026-11-11": None}
     (saved,) = (tmp_path / "debug" / "calendar").glob("*.json")
     assert "calendar-data.json" in saved.read_text()
+
+
+def shopping(b, seen):
+    """Answer the fake page's fare requests: cash or points flights by the posted fareType."""
+    from tests.conftest import detail, payload
+
+    def handle(route):
+        ft = json.loads(route.request.post_data)["fareType"]
+        seen.append(ft)
+        body = payload(detail("189.98", "20.00") if ft == "USD" else detail("12,000", "5.60"))
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+    b.page.route("**/air-booking/page/air/booking/shopping", handle)
+
+
+@pytest.mark.parametrize("mode, loads", [("ok", 1), ("static", 2), ("none", 2)])
+def test_points_by_switching_currency_on_the_results_page(site, monkeypatch, tmp_path, mode, loads):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    page_loads, seen = [], []
+    real_query = swa.search_query
+    monkeypatch.setattr(swa, "search_query", lambda *a, **k: {**real_query(*a, **k), "mode": mode})
+    with swa.BrowserSearcher(profile_key=f"t-toggle-{mode}", human=True) as b:
+        b._warmed = True
+        b.human.speed = 0.1
+        shopping(b, seen)
+        b.page.on("framenavigated", lambda f: f == b.page.main_frame and page_loads.append(f.url))
+        cash = b.search("LIR", "JAX", "2027-03-12", 1, "USD")
+        assert b.switches_currency
+        points = b.search("LIR", "JAX", "2027-03-12", 1, "POINTS")
+        assert b.switches_currency == (mode == "ok")
+    (c,) = cash.values()
+    (p,) = points.values()
+    assert c["fare"][0] == 189.98 and p["fare"][0] == 12000
+    assert len(page_loads) == loads and seen[-1] == "POINTS"
+
