@@ -44,70 +44,80 @@ document.addEventListener("DOMContentLoaded", () => {
     input.form && input.form.addEventListener("submit", () => { input.type = "password"; });
   });
 
-  // Several dates: a date picker that adds each picked day as a removable chip. The original
-  // comma-separated field stays as the hidden value that's submitted.
+  // Several dates: pick a day, or a day and a "through" day for a range, then Add. Runs of
+  // consecutive days show as one chip. The original comma-separated field stays as the hidden
+  // value that's submitted.
   document.querySelectorAll("input[data-date-list]").forEach((field) => {
+    const MAX = Number(field.dataset.max) || 31;   // the server's limit on dates per watch
     const label = field.closest("label");
     const box = document.createElement("div");
     box.className = "date-list";
     const chips = document.createElement("ul");
     chips.className = "chips";
     chips.setAttribute("aria-live", "polite");
-    const picker = document.createElement("input");
-    picker.type = "date";
-    if (field.dataset.min) picker.min = field.dataset.min;
-    picker.setAttribute("aria-label", "Add a date");
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "btn small";
-    add.textContent = "Add";
-    const row = document.createElement("div");
-    row.className = "date-add";
-    row.append(picker, add);
-    box.append(chips, row);
+    const mk = (tag, props) => Object.assign(document.createElement(tag), props);
+    const from = mk("input", { type: "date" });
+    const thru = mk("input", { type: "date" });
+    [from, thru].forEach((i) => { if (field.dataset.min) i.min = field.dataset.min; });
+    from.setAttribute("aria-label", "Date, or first day of a range");
+    thru.setAttribute("aria-label", "Last day of the range (optional)");
+    const add = mk("button", { type: "button", className: "btn small", textContent: "Add" });
+    const msg = mk("span", { className: "hint", role: "status" });
+    const row = mk("div", { className: "date-add" });
+    row.append(from, mk("span", { className: "muted small", textContent: "through" }), thru, add);
+    box.append(chips, row, msg);
     label.after(box);
     field.type = "hidden";
     const hint = label.querySelector(".hint");
-    if (hint) hint.textContent = hint.textContent.replace("YYYY-MM-DD, separated by commas.", "Pick a date to add it; add as many as you like.");
+    if (hint) hint.textContent = hint.textContent.replace("YYYY-MM-DD, separated by commas.",
+      "Pick a day, or a first and last day for a range, then Add. Add as many as you like.");
 
+    const DAY = 864e5;
+    const toDate = (d) => new Date(d + "T00:00:00Z");
+    const iso = (t) => new Date(t).toISOString().slice(0, 10);
     const read = () => field.value.split(/[\s,]+/).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
     const thisYear = String(new Date().getFullYear());
     const opts = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
     const short = new Intl.DateTimeFormat(undefined, opts);
     const long = new Intl.DateTimeFormat(undefined, { ...opts, year: "numeric" });
-    const fmt = { format: (dte) => (dte.toISOString().startsWith(thisYear) ? short : long).format(dte) };
+    const fmt = (d) => (d.startsWith(thisYear) ? short : long).format(toDate(d));
+    const runs = (days) => days.reduce((out, d) => {
+      const last = out[out.length - 1];
+      if (last && toDate(d) - toDate(last[last.length - 1]) === DAY) last.push(d); else out.push([d]);
+      return out;
+    }, []);
     const draw = () => {
       const days = [...new Set(read())].sort();
       field.value = days.join(", ");
-      chips.replaceChildren(...days.map((d) => {
-        const li = document.createElement("li");
-        li.className = "chip date-chip";
-        li.append(fmt.format(new Date(d + "T00:00:00Z")) + " ");
-        const x = document.createElement("button");
-        x.type = "button";
-        x.className = "chip-x";
-        x.textContent = "×";
-        x.setAttribute("aria-label", `Remove ${d}`);
-        x.addEventListener("click", () => { field.value = read().filter((v) => v !== d).join(","); draw(); picker.focus(); });
+      chips.replaceChildren(...runs(days).map((run) => {
+        const first = run[0], last = run[run.length - 1];
+        const li = mk("li", { className: "chip date-chip" });
+        li.append(run.length === 1 ? fmt(first) : `${fmt(first)} – ${fmt(last)} (${run.length} days)`, " ");
+        const x = mk("button", { type: "button", className: "chip-x", textContent: "×" });
+        x.setAttribute("aria-label", run.length === 1 ? `Remove ${first}` : `Remove ${first} through ${last}`);
+        x.addEventListener("click", () => { field.value = read().filter((v) => !run.includes(v)).join(","); draw(); from.focus(); });
         li.append(x);
         return li;
       }));
-      if (!days.length) {
-        const li = document.createElement("li");
-        li.className = "muted small";
-        li.textContent = "No dates yet";
-        chips.append(li);
-      }
+      if (!days.length) chips.append(mk("li", { className: "muted small", textContent: "No dates yet" }));
     };
     const addPicked = () => {
-      if (!picker.value) return;
-      field.value = [...read(), picker.value].join(",");
-      picker.value = "";
+      msg.textContent = "";
+      if (!from.value) { msg.textContent = "Pick a date first."; from.focus(); return; }
+      let [a, b] = [from.value, thru.value || from.value].sort();
+      const n = (toDate(b) - toDate(a)) / DAY + 1;
+      const added = Array.from({ length: n }, (_, i) => iso(toDate(a).getTime() + i * DAY));
+      const total = new Set([...read(), ...added]).size;
+      if (total > MAX) { msg.textContent = `That would make ${total} dates; the limit is ${MAX}.`; return; }
+      field.value = [...read(), ...added].join(",");
+      from.value = thru.value = "";
       draw();
+      from.focus();
     };
-    picker.addEventListener("change", addPicked);
+    // picking a start day suggests it as the range start so the "through" calendar opens near it
+    from.addEventListener("change", () => { if (from.value) thru.min = from.value; });
     add.addEventListener("click", addPicked);
-    picker.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addPicked(); } });
+    [from, thru].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addPicked(); } }));
     draw();
   });
 
