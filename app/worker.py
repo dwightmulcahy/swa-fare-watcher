@@ -345,8 +345,6 @@ class Worker:
                                         w_f += 1
                                         self.phase(user_id, f"{route}: {frm}→{to} {date} {ft.lower()} search "
                                                    "returned no fares", watch_id=w["id"], level="warn")
-                                    if ft == order[0] and getattr(searcher, "switches_currency", False):
-                                        continue   # the other currency is a click on the same page
                                     pause = search_pause(*settings.search_delay)
                                     self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                                                watch_id=w["id"], log=False, until=time.time() + pause)
