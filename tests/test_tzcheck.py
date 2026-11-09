@@ -94,3 +94,12 @@ def test_lookup_falls_through_services():
     assert tzcheck.lookup_ip_timezone(opener=opener) == ("America/Denver", "198.51.100.1",
                                                           "Denver, Colorado, United States", "ipapi.co")
     assert len(calls) == 2
+
+
+def test_utc_in_docker_explains_env_not_reaching_container(tz, monkeypatch):
+    tz("UTC")
+    monkeypatch.setattr(tzcheck, "in_docker", lambda: True)
+    r = tzcheck.check(found("America/Costa_Rica"), WINTER)
+    assert r.level == "error" and "env_file: .env" in r.message and "NAS's own time zone" in r.message
+    monkeypatch.setattr(tzcheck, "in_docker", lambda: False)
+    assert "env_file" not in tzcheck.check(found("America/Costa_Rica"), WINTER).message

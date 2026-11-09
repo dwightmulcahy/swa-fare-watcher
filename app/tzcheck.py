@@ -116,8 +116,22 @@ def check(lookup=lookup_ip_timezone, now=None):
         "error",
         f"Browser time zone {btz} ({_fmt(b_off[0])}) doesn't match this machine's internet location: "
         f"{where} is in {itz} ({_fmt(i_off[0])}), per {source}. Sites compare the two, and a mismatch "
-        f"looks like a bot or proxy. Set {var}={itz}, or SWA_SKIP_TZ_CHECK=true if you know better.",
+        f"looks like a bot or proxy. Set {var}={itz}, or SWA_SKIP_TZ_CHECK=true if you know better."
+        + (_not_passed_hint(var) if btz.upper() in ("UTC", "ETC/UTC") else ""),
         btz, itz, ip, place, source)
+
+
+def in_docker():
+    return Path("/.dockerenv").exists()
+
+
+def _not_passed_hint(var):
+    # The image defaults to UTC; seeing it usually means the .env never reached the container
+    if not in_docker():
+        return ""
+    return (f" In Docker, UTC means {var} isn't reaching the container: a .env next to the compose file only "
+            "fills in ${...} in that file. Give the service `env_file: .env`, or `environment:` with "
+            f"`{var}: ...`. The NAS's own time zone setting doesn't matter.")
 
 
 last_result = None  # shown on the admin page
