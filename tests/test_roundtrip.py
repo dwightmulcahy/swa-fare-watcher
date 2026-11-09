@@ -118,6 +118,8 @@ def test_create_round_trip_watch_and_view_results(client, worker):
     worker.run_user(uid)
     page = client.get(f"/watches/{wid}").text
     assert "Best round trips" in page and "Fares by direction" in page and "tripType=roundtrip" in page
+    assert page.count("data-sortable") == 2                       # both tables sort by column
+    assert 'data-sort="379.96"' in page                           # raw totals for numeric sorting
     assert "Round trip" in client.get("/").text
 
 

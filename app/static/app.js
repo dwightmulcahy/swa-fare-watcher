@@ -128,6 +128,42 @@ document.addEventListener("DOMContentLoaded", () => {
     show();
   }
 
+  // Sortable tables: click a column title to sort; click again to reverse. Cells may carry a
+  // data-sort value (raw number or ISO date); blanks always sort last.
+  document.querySelectorAll("table[data-sortable]").forEach((table) => {
+    const body = table.tBodies[0];
+    if (!body) return;
+    const heads = [...table.tHead.rows[0].cells];
+    const key = (row, i) => {
+      const c = row.cells[i];
+      if (!c) return null;
+      const raw = (c.dataset.sort ?? c.textContent).trim();
+      if (raw === "" || raw === "—") return null;
+      const n = Number(raw.replace(/[$,¢\s]/g, ""));
+      return Number.isFinite(n) && /^[\s$\d.,¢-]+$/.test(raw) ? n : raw.toLowerCase();
+    };
+    heads.forEach((th, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sort";
+      btn.append(...th.childNodes);
+      btn.append(Object.assign(document.createElement("span"), { className: "sort-arrow", ariaHidden: "true" }));
+      th.append(btn);
+      btn.addEventListener("click", () => {
+        const dir = th.getAttribute("aria-sort") === "ascending" ? -1 : 1;
+        heads.forEach((h) => h.removeAttribute("aria-sort"));
+        th.setAttribute("aria-sort", dir === 1 ? "ascending" : "descending");
+        const rows = [...body.rows].map((r, n) => [r, key(r, i), n]);
+        rows.sort(([, a, x], [, b, y]) => {
+          if (a === null || b === null) return a === b ? x - y : a === null ? 1 : -1;
+          if (typeof a !== typeof b) return (typeof a === "number" ? -1 : 1) * dir;
+          return (a < b ? -1 : a > b ? 1 : x - y) * dir;
+        });
+        body.append(...rows.map(([r]) => r));
+      });
+    });
+  });
+
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const text = document.getElementById(btn.dataset.copy).textContent.trim();
