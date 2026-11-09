@@ -1,0 +1,1197 @@
+{
+ "success": true,
+ "data": {
+  "searchResults": [
+   {
+    "destinationAirportCode": "JAX",
+    "originationAirportCode": "LIR",
+    "international": true,
+    "currencyCode": "USD",
+    "lowFareCalendarDays": [
+     {
+      "date": "2027-03-01",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "255.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "368.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "113.52"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "295.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "410.62"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "115.62"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "375.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "494.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "119.92"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "435.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "558.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "123.22"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-02",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-03",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-04",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "202.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "312.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "110.52"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "242.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "354.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "112.72"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "322.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "439.02"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "117.02"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "382.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "502.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "120.32"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-05",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "158.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "266.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "108.22"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "198.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "308.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "110.32"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "278.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "392.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "114.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "338.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "455.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "117.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-06",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-07",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "298.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "413.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "115.72"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "338.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "455.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "117.92"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "418.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "540.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "122.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "478.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "603.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "125.52"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-08",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "255.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "368.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "113.52"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "295.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "410.62"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "115.62"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "375.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "494.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "119.92"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "435.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "558.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "123.22"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-09",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-10",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-11",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "460.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "574.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "114.42"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "540.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "658.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "118.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "600.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "721.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "121.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-12",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1090.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "140.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1175.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1238.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "148.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-13",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1095.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.32"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1179.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "149.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1242.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "152.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-14",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "407.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "523.12"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "116.12"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1175.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1238.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "148.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-15",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "298.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "413.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "115.72"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "338.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "455.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "117.92"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "418.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "540.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "122.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "478.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "603.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "125.52"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-16",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "317.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "433.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "116.82"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "355.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "473.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "118.92"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "435.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "558.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "123.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "495.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "621.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "126.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-17",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "460.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "574.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "114.42"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "540.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "658.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "118.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "600.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "721.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "121.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-18",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "560.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "679.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "119.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "640.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "764.12"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "124.12"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "700.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "827.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "127.32"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-19",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "875.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1011.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "136.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "955.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1096.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "141.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1015.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1159.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "144.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-20",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1095.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.32"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1179.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "149.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1242.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "152.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-21",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1090.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "140.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1175.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1238.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "148.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-22",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "460.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "584.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "124.52"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "540.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "668.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "128.82"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "600.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "732.02"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "132.02"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-23",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-24",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-25",
+      "fares": {
+       "WGA": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "317.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "423.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "106.72"
+        }
+       },
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "355.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "463.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "108.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "435.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "548.12"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "113.12"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "495.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "611.32"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "116.32"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-26",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1090.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "140.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1175.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1238.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "148.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-27",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "460.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "584.52"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "124.52"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1179.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "149.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1242.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "152.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-28",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "950.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1090.82"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "140.82"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1030.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1175.22"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "145.22"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "1090.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "1238.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "148.42"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-29",
+      "fares": {
+       "PLU": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "460.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "574.42"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "114.42"
+        }
+       },
+       "ANY": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "540.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "658.72"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "118.72"
+        }
+       },
+       "BUS": {
+        "baseFare": {
+         "currencyCode": "USD",
+         "value": "600.00"
+        },
+        "totalFare": {
+         "currencyCode": "USD",
+         "value": "721.92"
+        },
+        "totalTaxesAndFees": {
+         "currencyCode": "USD",
+         "value": "121.92"
+        }
+       }
+      }
+     },
+     {
+      "date": "2027-03-30",
+      "fares": {}
+     },
+     {
+      "date": "2027-03-31",
+      "fares": {}
+     }
+    ]
+   }
+  ]
+ }
+}

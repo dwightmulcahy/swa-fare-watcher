@@ -191,9 +191,14 @@ def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
     with BrowserSearcher(profile_key="t-cal", human=False) as b:
         b._warmed = True
         days = b.calendar("LIR", "HOU", "2026-11-09", 1, "USD")
-    assert days == {"2026-11-09": 481.0, "2026-11-10": 256.0, "2026-11-11": None}
-    (saved,) = (tmp_path / "debug" / "calendar").glob("*.json")
-    assert "calendar-data.json" in saved.read_text()
+        assert days == {"2026-11-09": 481.0, "2026-11-10": 256.0, "2026-11-11": None}
+        assert b.calendar_switches_currency
+        points = b.calendar("LIR", "HOU", "2026-11-09", 1, "POINTS")      # a click, not a page load
+        fetches = b.page.evaluate("window.calendarFetches")
+    assert points == {"2026-11-09": 38000.0, "2026-11-10": 19500.0, "2026-11-11": None}
+    assert fetches == ["USD", "POINTS"]                                 # same page: both on its log
+    saved = sorted(p.read_text() for p in (tmp_path / "debug" / "calendar").glob("*.json"))
+    assert any("calendar-data-USD.json" in t for t in saved) and any("calendar-data-POINTS" in t for t in saved)
 
 
 def shopping(b, seen):

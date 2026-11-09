@@ -126,7 +126,52 @@ def _amount(v, depth=0):
     return None
 
 
+def _api_errors(payloads):
+    """", Southwest said VALIDATION__X" from failed API responses, for the log."""
+    codes = []
+    for _, p in payloads:
+        if isinstance(p, dict) and p.get("success") is False:
+            for e in ((p.get("notifications") or {}).get("fieldErrors") or []) + \
+                     ((p.get("notifications") or {}).get("formErrors") or []):
+                if isinstance(e, dict) and e.get("code"):
+                    codes.append(e["code"])
+    return f" (Southwest said: {', '.join(dict.fromkeys(codes))})" if codes else ""
+
+
+def _parse_low_fare_days(payload):
+    """Southwest's own format: data.searchResults[].lowFareCalendarDays[] =
+    {"date": "2027-03-01", "fares": {"WGA": {"totalFare": {"value": "368.52"}}, "PLU": ...}}.
+    A day's low is its cheapest fare class; {} fares = nothing available. None if not this format."""
+    try:
+        results = payload["data"]["searchResults"]
+    except (KeyError, TypeError):
+        return None
+    out = None
+    for res in results if isinstance(results, list) else []:
+        days = res.get("lowFareCalendarDays") if isinstance(res, dict) else None
+        if not isinstance(days, list):
+            continue
+        out = out or {}
+        for d in days:
+            if not isinstance(d, dict) or not _ISO_DAY.match(str(d.get("date", ""))):
+                continue
+            lows = [num(((f or {}).get("totalFare") or {}).get("value"))
+                    for f in (d.get("fares") or {}).values() if isinstance(f, dict)]
+            lows = [x for x in lows if x is not None and x > 0]
+            day = d["date"][:10]
+            low = min(lows) if lows else None
+            out[day] = low if out.get(day) is None else (min(out[day], low) if low is not None else out[day])
+    return out
+
+
 def parse_calendar(payload):
+    exact = _parse_low_fare_days(payload)
+    if exact is not None:
+        return exact if any(v is not None for v in exact.values()) else None
+    return _parse_calendar_guess(payload)
+
+
+def _parse_calendar_guess(payload):
     """{YYYY-MM-DD: lowest fare that day (None = unavailable)} from the calendar's JSON, or None
     if nothing in it looks like a day with a price. Southwest's format isn't documented, so this
     looks for any object that has a date and a price; struck-through "was" prices are ignored."""
@@ -957,10 +1002,51 @@ class BrowserSearcher:
     def _uid(self):
         return self.profile_key if isinstance(self.profile_key, int) else None
 
+    _cal_shown = None        # (origin, dest, month, adults, fare_type) of the calendar on screen
+    _cal_toggle_works = None
+
+    @property
+    def calendar_switches_currency(self):
+        """True when the next calendar for the same route and month will be a click on the open page."""
+        return self._cal_shown is not None and self._cal_toggle_works is not False
+
     def calendar(self, origin, dest, date, adults, fare_type):
-        """Lowest fare for each day of the month containing `date` (one page load), as
-        {YYYY-MM-DD: amount or None}. Returns None if the calendar couldn't be read. The raw
-        data is saved to debug/calendar/ so the parser can be checked against the real thing."""
+        """Lowest fare for each day of the month containing `date`, as {YYYY-MM-DD: amount or None},
+        or None if the calendar couldn't be read. The other currency for the same month is a click
+        on the page's Dollars/Points switch. Raw data is saved to debug/calendar/."""
+        tag = f"calendar-{origin}-{dest}-{date[:7]}-{fare_type}"
+        if not self._warmed:
+            self.warm_up()
+        key = (origin, dest, date[:7], adults)
+        if (self._cal_shown and self._cal_shown[:4] == key and self._cal_shown[4] != fare_type
+                and self._cal_toggle_works is not False):
+            el = None
+            from .swa_login import find
+            el = find(self.page, FARE_TOGGLE[fare_type], timeout=3)
+            if el is not None:
+                def click():
+                    if self.humanize:
+                        self.human.pause(1.5, 4.5)
+                        self.human.click(el)
+                    else:
+                        el.click()
+                days, payloads = self._collect_calendar(click, tag, wait=20)
+                if days is not None:
+                    if self._cal_toggle_works is None:
+                        applog.info(f"{tag}: switched currency on the calendar page", source="search",
+                                    user_id=self._uid())
+                    self._cal_toggle_works = True
+                    self._cal_shown = (*key, fare_type)
+                    return days
+                self._cal_toggle_works = False
+                applog.warn(f"{tag}: the calendar's Dollars/Points switch didn't bring daily fares"
+                            f"{_api_errors(payloads)}; loading the {fare_type.lower()} calendar address "
+                            "instead", source="search", user_id=self._uid(), attachment=self.capture(tag))
+            else:
+                self._cal_toggle_works = False
+                applog.info(f"{tag}: no Dollars/Points switch on the calendar page; loading each currency's "
+                            "address instead", source="search", user_id=self._uid(),
+                            attachment=self.capture(tag + "-no-toggle"))
         q = {
             "adultPassengersCount": adults, "adultsCount": adults,
             "currencyCode": "PTS" if fare_type == "POINTS" else "USD",
@@ -968,13 +1054,30 @@ class BrowserSearcher:
             "lapInfantPassengersCount": 0, "originationAirportCode": origin, "passengerType": "ADULT",
             "promoCode": "", "returnAirportCode": "", "returnDate": "", "tripType": "oneway",
         }
-        tag = f"calendar-{origin}-{dest}-{date[:7]}-{fare_type}"
-        if not self._warmed:
-            self.warm_up()
+        self._cal_shown = None
 
-        # Every JSON response the page loads; the calendar's is the one with fares by day.
-        # (Matching on the URL alone isn't enough: the app's own build manifest lives under
-        # .../low-fare-calendar too.)
+        def go():
+            self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
+        try:
+            days, payloads = self._collect_calendar(go, tag, wait=45)
+        except Exception as e:
+            applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
+                        f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag))
+            return None
+        if days is not None:
+            self._cal_shown = (*key, fare_type)
+            return days
+        # Nothing recognisable: keep every JSON response so the parser can be fixed from them
+        raw = self._save_json(tag + "-all", [{"url": u, "data": d} for u, d in payloads], sub="calendar")
+        applog.warn(f"{tag}: couldn't find daily fares in {len(payloads)} data response(s)"
+                    f"{_api_errors(payloads)}; saved to {raw}. Falling back to searching each date.",
+                    source="search", user_id=self._uid(), attachment=self.capture(tag))
+        return None
+
+    def _collect_calendar(self, action, tag, wait):
+        """Run `action` (a page load or a click) and read the JSON responses it brings until one
+        has daily fares. Returns (days or None, [(url, payload)])."""
         responses = []
 
         def note(r):
@@ -987,8 +1090,8 @@ class BrowserSearcher:
         self.page.on("response", note)
         found, checked, payloads = None, 0, []
         try:
-            self.page.goto(f"{settings.calendar_url}?{urlencode(q)}", wait_until="domcontentloaded")
-            deadline = time.monotonic() + 45
+            action()
+            deadline = time.monotonic() + wait
             while time.monotonic() < deadline:
                 while checked < len(responses):
                     r = responses[checked]
@@ -999,14 +1102,9 @@ class BrowserSearcher:
                         continue
                     payloads.append((r.url, payload))
                     found = best_calendar(payloads)
-                if found and time.monotonic() > deadline - 40:   # give later responses a moment
+                if found:
                     break
                 self.page.wait_for_timeout(500)
-        except Exception as e:
-            applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
-                        f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
-                        attachment=self.capture(tag))
-            return None
         finally:
             self.page.remove_listener("response", note)
         if self.humanize:
@@ -1014,17 +1112,11 @@ class BrowserSearcher:
                 self.human.read()
             except Exception:
                 pass
-        if found:
-            url, payload, days = found
-            self._save_json(tag, {"url": url, "data": payload}, sub="calendar")
-            return days
-        # Nothing recognisable: keep every JSON response so the parser can be fixed from them
-        raw = self._save_json(tag + "-all", [{"url": u, "data": d} for u, d in payloads], sub="calendar")
-        applog.warn(f"{tag}: couldn't find daily fares in {len(payloads)} data response(s) "
-                    f"({', '.join(u.split('?')[0][-60:] for u, _ in payloads[:8]) or 'none'}); saved to {raw}. "
-                    "Falling back to searching each date.", source="search", user_id=self._uid(),
-                    attachment=self.capture(tag))
-        return None
+        if not found:
+            return None, payloads
+        url, payload, days = found
+        self._save_json(tag, {"url": url, "data": payload}, sub="calendar")
+        return days, payloads
 
     def capture(self, tag):
         """Screenshot what the browser shows right now, for the log. Returns the file (or None)."""

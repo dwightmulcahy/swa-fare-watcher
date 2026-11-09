@@ -111,3 +111,23 @@ def test_best_calendar_ignores_build_manifest():
     url, _, days = swa.best_calendar([(".../low-fare-calendar/manifest.json", manifest), ("/api/cal", fares)])
     assert url == "/api/cal" and days == {"2026-11-09": 481.0}
     assert swa.best_calendar([("m", manifest)]) is None
+
+
+def _fixture(name):
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).parent / "fixtures" / name).read_text())
+
+
+def test_parse_real_southwest_calendar():
+    days = swa.parse_calendar(_fixture("calendar-LIR-JAX-2027-03-USD.json"))
+    assert len(days) == 31 and sum(v is not None for v in days.values()) == 22
+    assert days["2027-03-01"] == 368.52                          # cheapest of WGA/PLU/ANY/BUS
+    assert days["2027-03-02"] is None and days["2027-03-04"] == 312.52
+
+
+def test_api_errors_are_reported():
+    err = _fixture("calendar-points-currency-error.json")
+    assert swa.parse_calendar(err) is None
+    assert "VALIDATION__CURRENCY_CODE__REQUIRED" in swa._api_errors([("u", err)])
+    assert swa._api_errors([("u", {"success": True})]) == ""
