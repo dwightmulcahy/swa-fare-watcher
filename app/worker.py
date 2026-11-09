@@ -74,14 +74,44 @@ def search_order(dates, rng=random):
     return out
 
 
-def _is_new_low(con, watch_id, key, r):
-    row = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
-                      (watch_id, key)).fetchone()
-    if row is None:
-        return True
-    lc, lp = row["cash"], row["points"]
-    return (r["cash"] is not None and (lc is None or r["cash"] < lc)) or (
-        r["points"] is not None and (lp is None or r["points"] < lp))
+ALERT_LIMIT = 5      # fares per watch in one email
+BEST_KEY = "__best__"   # alerted row holding the cheapest cash and points emailed so far per watch
+
+
+def _beats(r, best):
+    return (r["cash"] is not None and (best["cash"] is None or r["cash"] < best["cash"])) or (
+        r["points"] is not None and (best["points"] is None or r["points"] < best["points"]))
+
+
+def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
+    """What to email for a watch: on its first emailed search, the cheapest matches; after that,
+    only matches cheaper (in cash or in points) than anything already emailed for it.
+    Up to `limit` cheapest by cash, plus the cheapest by points if that's a different one."""
+    best = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
+                       (watch_id, BEST_KEY)).fetchone()
+    if best is not None:
+        cands = [c for c in cands if _beats(c["row"], best)]
+    cands = sorted(cands, key=lambda c: swa.cheapest_first(c["row"]))
+    out = cands[:limit]
+    by_points = min((c for c in cands if c["row"]["points"] is not None),
+                    key=lambda c: c["row"]["points"], default=None)
+    if by_points is not None and all(by_points is not c for c in out):
+        out.append(by_points)
+    return out
+
+
+def record_alerted(con, hits):
+    """Lower each watch's emailed-best to include what was just sent."""
+    for wid in {h["watch_id"] for h in hits}:
+        row = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
+                          (wid, BEST_KEY)).fetchone()
+        cash = [h["row"]["cash"] for h in hits if h["watch_id"] == wid and h["row"]["cash"] is not None]
+        pts = [h["row"]["points"] for h in hits if h["watch_id"] == wid and h["row"]["points"] is not None]
+        if row is not None:
+            cash += [row["cash"]] if row["cash"] is not None else []
+            pts += [row["points"]] if row["points"] is not None else []
+        con.execute("INSERT OR REPLACE INTO alerted VALUES (?,?,?,?)",
+                    (wid, BEST_KEY, min(cash, default=None), min(pts, default=None)))
 
 
 class Worker:
@@ -289,8 +319,7 @@ class Worker:
                                 note = "No date on the calendar under your target"
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
                         multi = n_routes > 1
-                        best = swa.best_only(w)
-                        best_cands = []   # no target: only the run's cheapest flight is reported
+                        cands = []   # this watch's matching flights or round trips; pick_alerts decides
                         for leg, date in dates:
                             ts = db.now()   # one timestamp per date, shared by its airport pairs
                             for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
@@ -340,16 +369,11 @@ class Worker:
                                             continue
                                         w_m += 1
                                         n_match += 1
-                                        if best:
-                                            best_cands.append((r, date, frm, to))
-                                            continue
-                                        key = f"{date}|{frm}-{to}|{r['key']}" if multi else f"{date}|{r['key']}"
-                                        if _is_new_low(con, w["id"], key, r):
-                                            hits.append({
-                                                "watch_id": w["id"], "key": key, "row": r, "date": date,
-                                                "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
-                                                "url": swa.booking_url(frm, to, date, w["adults"]),
-                                            })
+                                        cands.append({
+                                            "watch_id": w["id"], "row": r, "date": date,
+                                            "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
+                                            "url": swa.booking_url(frm, to, date, w["adults"]),
+                                        })
                                 cheap_c = min((r["cash"] for r in rows if r["cash"] is not None), default=None)
                                 cheap_p = min((r["points"] for r in rows if r["points"] is not None), default=None)
                                 cheapest = ", cheapest " + " / ".join(
@@ -361,36 +385,27 @@ class Worker:
                                             user_id=user_id, watch_id=w["id"], source="run")
                             if limited:
                                 break
-                        if best_cands:
-                            r, date, frm, to = min(best_cands, key=lambda c: swa.cheapest_first(c[0]))
-                            with db.tx() as con:
-                                if _is_new_low(con, w["id"], "best", r):
-                                    hits.append({
-                                        "watch_id": w["id"], "key": "best", "row": r, "date": date,
-                                        "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
-                                        "url": swa.booking_url(frm, to, date, w["adults"]),
-                                    })
                         if rt:
                             trips = swa.roundtrips(w, legs)
-                            best_trip = next((t for t in trips if t["matched"]), None) if best else None
-                            with db.tx() as con:
-                                for t in trips:
-                                    if not t["matched"]:
-                                        continue
-                                    w_m += 1
-                                    if best and t is not best_trip:
-                                        continue
-                                    key = "rt|best" if best else f"rt|{t['out_date']}|{t['ret_date']}"
-                                    if _is_new_low(con, w["id"], key, {"cash": t["cash"], "points": t["points"]}):
-                                        hits.append({
-                                            "watch_id": w["id"], "key": key, "trip": t, "date": t["out_date"],
-                                            "row": {"cash": t["cash"], "points": t["points"]},
-                                            "watch": f'{w["name"]} ({t["out_route"]}, {t["ret_route"]})'
-                                                     if multi else route, "use": t["use"],
-                                            "url": t["url"], "ret_url": t["ret_url"],
-                                        })
+                            for t in trips:
+                                if not t["matched"]:
+                                    continue
+                                w_m += 1
+                                cands.append({
+                                    "watch_id": w["id"], "trip": t, "date": t["out_date"],
+                                    "row": {"cash": t["cash"], "points": t["points"]},
+                                    "watch": f'{w["name"]} ({t["out_route"]}, {t["ret_route"]})'
+                                             if multi else route, "use": t["use"],
+                                    "url": t["url"], "ret_url": t["ret_url"],
+                                })
                             applog.info(f"{route}: {len(trips)} round trip(s) priced, {w_m} matching",
                                         user_id=user_id, watch_id=w["id"], source="run")
+                        with db.tx() as con:
+                            new = pick_alerts(con, w["id"], cands, 1 if swa.best_only(w) else ALERT_LIMIT)
+                        if cands and not new:
+                            applog.info(f"{route}: nothing cheaper than the fares already emailed",
+                                        user_id=user_id, watch_id=w["id"], source="run")
+                        hits.extend(new)
                         if note is None:
                             note = ("All searches failed" if w_s and w_f == w_s
                                     else f"{w_m} matching {'round trip' if rt else 'flight'}(s)" if w_s
@@ -437,9 +452,7 @@ class Worker:
                                mailer.render_hits(hits))
             if sent:
                 with db.tx() as con:
-                    for h in hits:
-                        con.execute("INSERT OR REPLACE INTO alerted VALUES (?,?,?,?)",
-                                    (h["watch_id"], h["key"], h["row"]["cash"], h["row"]["points"]))
+                    record_alerted(con, hits)
         if all_failed and not (creds and signin is not None and signin.status in ("success", "already_signed_in")):
             mailer.send(user["email"], "SWA fare watcher: searches failed",
                         "<p>No fare data was returned for your watches. Your Southwest session may "
