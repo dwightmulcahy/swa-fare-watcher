@@ -167,3 +167,21 @@ def test_cash_and_points_order_varies(worker, sent):
     firsts = [c[3] for c in FakeSearcher.calls[::2]]  # first fare type searched for each date
     assert set(firsts) == {"USD", "POINTS"}
 
+
+
+def test_no_flights_day_skips_the_other_currency(worker, sent):
+    from tests.conftest import FakeSearcher
+
+    class NoFlights(FakeSearcher):
+        def search(self, origin, dest, date, adults, fare_type):
+            FakeSearcher.calls.append((origin, dest, date, fare_type))
+            return {}
+
+    FakeSearcher.calls = []
+    worker.searcher_factory = NoFlights
+    uid = make_user()
+    wid = make_watch(uid)                    # 2 dates
+    res = worker.run_user(uid)
+    assert len(FakeSearcher.calls) == 2      # one currency per date, not two
+    assert res["attempts"] == 2 and res["failures"] == 0 and res["hits"] == 0
+    assert "failed" not in (db.one("SELECT last_status FROM watches WHERE id=?", (wid,))["last_status"] or "")
