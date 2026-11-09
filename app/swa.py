@@ -17,6 +17,15 @@ from . import applog
 from .config import settings
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
+# The results page's "Shop in: Dollars | Points | $ + Points" switch
+FARE_TOGGLE = {
+    "POINTS": [("role", "radio", r"^\s*points\s*$"), ("role", "button", r"^\s*points\s*$"),
+               ("role", "tab", r"^\s*points\s*$"),
+               ("css", "label:text-is('Points'), button:text-is('Points'), [role=radio]:text-is('Points')")],
+    "USD": [("role", "radio", r"^\s*dollars\s*$"), ("role", "button", r"^\s*dollars\s*$"),
+            ("role", "tab", r"^\s*dollars\s*$"),
+            ("css", "label:text-is('Dollars'), button:text-is('Dollars'), [role=radio]:text-is('Dollars')")],
+}
 CALENDAR_URL = "https://www.southwest.com/air/low-fare-calendar/select-dates"
 SHOPPING_API = "/air-booking/page/air/booking/shopping"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -851,11 +860,79 @@ class BrowserSearcher:
             return swa_login.LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}",
                                          screenshot=rec.shot("exception"))
 
+    _shown = None          # (origin, dest, date, adults, fare_type) of the results on screen
+    _shown_payload = None
+    _toggle_works = None   # None = untried, False = no toggle / it didn't fetch (use the URL)
+
+    @property
+    def switches_currency(self):
+        """True when the next search for the same trip will be a click on the open results page."""
+        return self._shown is not None and self._toggle_works is not False
+
     def search(self, origin, dest, date, adults, fare_type):
-        q = search_query(origin, dest, date, adults, fare_type)
         tag = f"{origin}-{dest}-{date}-{fare_type}"
         if not self._warmed:
             self.warm_up()
+        # Same trip in the other currency: click the page's Dollars/Points switch, like a person
+        if (self._shown and self._shown[:4] == (origin, dest, date, adults) and self._shown[4] != fare_type
+                and self._toggle_works is not False):
+            payload = self._toggle(fare_type, tag)
+            if payload is not None:
+                self._shown, self._shown_payload = (origin, dest, date, adults, fare_type), payload
+                return self._parse(payload, tag)
+        return self._load(origin, dest, date, adults, fare_type, tag)
+
+    def _toggle(self, fare_type, tag):
+        """Click Dollars/Points and capture the fares the page fetches. None if the switch isn't
+        there or didn't fetch anything (then the caller loads the search address instead)."""
+        from .swa_login import find
+        el = find(self.page, FARE_TOGGLE[fare_type], timeout=3)
+        if el is None:
+            self._toggle_works = False
+            applog.info(f"{tag}: no Dollars/Points switch found on the results page; loading each "
+                        "currency's search address instead", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag + "-no-toggle"))
+            return None
+        try:
+            with self.page.expect_response(
+                lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=20_000
+            ) as info:
+                if self.humanize:
+                    self.human.pause(1.5, 4.5)       # look at the first prices, then switch
+                    self.human.click(el)
+                else:
+                    el.click()
+            payload = info.value.json()
+        except Exception as e:
+            self._toggle_works = False
+            raw = self._save_json(tag + "-before-toggle", self._shown_payload)
+            applog.warn(f"{tag}: the Dollars/Points switch didn't fetch new fares ({e.__class__.__name__}); "
+                        f"the page may already have had both. Data before the click saved to {raw}. "
+                        "Loading each currency's search address instead.", source="search",
+                        user_id=self._uid(), attachment=self.capture(tag + "-toggle"))
+            return None
+        if self._toggle_works is None:
+            applog.info(f"{tag}: switched currency on the results page (one page load for cash and points)",
+                        source="search", user_id=self._uid())
+        self._toggle_works = True
+        if self.humanize:
+            try:
+                self.human.read()
+            except Exception:
+                pass
+        return payload
+
+    def _parse(self, payload, tag):
+        flights = parse_flights(payload)
+        if flights is None:
+            self._save_json(tag, payload)
+            applog.warn(f"{tag}: Southwest's fare data has a shape the parser doesn't know; raw JSON saved "
+                        "to debug/", source="search", user_id=self._uid(), attachment=self.capture(tag))
+        return flights
+
+    def _load(self, origin, dest, date, adults, fare_type, tag):
+        q = search_query(origin, dest, date, adults, fare_type)
+        self._shown = None
         # Loaded like a bookmarked search URL. No Referer: page.goto is an address-bar navigation
         # (Sec-Fetch-Site: none), and a real browser never sends a Referer with one.
         try:
@@ -869,17 +946,13 @@ class BrowserSearcher:
                         f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
                         attachment=self.capture(tag))
             return None
+        self._shown, self._shown_payload = (origin, dest, date, adults, fare_type), payload
         if self.humanize:
             try:
                 self.human.read()  # look over the results before moving on
             except Exception:
                 pass
-        flights = parse_flights(payload)
-        if flights is None:
-            self._save_json(tag, payload)
-            applog.warn(f"{tag}: Southwest's fare data has a shape the parser doesn't know; raw JSON saved "
-                        "to debug/", source="search", user_id=self._uid(), attachment=self.capture(tag))
-        return flights
+        return self._parse(payload, tag)
 
     def _uid(self):
         return self.profile_key if isinstance(self.profile_key, int) else None
