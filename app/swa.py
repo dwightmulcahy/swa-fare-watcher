@@ -1179,22 +1179,33 @@ class BrowserSearcher:
 
     def _strip(self, date, tag):
         """Show another date via the results page's date strip ("Thu Dec 31 · Fri Jan 1 · ..."),
-        like a person checking the next day. Returns the flights ({} = no flights that day), or
+        like a person picking another day. Returns the flights ({} = no flights that day), or
         None if the day isn't on the strip or the click didn't bring that day's fares (then the
         caller loads its address; a strip that never works is not tried again this session)."""
         d = dt.date.fromisoformat(date)
         day = f"{d:%b} {d.day}"                       # "Jan 2"
+        # Southwest's strip: <div aria-label="Flight date calendar"> holding one
+        # <button role="tab" aria-label="Saturday January 2" aria-selected=...> per bookable day
+        # (the whole booking window, scrolled sideways). Labels have no year; the window is
+        # under a year long, so they're unique.
         el = None
-        for cand in self.page.locator(f'button:has-text("{day}"), a:has-text("{day}"), '
-                                      f'[role=tab]:has-text("{day}"), [role=button]:has-text("{day}")').all()[:12]:
-            try:
-                text = " ".join(cand.inner_text(timeout=1000).split())
-            except Exception:
-                continue
-            # a date-strip cell: short, and says the weekday and that day (not a flight card)
-            if len(text) <= 40 and f"{d:%a}".lower() in text.lower() and cand.is_visible():
-                el = cand
-                break
+        exact = self.page.locator(f'[aria-label="Flight date calendar"] [role=tab]'
+                                  f'[aria-label="{d:%A} {d:%B} {d.day}"]')
+        try:
+            if exact.count():
+                el = exact.first
+        except Exception:
+            el = None
+        if el is None:   # other markup: a short strip cell showing that weekday and day
+            for cand in self.page.locator(f'button:has-text("{day}"), a:has-text("{day}"), '
+                                          f'[role=tab]:has-text("{day}"), [role=button]:has-text("{day}")').all()[:12]:
+                try:
+                    text = " ".join(cand.inner_text(timeout=1000).split())
+                except Exception:
+                    continue
+                if len(text) <= 40 and f"{d:%a}".lower() in text.lower() and cand.is_visible():
+                    el = cand
+                    break
         if el is None:
             if self._strip_works is None:
                 self._strip_works = False
@@ -1202,6 +1213,10 @@ class BrowserSearcher:
                             "address instead", source="search", user_id=self._uid(),
                             attachment=self.capture(tag + "-no-strip"))
             return None
+        try:
+            el.scroll_into_view_if_needed(timeout=5000)   # the strip scrolls sideways to that day
+        except Exception:
+            pass
         try:
             with self.page.expect_response(
                 lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=20_000
@@ -1223,7 +1238,11 @@ class BrowserSearcher:
                         "loading each date's address instead", source="search", user_id=self._uid(),
                         attachment=self.capture(tag + "-strip"))
             return None
-        if date not in asked:                          # not verifiably that day's fares
+        try:
+            picked = (el.get_attribute("aria-selected") or "").lower() == "true"
+        except Exception:
+            picked = False
+        if date not in asked and not picked:           # not verifiably that day's fares
             self._strip_works = False
             applog.warn(f"{tag}: the date strip's fare request didn't mention {date}; loading each date's "
                         "address instead", source="search", user_id=self._uid())

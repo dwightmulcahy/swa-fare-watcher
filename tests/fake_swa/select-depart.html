@@ -1,21 +1,26 @@
 <!doctype html><title>Select departing flight</title>
 <body><h1>Depart</h1>
-<!-- a date strip like Southwest's: Thu Dec 31 · Fri Jan 1 · Sat Jan 2 · ... -->
-<div id="strip" role="tablist"></div>
+<!-- Southwest's date strip (trimmed markup): every bookable day, scrolled sideways -->
+<div aria-label="Flight date calendar"><div role="tablist" id="strip"
+     style="display:flex; overflow-x:auto; width:600px; white-space:nowrap"></div></div>
 <script>
 // Asks for fares like the real page; on a day with no flights, Southwest sends you to the
 // Low Fare Calendar with a "Wanna look for another day?" banner.
 const q = new URLSearchParams(location.search);
 window.shoppingCalls = [];
 const fmt = (d, o) => d.toLocaleDateString("en-US", { timeZone: "UTC", ...o });
-function strip(center) {
-  const c = new Date(center + "T00:00:00Z"), box = document.getElementById("strip");
+function strip(selected) {
+  const box = document.getElementById("strip"), start = new Date("2026-12-20T00:00:00Z");
   box.replaceChildren();
-  for (let i = -2; i <= 2; i++) {
-    const d = new Date(c.getTime() + i * 864e5), iso = d.toISOString().slice(0, 10);
+  for (let i = 0; i < 90; i++) {
+    const d = new Date(start.getTime() + i * 864e5), iso = d.toISOString().slice(0, 10);
     const b = document.createElement("button");
     b.setAttribute("role", "tab");
-    b.innerHTML = `<span>${fmt(d, { weekday: "short" })}</span><br><span>${fmt(d, { month: "short", day: "numeric" })}</span>`;
+    b.setAttribute("aria-label", fmt(d, { weekday: "long" }) + " " + fmt(d, { month: "long", day: "numeric" }));
+    b.setAttribute("aria-selected", String(iso === selected));
+    b.style.minWidth = "120px";
+    const label = `<div>${fmt(d, { weekday: "short" })}</div><div>${fmt(d, { month: "short", day: "numeric" })}</div>`;
+    b.innerHTML = `<div style="visibility:hidden;height:0">${label}</div><div>${label}</div>`;
     b.onclick = () => { q.set("departureDate", iso); history.pushState({}, "", "?" + q.toString()); load(); };
     box.append(b);
   }
