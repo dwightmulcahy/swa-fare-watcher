@@ -37,7 +37,8 @@ def test_pick_oneway_keeps_days_under_target_cheapest_first():
                    "2026-12-20": {"cash": None, "points": None},   # sold out
                    }}                                              # 21st not on calendar
     assert swa.calendar_pick(ow(), cal, legs, 6) == [("out", "2026-12-19"), ("out", "2026-12-21")]
-    assert swa.calendar_pick(ow(), cal, legs, 1) == [("out", "2026-12-19")]
+    # the cap applies to priced days; a day the calendar couldn't price is always searched
+    assert swa.calendar_pick(ow(), cal, legs, 1) == [("out", "2026-12-19"), ("out", "2026-12-21")]
     assert swa.calendar_pick(ow(), {"out": None}, legs, 1) == legs   # unreadable: search everything
 
 
@@ -165,3 +166,33 @@ def test_parse_real_calendar_cells():
     assert days["2026-12-01"] is None and days["2026-12-30"] == 639
     assert swa.parse_calendar_cells("Smarch 2026", fx["cells"]) is None
     assert swa.parse_calendar_cells("December 2026", ["Tuesday 1, Unavailable"]) is None   # nothing priced
+
+
+def test_pick_roundtrip_unpriced_pairs_are_not_capped():
+    w = rt()
+    legs = swa.search_legs(w)
+    # neither calendar readable: every date is searched, not the first few pairs
+    assert sorted(swa.calendar_pick(w, {"out": None, "ret": None}, legs, 1)) == sorted(legs)
+
+
+class PointsCalendarBroken(CalendarSearcher):
+    def calendar(self, origin, dest, date, adults, fare_type):
+        CalendarSearcher.cal_calls.append((origin, dest, date[:7], fare_type))
+        return None if fare_type == "POINTS" else CalendarSearcher.lows.get(fare_type)
+
+
+def test_unreadable_points_calendar_still_uses_cash_lows(worker, sent):
+    from tests.conftest import FakeSearcher
+    days = [future(n) for n in range(10, 18)]                      # 8 dates
+    CalendarSearcher.cal_calls = []
+    CalendarSearcher.lows = {"USD": {d: 100 + i * 50 for i, d in enumerate(days)}}
+    worker.searcher_factory = PointsCalendarBroken
+    uid = make_user()
+    wid = make_watch(uid, dates=",".join(days))
+    FakeSearcher.calls = []
+    worker.run_user(uid)
+    searched = sorted({c[2] for c in FakeSearcher.calls})
+    assert len(searched) == 6 and searched == sorted(days)[:6]    # the 6 cheapest by cash, not all 8
+    msgs = [r["message"] for r in db.query("SELECT message FROM logs WHERE watch_id=?", (wid,))]
+    assert any("points calendar unreadable; choosing dates by the other currency" in m for m in msgs)
+    assert not any("calendar unreadable; searching every date" in m for m in msgs)
