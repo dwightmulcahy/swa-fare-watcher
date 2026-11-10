@@ -134,7 +134,7 @@ def create_app(worker=None, start_worker=True):
 
     def render(request, name, user=None, sess=None, status=200, **ctx):
         ctx.setdefault("code_request", pending_code(user))
-        ctx.update(user=user, csrf=sess["csrf"] if sess else "", today_str=db.today(),
+        ctx.update(user=user, csrf=sess["csrf"] if sess else "", today_str=db.today(), now_str=db.now(),
                    msg=request.query_params.get("ok"), err=ctx.get("err") or request.query_params.get("err"))
         return templates.TemplateResponse(request, name, ctx, status_code=status)
 
@@ -149,6 +149,16 @@ def create_app(worker=None, start_worker=True):
         resp.set_cookie(COOKIE, tok, max_age=settings.session_days * 86400, httponly=True,
                         samesite="lax", secure=settings.cookie_secure)
         return resp
+
+    @app.post("/resume")
+    async def resume(request: Request):
+        """Lift the pause put on scheduled runs after Southwest blocked a request."""
+        user, sess = require(request)
+        await form(request, sess)
+        with db.tx() as con:
+            con.execute("UPDATE users SET blocked_until=NULL WHERE id=?", (user["id"],))
+        applog.info("Scheduled runs resumed by the user after a block pause", user_id=user["id"], source="run")
+        raise Redirect("/?ok=Scheduled+runs+resumed")
 
     # ---------- public ----------
     @app.get("/health")

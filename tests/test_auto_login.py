@@ -1,7 +1,8 @@
+import pytest
 import threading
 import time
 
-from app import db
+from app import swa, db
 from app.security import decrypt_json, encrypt_json
 from tests.conftest import FakeSearcher, csrf, login
 from tests.test_web import ADMIN_PW, activate, admin_client, create_user
@@ -87,9 +88,12 @@ def test_wrong_password_turns_it_off_and_emails(worker, sent):
 def test_two_failures_in_a_row_turn_it_off(worker, sent):
     uid = with_creds()
     FakeSearcher.signin = ["blocked", "blocked"]
-    worker.run_user(uid, signin_only=True)
+    with pytest.raises(swa.Blocked):          # a block page stops the run (and pauses the schedule)
+        worker.run_user(uid, signin_only=True)
     assert user(uid)["auto_login"] == 1 and user(uid)["auto_login_failures"] == 1
-    worker.run_user(uid, signin_only=True)
+    assert user(uid)["blocked_until"]
+    with pytest.raises(swa.Blocked):
+        worker.run_user(uid, signin_only=True)
     u = user(uid)
     assert u["auto_login"] == 0 and "2 failed attempts" in u["auto_login_status"]
 

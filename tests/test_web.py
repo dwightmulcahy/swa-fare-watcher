@@ -224,3 +224,13 @@ def test_too_many_specific_dates_rejected(client):
     assert r.status_code == 400 and "At most 31 departure dates (40 picked)" in r.text
     page = client.get("/watches/new").text
     assert page.count('data-max="31"') == 2      # both date pickers know the limit
+
+
+def test_block_pause_banner_and_resume(client):
+    token = admin_client(client)
+    with db.tx() as con:
+        con.execute("UPDATE users SET blocked_until='2999-01-01T00:00', blocked_reason='calendar: HTTP 403'")
+    page = client.get("/").text
+    assert "Scheduled runs are paused until 2999-01-01 00:00" in page and "calendar: HTTP 403" in page
+    assert client.post("/resume", data={"csrf": token}, follow_redirects=False).status_code == 303
+    assert "Scheduled runs are paused" not in client.get("/").text
