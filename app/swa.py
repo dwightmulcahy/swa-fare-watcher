@@ -122,6 +122,17 @@ def _clock(v):
     return f"{int(m.group(1)):02d}:{m.group(2)}" if m else ""
 
 
+def _stops(d):
+    """Stops on an itinerary. Southwest lists each flight leg in `segments` (a connection is a
+    new segment) and any stop a single flight makes in that segment's `numberOfStops`."""
+    segs = d.get("segments")
+    if isinstance(segs, list) and segs:
+        return len(segs) - 1 + sum(int(num(s.get("numberOfStops")) or 0) for s in segs if isinstance(s, dict))
+    if d.get("numberOfStops") is not None:
+        return int(num(d.get("numberOfStops")) or 0)
+    return max(len(d.get("stopsDetails") or [None]) - 1, 0)
+
+
 def parse_flights(payload):
     """Return {key: flight dict} or None if the payload shape is unrecognized."""
     try:
@@ -131,15 +142,14 @@ def parse_flights(payload):
     out = {}
     for prod in products or []:
         for d in (prod or {}).get("details") or []:
-            stops = d.get("numberOfStops")
-            if stops is None:
-                stops = max(len(d.get("stopsDetails") or [None]) - 1, 0)
+            stops = _stops(d)
             flights = _text(d.get("flightNumbers"))
             key = f'{flights}|{_text(d.get("departureDateTime") or d.get("departureTime"))}'
             out[key] = {
                 "flights": flights,
                 "depart": _clock(d.get("departureTime") or d.get("departureDateTime")),
-                "arrive": _clock(d.get("arrivalTime") or d.get("arrivalDateTime")),
+                "arrive": _clock(d.get("arrivalTime") or d.get("arrivalDateTime"))
+                          + (" +1" if d.get("nextDay") else ""),
                 "duration": int(num(d.get("totalDuration")) or 0),
                 "stops": int(stops),
                 "fare": lowest_fare(d),
