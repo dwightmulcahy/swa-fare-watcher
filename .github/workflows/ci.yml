@@ -64,7 +64,7 @@ jobs:
             GIT_SHA=${{ github.sha }}
             REPOSITORY=${{ github.repository }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
       - name: Start hardened container
         run: |
           docker run -d --name app --init -p ${PORT}:8080 \
