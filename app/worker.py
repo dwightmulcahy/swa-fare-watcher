@@ -230,6 +230,9 @@ class Worker:
         t = threading.Thread(target=self._loop, name="swa-worker", daemon=True)
         t.start()
         self._threads.append(t)
+        h = threading.Thread(target=self._housekeeping_loop, name="swa-housekeeping", daemon=True)
+        h.start()
+        self._threads.append(h)
         if scheduler:
             s = threading.Thread(target=self._schedule, name="swa-scheduler", daemon=True)
             s.start()
@@ -258,6 +261,20 @@ class Worker:
                     self.running_user = None
                     self.cancelled.discard(uid)
                 self.progress.pop(uid, None)
+
+    def housekeeping(self):
+        """Background chores, checked every few minutes; each is safe to repeat."""
+        try:
+            made = db.backup()
+            if made:
+                applog.info(f"Database backed up to {made.relative_to(settings.data_dir)}", source="backup")
+        except Exception as e:
+            applog.error(f"Database backup failed: {e.__class__.__name__}: {e}", source="backup")
+
+    def _housekeeping_loop(self):
+        while True:
+            self.housekeeping()
+            time.sleep(600)
 
     def _sleep_until(self, when):
         while (wait := (when - dt.datetime.now()).total_seconds()) > 0:

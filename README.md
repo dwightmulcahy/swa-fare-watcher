@@ -200,6 +200,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_TIMEZONE` | container `TZ` | Browser time zone; match where the server's IP is |
 | `SWA_AUTO_LOGIN` | `true` | Allow users to turn on automatic sign-in |
 | `SWA_CODE_WAIT_SECONDS` | `600` | How long a sign-in waits for a verification code |
+| `SWA_BACKUP_KEEP` | `7` | Copy the database to `data/backups/app-YYYY-MM-DD.db` once a day (taken safely while the app runs) and keep this many; `0` turns it off. Restore: stop the container, copy a backup over `data/app.db`, start it |
 | `SESSION_DAYS` | `14` | Web sign-in lifetime |
 
 ## Run without Docker
