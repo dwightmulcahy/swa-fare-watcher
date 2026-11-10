@@ -367,3 +367,57 @@ def test_saved_cookies_only_restored_into_a_profile_without_them(site, monkeypat
                              "expires": -1, "httpOnly": False, "secure": False, "sameSite": "Lax"}], "origins": []}
     with swa.BrowserSearcher(imported, profile_key="t-cookies", human=False) as b:  # cookies imported in Settings
         assert "imported" in names(b)
+
+
+def _shopping_route(b, prices):
+    import json
+
+    from tests.conftest import detail, payload
+
+    def handle(route):
+        body = json.loads(route.request.post_data)
+        price = prices.get((body.get("fareType"), body["departureDate"]))
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(payload(detail(price, "5.60")) if price else {"success": False}))
+    b.page.route("**/air-booking/page/air/booking/shopping", handle)
+
+
+@pytest.mark.parametrize("human", [False, True])
+def test_search_from_the_book_a_flight_form(site, monkeypatch, tmp_path, human):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "form_share", 1.0)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with swa.BrowserSearcher(profile_key=f"t-form-{human}", human=human) as b:
+        b._warmed = True
+        if human:
+            b.human.speed = 0.15
+        _shopping_route(b, {("POINTS", "2027-01-02"): "12,000"})
+        got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")
+        url = b.page.url
+    (f,) = got.values()
+    assert f["fare"][0] == 12000 and b._form_works is True
+    # the form was really used: one-way, both airports picked, MM/DD date, 2 -> 1 passengers, points ticked
+    for part in ("originationAirportCode=SJO", "destinationAirportCode=JAX", "departureDate=2027-01-02",
+                 "fareType=POINTS", "adultPassengersCount=1", "tripType=oneway"):
+        assert part in url, part
+
+
+def test_missing_form_falls_back_to_the_search_address(site, monkeypatch, tmp_path):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "home_url", site)                    # a home page without the form
+    monkeypatch.setattr(settings, "form_share", 1.0)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with swa.BrowserSearcher(profile_key="t-noform", human=False) as b:
+        b._warmed = True
+        b.page.goto(site)
+        _shopping_route(b, {("USD", "2027-01-02"): "150.00"})
+        got = b.search("SJO", "JAX", "2027-01-02", 1, "USD")
+        works = b._form_works
+    assert next(iter(got.values()))["fare"][0] == 150.0 and works is False
