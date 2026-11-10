@@ -60,6 +60,8 @@ class Settings:
         # Defaults applied to new users (admin can change per user; blank = unlimited)
         self.default_max_watches = int(_env("DEFAULT_MAX_WATCHES", "5"))
         self.default_max_searches = int(_env("DEFAULT_MAX_SEARCHES_PER_DAY", "40"))
+        # Nightly copy of the database into <data>/backups, keeping this many days (0 = off)
+        self.backup_keep = max(0, int(_env("SWA_BACKUP_KEEP", "7")))
         self._secret = _env("SECRET_KEY")
 
     @property

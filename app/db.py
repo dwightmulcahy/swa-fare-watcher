@@ -217,6 +217,32 @@ def init():
         con.close()
 
 
+def backup(keep=None, day=None):
+    """Copy the live database to <data>/backups/app-YYYY-MM-DD.db (once a day, consistent even
+    mid-write) and keep the newest `keep` copies. Returns the new file, or None if nothing to do."""
+    keep = settings.backup_keep if keep is None else keep
+    if keep <= 0:
+        return None
+    folder = settings.data_dir / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"app-{day or today()}.db"
+    made = None
+    if not path.exists():
+        tmp = path.with_name(path.name + ".tmp")
+        src, dst = connect(), sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        tmp.chmod(0o600)
+        tmp.replace(path)
+        made = path
+    for old in sorted(folder.glob("app-*.db"))[:-keep]:
+        old.unlink()
+    return made
+
+
 # ---------- domain helpers ----------
 def user_expired(user) -> bool:
     return bool(user["expires_at"]) and user["expires_at"] < today()
