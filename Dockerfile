@@ -15,10 +15,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=UTC
 
 ARG TARGETARCH
-# Set by the release workflow (tag without "v", commit, owner/repo); empty = "dev" build
-ARG APP_VERSION=
-ARG GIT_SHA=
-ARG REPOSITORY=
 WORKDIR /app
 COPY requirements.txt ./
 # Browser + its OS libraries, and Xvfb so it runs headed (far less likely to be blocked).
@@ -47,6 +43,11 @@ RUN apt-get update \
 # Files owned by root, process runs as non-root: app cannot modify itself
 COPY app ./app
 # Build metadata for the version label / About dialog
+# Declared here, not above: a per-commit ARG before the heavy RUN busts its cache every build
+# Set by the release workflow (tag without "v", commit, owner/repo); empty = "dev" build
+ARG APP_VERSION=
+ARG GIT_SHA=
+ARG REPOSITORY=
 RUN --mount=type=bind,from=git,target=/git \
     APP_VERSION="${APP_VERSION}" GIT_SHA="${GIT_SHA}" REPOSITORY="${REPOSITORY}" GIT_DIR=/git \
     python -m app.buildinfo /app/app/build.json

@@ -119,8 +119,7 @@ jobs:
             REPOSITORY=${{ github.repository }}
           provenance: mode=max
           sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true   # release images always get fresh OS patches
 
   release:
     name: GitHub Release
