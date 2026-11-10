@@ -30,8 +30,9 @@ RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends xvfb tzdata \
  && pip install -r requirements.txt \
- && playwright install --with-deps chromium \
- && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "amd64" ]; then playwright install --with-deps chrome; fi \
+ && retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i: $*" >&2; sleep $((i * 10)); done; return 1; } \
+ && retry playwright install --with-deps chromium \
+ && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "amd64" ]; then retry playwright install --with-deps chrome; fi \
  && apt-get install -y --no-install-recommends fonts-liberation fonts-noto-color-emoji \
  && { pip uninstall -y setuptools wheel || true; } \
  && pip uninstall -y pip \
