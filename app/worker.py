@@ -123,8 +123,43 @@ def lowest_seen(con, watch_id, date, before):
     return (r["cash"], r["ts"]) if r else None
 
 
+def rebook_key(b):
+    return f'rebook:{b["leg"]}:{b["date"]}'
+
+
+def rebook_hits(con, w, booked, legs):
+    """Alerts for booked flights that got cheaper than what was paid (and than the last rebook alert)."""
+    out = []
+    for b in booked:
+        offer = swa.rebook_offer(b, legs[b["leg"]].get(b["date"], []))
+        if not offer:
+            continue
+        r = offer["row"]
+        prev = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
+                           (w["id"], rebook_key(b))).fetchone()
+        if prev is not None and not _beats(r, prev):
+            continue
+        save = " / ".join(x for x in (f'${offer["save_cash"]:,.0f}' if offer["save_cash"] >= 1 else "",
+                                      f'{int(offer["save_points"]):,} pts' if offer["save_points"] >= 1 else "") if x)
+        paid = " / ".join(x for x in (f'${b["cash"]:,.0f}' if b.get("cash") is not None else "",
+                                      f'{int(b["points"]):,} pts' if b.get("points") is not None else "") if x)
+        frm, to = r.get("origin") or w["origin"], r.get("dest") or w["destination"]
+        out.append({
+            "watch_id": w["id"], "row": r, "date": b["date"], "rebook": rebook_key(b),
+            "watch": f'{w["name"]}: your booked {"return" if b["leg"] == "ret" else "flight"} got cheaper',
+            "use": f"Rebook and save {save} (you paid {paid})",
+            "url": swa.booking_url(frm, to, b["date"], w["adults"]),
+        })
+    return out
+
+
 def record_alerted(con, hits):
     """Lower each watch's emailed-best to include what was just sent."""
+    for h in hits:
+        if h.get("rebook"):
+            con.execute("INSERT OR REPLACE INTO alerted VALUES (?,?,?,?)",
+                        (h["watch_id"], h["rebook"], h["row"]["cash"], h["row"]["points"]))
+    hits = [h for h in hits if not h.get("rebook")]
     for wid in {h["watch_id"] for h in hits}:
         row = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
                           (wid, BEST_KEY)).fetchone()
@@ -461,6 +496,7 @@ class Worker:
                         if self._stop(user_id):
                             break
                         route = f'{w["name"]} ({swa.route_label(w)})'
+                        planned = set(dates)
                         w_started = db.now()
                         with db.tx() as con:
                             open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
@@ -488,6 +524,12 @@ class Worker:
                                 note, limited, dates = "Daily search limit reached", True, []
                             elif not dates:
                                 note = "No date on the calendar under your target"
+                        # dates of flights already booked are always searched (rebook check)
+                        booked = [b for b in swa.booked(w) if b["date"] >= db.today() and (rt or b["leg"] == "out")]
+                        extra = {(b["leg"], b["date"]) for b in booked} - planned
+                        if not limited:
+                            dates = list(dates) + [k for k in dict.fromkeys((b["leg"], b["date"]) for b in booked)
+                                                   if k not in set(dates)]
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
                         multi = n_routes > 1
                         cands = []   # this watch's matching flights or round trips; pick_alerts decides
@@ -553,7 +595,7 @@ class Worker:
                                             (w["id"], ts, date, leg, frm, to, r["key"], r["flights"], r["depart"],
                                              r["arrive"], r["stops"], r.get("via") or "", r["duration"], r["cash"],
                                              r["points"], r["points_taxes"], r["cpp"], int(matched)))
-                                        if not matched or rt:
+                                        if not matched or rt or (leg, date) in extra:
                                             continue
                                         w_m += 1
                                         n_match += 1
@@ -574,7 +616,8 @@ class Worker:
                             if limited or self._stop(user_id):
                                 break
                         if rt:
-                            trips = swa.roundtrips(w, legs)
+                            trips = swa.roundtrips(w, {lg: {d: v for d, v in by.items() if (lg, d) not in extra}
+                                                       for lg, by in legs.items()})
                             for t in trips:
                                 if not t["matched"]:
                                     continue
@@ -589,6 +632,7 @@ class Worker:
                             applog.info(f"{route}: {len(trips)} round trip(s) priced, {w_m} matching",
                                         user_id=user_id, watch_id=w["id"], source="run")
                         with db.tx() as con:
+                            hits.extend(rebook_hits(con, w, booked, legs))
                             new = pick_alerts(con, w["id"], cands, 1 if swa.best_only(w) else ALERT_LIMIT)
                             for c in new:
                                 if not c.get("trip"):
@@ -645,24 +689,27 @@ class Worker:
         applog.info(f"Run {'cancelled' if cancelled else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
-        if hits and (user["alert_mode"] or "instant") != "instant":
+        rebooks = [h for h in hits if h.get("rebook")]
+        regular = [h for h in hits if not h.get("rebook")]
+        if regular and (user["alert_mode"] or "instant") != "instant":
             with db.tx() as con:   # saved for the digest; counts as alerted so it isn't queued again
-                for h in hits:
+                for h in regular:
                     con.execute("INSERT INTO digest_hits(user_id, created, hit) VALUES (?,?,?)",
                                 (user_id, db.now(), json.dumps(h, default=str)))
-                record_alerted(con, hits)
-            applog.info(f"{len(hits)} fare alert(s) saved for your {user['alert_mode']} digest",
+                record_alerted(con, regular)
+            applog.info(f"{len(regular)} fare alert(s) saved for your {user['alert_mode']} digest",
                         user_id=user_id, source="run")
-            hits_for_email = []
+            hits_for_email = rebooks   # price drops on booked flights don't wait for the digest
         else:
-            hits_for_email = hits
+            hits_for_email = rebooks + regular
         if hits_for_email:
-            self.phase(user_id, f"Emailing {len(hits)} fare alert(s)", log=False)
-            sent = mailer.send(user["email"], f"SWA fare alert: {len(hits)} match(es)",
-                               mailer.render_hits(hits))
+            self.phase(user_id, f"Emailing {len(hits_for_email)} fare alert(s)", log=False)
+            subject = ("SWA price drop on your booked flight: rebook to save" if rebooks
+                       else f"SWA fare alert: {len(hits_for_email)} match(es)")
+            sent = mailer.send(user["email"], subject, mailer.render_hits(hits_for_email))
             if sent:
                 with db.tx() as con:
-                    record_alerted(con, hits)
+                    record_alerted(con, hits_for_email)
         if all_failed and not (creds and signin is not None and signin.status in ("success", "already_signed_in")):
             mailer.send(user["email"], "SWA fare watcher: searches failed",
                         "<p>No fare data was returned for your watches. Your Southwest session may "
