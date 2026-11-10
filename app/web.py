@@ -675,7 +675,7 @@ def create_app(worker=None, start_worker=True):
         u, s = require(request)
         creds = decrypt_json(u["swa_creds"]) or {}
         attempts = u["auto_login_attempts"] if u["auto_login_day"] == db.today() else 0
-        return render(request, "settings.html", u, s, limits=limits_for(u), creds_username=creds.get("username"),
+        return render(request, "settings.html", u, s, limits=limits_for(u), digest_at=settings.digest_at, creds_username=creds.get("username"),
                       auto_login_available=settings.auto_login, signin_attempts_today=attempts,
                       signin_status=app.state.worker.status(u["id"]),
                       code_wait_minutes=max(1, settings.code_wait_seconds // 60))
@@ -751,8 +751,10 @@ def create_app(worker=None, start_worker=True):
         email = str(f.get("email", "")).strip()
         if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             raise Redirect("/settings?err=Enter+a+valid+email+address")
+        mode = str(f.get("alert_mode", "instant"))
+        mode = mode if mode in ("instant", "daily", "weekly") else "instant"
         with db.tx() as con:
-            con.execute("UPDATE users SET email=? WHERE id=?", (email, u["id"]))
+            con.execute("UPDATE users SET email=?, alert_mode=? WHERE id=?", (email, mode, u["id"]))
         raise Redirect("/settings?ok=Saved")
 
     @app.post("/settings/swa")

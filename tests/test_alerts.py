@@ -70,3 +70,37 @@ def test_lowest_seen_ignores_this_run():
                         (wid, ts, d, "1|x", cash))
         assert lowest_seen(con, wid, d, "2027-01-03T06:00:00") == (299.0, "2027-01-02T07:00:00")
         assert lowest_seen(con, wid, d, "2027-01-01T06:00:00") is None
+
+
+def test_digest_mode_saves_alerts_and_sends_once_a_day(worker, sent):
+    import datetime as dt
+    from app.worker import Worker
+    uid = make_user(alert_mode="daily")
+    make_watch(uid)
+    out = worker.run_user(uid)
+    assert out["hits"] and not sent                       # nothing emailed during the run
+    queued = db.query("SELECT COUNT(*) n FROM digest_hits")[0]["n"]
+    assert queued == out["hits"]
+    assert worker.run_user(uid)["hits"] == 0              # already alerted: not queued again
+    day = dt.datetime.now().replace(hour=17, minute=0)
+    assert Worker.send_digests(now=day) == 0              # before SWA_DIGEST_AT
+    assert Worker.send_digests(now=day.replace(hour=18, minute=5)) == 1
+    assert "digest" in sent[0][1] and "this day" in sent[0][1] and "Book on Southwest" in sent[0][2]
+    assert db.query("SELECT COUNT(*) n FROM digest_hits")[0]["n"] == 0
+    with db.tx() as con:
+        con.execute("INSERT INTO digest_hits(user_id, created, hit) VALUES (?,?,?)",
+                    (uid, db.now(), '{"watch_id": 1, "watch": "x", "date": "2027-01-01", "row": {"cash": 1, "points": null, "points_taxes": null, "cpp": null, "flights": "1", "depart": "1", "arrive": "2", "stops": 0, "duration": 60}, "use": "Cash", "url": "u"}'))
+    assert Worker.send_digests(now=day.replace(hour=20)) == 0          # same day
+    with db.tx() as con:
+        con.execute("UPDATE users SET alert_mode='instant' WHERE id=?", (uid,))
+    assert Worker.send_digests(now=day.replace(hour=9)) == 1           # switched back: sent now
+
+
+def test_settings_saves_alert_mode(client):
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    client.post("/settings", data={"csrf": t, "email": "a@b.co", "alert_mode": "weekly"})
+    assert db.one("SELECT alert_mode FROM users WHERE username='admin'")["alert_mode"] == "weekly"
+    assert "weekly digest" in client.get("/settings").text
+    client.post("/settings", data={"csrf": t, "email": "a@b.co", "alert_mode": "bogus"})
+    assert db.one("SELECT alert_mode FROM users WHERE username='admin'")["alert_mode"] == "instant"

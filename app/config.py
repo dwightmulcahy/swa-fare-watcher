@@ -64,6 +64,8 @@ class Settings:
         self.backup_keep = max(0, int(_env("SWA_BACKUP_KEEP", "7")))
         # Email the admins when no search run has finished for this many hours (0 = off)
         self.stale_hours = max(0.0, float(_env("SWA_STALE_HOURS", "26")))
+        # Daily/weekly digest emails go out at this local time (users choose the mode in Settings)
+        self.digest_at = _env("SWA_DIGEST_AT", "18:00")
         self._secret = _env("SECRET_KEY")
 
     @property

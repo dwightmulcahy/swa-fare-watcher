@@ -201,6 +201,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_AUTO_LOGIN` | `true` | Allow users to turn on automatic sign-in |
 | `SWA_CODE_WAIT_SECONDS` | `600` | How long a sign-in waits for a verification code |
 | `SWA_STALE_HOURS` | `26` | Email the admins (once) when no search run has finished for this long while watches are active; `0` turns it off. `/health` (also `/healthz`, used by the container's health check) returns 503 if the worker thread has stopped |
+| `SWA_DIGEST_AT` | `18:00` | When daily/weekly digests are emailed (each user picks *each deal*, *daily digest* or *weekly digest* under Settings → Alerts) |
 | `SWA_BACKUP_KEEP` | `7` | Copy the database to `data/backups/app-YYYY-MM-DD.db` once a day (taken safely while the app runs) and keep this many; `0` turns it off. Restore: stop the container, copy a backup over `data/app.db`, start it |
 | `SESSION_DAYS` | `14` | Web sign-in lifetime |
 
