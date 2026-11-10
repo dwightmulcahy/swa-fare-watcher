@@ -121,6 +121,19 @@
     <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>
   </fieldset>
 
+  <fieldset>
+    <legend>Already booked? <span class="hint">optional rebook alerts</span></legend>
+    <p class="hint">Enter what you paid per person and you'll be emailed straight away when that flight (or, without a flight number, any flight that day) gets cheaper, so you can change to the lower fare and get the difference back.</p>
+    {% set bk = booked_of(w) %}
+    {% for leg, label in [("out", "Outbound"), ("ret", "Return")] %}{% set b = bk.get(leg, {}) %}
+    <div class="row booked-row" {% if leg == "ret" %}data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}{% endif %}>
+      <label>{{ label }} date <input name="booked_{{ leg }}_date" type="date" value="{{ b.date or '' }}"></label>
+      <label>Flight # <span class="hint">optional</span><input name="booked_{{ leg }}_flights" value="{{ b.flights or '' }}" placeholder="502/52" inputmode="numeric"></label>
+      <label>Paid cash <span class="hint">USD</span><input name="booked_{{ leg }}_cash" type="number" min="1" value="{{ b.cash or '' }}"></label>
+      <label>or points <input name="booked_{{ leg }}_points" data-readable="points" type="number" min="1" value="{{ b.points or '' }}"></label>
+    </div>{% endfor %}
+  </fieldset>
+
   <fieldset class="plain">
     <input type="hidden" name="active" value="0">
     <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if w.active }}> Active (searched daily)</label>

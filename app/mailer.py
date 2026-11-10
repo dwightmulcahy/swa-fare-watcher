@@ -94,7 +94,10 @@ def _history(h):
     return f"<div style='{FONT};font-size:12px;color:#636363;padding:0 0 8px'>{' · '.join(bits)}</div>"
 
 
-def _card(title, url, sub, legs, cash, points, cpp, use, extra=""):
+MANAGE_URL = "https://www.southwest.com/air/manage-reservation/"
+
+
+def _card(title, url, sub, legs, cash, points, cpp, use, extra="", button="Book on Southwest", button_url=None):
     e = html.escape
     price = f"<div style='{FONT};font-size:26px;font-weight:bold;color:{NAVY}'>{cash}</div>" if cash else ""
     pts = f"<div style='{FONT};font-size:13px;color:#636363'>{points}</div>" if points else ""
@@ -111,8 +114,8 @@ def _card(title, url, sub, legs, cash, points, cpp, use, extra=""):
   <tr><td colspan="2" style="padding:0 14px 12px">{extra}
     <span style="{FONT};font-size:13px;color:{NAVY};background:#FFF4D6;border-left:4px solid {YELLOW};
                  padding:6px 10px;display:inline-block">Pay with: <b>{e(use)}</b></span>
-    <a href="{e(url)}" style="{FONT};float:right;background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
-       padding:8px 16px;border-radius:4px;text-decoration:none">Book on Southwest</a></td></tr>
+    <a href="{e(button_url or url)}" style="{FONT};float:right;background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
+       padding:8px 16px;border-radius:4px;text-decoration:none">{e(button)}</a></td></tr>
 </table>"""
 
 
@@ -132,6 +135,13 @@ def render_hits(hits):
             continue
         r = h["row"]
         pts = f'{int(r["points"]):,} pts + ${r["points_taxes"] or 0:.2f}' if r["points"] else ""
+        if h.get("rebook"):
+            cards += _card(h["watch"], h["url"], "Change to the lower fare: Southwest returns the difference "
+                           "(flight credit, or to your card on refundable fares; points go back to your account)",
+                           _leg_line("Flight", h["date"], r, h["url"]),
+                           f'${r["cash"]:,.0f}' if r["cash"] else "", pts, "", h["use"],
+                           button="Change flight", button_url=MANAGE_URL)
+            continue
         cards += _card(h["watch"], h["url"], "One way", _leg_line("Flight", h["date"], r, None),
                        f'${r["cash"]:,.0f}' if r["cash"] else "", pts,
                        f'{r["cpp"]:.2f}' if r["cpp"] else "", h["use"], _history(h))

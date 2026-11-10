@@ -1,6 +1,6 @@
 from app import db
 from app.worker import pick_alerts, record_alerted
-from tests.conftest import future
+from tests.conftest import FakeSearcher, future
 from tests.test_worker import make_user, make_watch
 
 
@@ -104,3 +104,42 @@ def test_settings_saves_alert_mode(client):
     assert "weekly digest" in client.get("/settings").text
     client.post("/settings", data={"csrf": t, "email": "a@b.co", "alert_mode": "bogus"})
     assert db.one("SELECT alert_mode FROM users WHERE username='admin'")["alert_mode"] == "instant"
+
+
+def test_rebook_offer_same_flight_or_any():
+    from app import swa
+    rows = [{"flights": "502/52", "cash": 240.0, "points": 15000}, {"flights": "99", "cash": 199.0, "points": 12000}]
+    o = swa.rebook_offer({"flights": "502 / 52", "cash": 280, "points": None}, rows)
+    assert o["row"]["flights"] == "502/52" and o["save_cash"] == 40
+    assert swa.rebook_offer({"flights": "", "cash": 280, "points": None}, rows)["row"]["flights"] == "99"
+    assert swa.rebook_offer({"flights": "99", "cash": None, "points": 12000}, rows) is None   # not cheaper
+    assert swa.rebook_offer({"flights": "", "cash": None, "points": 16000}, rows)["save_points"] == 4000
+
+
+def test_rebook_alert_sent_once_and_skips_digest(worker, sent):
+    import json
+    uid = make_user(alert_mode="daily")
+    d = future(30)     # not one of the watch's dates: searched only for the rebook check
+    make_watch(uid, booked=json.dumps([{"leg": "out", "date": d, "flights": "99", "cash": 450, "points": None}]))
+    worker.run_user(uid)
+    assert len(sent) == 1 and "booked flight" in sent[0][1]
+    assert "Rebook and save $30" in sent[0][2] and "Change flight" in sent[0][2]
+    assert any(c[2] == d for c in FakeSearcher.calls)
+    q = [json.loads(r["hit"]) for r in db.query("SELECT hit FROM digest_hits")]
+    assert q and all(h["date"] != d for h in q)        # the booked date isn't one of the watch's deals
+    worker.run_user(uid)
+    assert len(sent) == 1                              # same price: no second rebook email
+
+
+def test_watch_form_saves_booked_flight(client):
+    import json
+    from tests.test_web import admin_client, watch_form
+    t = admin_client(client)
+    data = {**watch_form(t), "booked_out_date": future(10), "booked_out_flights": "502/52", "booked_out_cash": "289"}
+    loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
+    wid = int(loc.rstrip("/").split("/")[-1])
+    b = json.loads(db.one("SELECT booked FROM watches WHERE id=?", (wid,))["booked"])
+    assert b == [{"leg": "out", "date": future(10), "cash": 289, "points": None, "flights": "502/52"}]
+    assert 'value="502/52"' in client.get(loc + "/edit").text
+    bad = {**watch_form(t), "booked_out_date": future(10)}
+    assert "what you paid" in client.post("/watches", data=bad).text

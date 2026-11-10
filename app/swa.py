@@ -533,6 +533,38 @@ def combine(cash, points):
 
 
 # ---------- rules ----------
+def booked(w):
+    """Flights already bought on this watch: [{"leg", "date", "flights", "cash", "points"}]."""
+    try:
+        items = json.loads(_get(w, "booked", "") or "[]")
+    except ValueError:
+        return []
+    return [b for b in items if isinstance(b, dict) and b.get("date") and b.get("leg") in ("out", "ret")
+            and (b.get("cash") is not None or b.get("points") is not None)]
+
+
+def _flight_nums(s):
+    return "/".join(re.findall(r"\d+", str(s or "")))
+
+
+def rebook_offer(b, rows):
+    """Cheapest way to rebook a booked flight from today's fares: same flight number(s) if given,
+    else any flight that day. Returns {"row", "save_cash", "save_points"} when it's cheaper."""
+    want = _flight_nums(b.get("flights"))
+    rows = [r for r in rows if not want or _flight_nums(r.get("flights")) == want]
+    best = None
+    for r in rows:
+        sc = (b["cash"] - r["cash"]) if b.get("cash") is not None and r.get("cash") is not None else 0
+        sp = (b["points"] - r["points"]) if b.get("points") is not None and r.get("points") is not None else 0
+        sc, sp = max(sc, 0), max(sp, 0)
+        if sc < 1 and sp < 1:
+            continue
+        score = (sc, sp) if b.get("cash") is not None else (sp, sc)
+        if best is None or score > best[0]:
+            best = (score, {"row": r, "save_cash": sc, "save_points": sp})
+    return best[1] if best else None
+
+
 def _get(w, key, default=None):
     """Watch column, tolerating dicts/rows created before round trips existed."""
     try:

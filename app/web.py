@@ -40,6 +40,7 @@ def _stops_label(f):
 
 
 templates.env.globals["stops_label"] = _stops_label
+templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["max_dates"] = settings.max_dates_per_watch
 templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
@@ -480,6 +481,24 @@ def create_app(worker=None, start_worker=True):
                 errs.append("No return date falls on or after an outbound date. Check the return dates or stay length.")
         else:
             w["ret_depart_after"] = w["ret_depart_before"] = None
+        booked = []
+        for leg in ("out", "ret") if w["trip_type"] == "roundtrip" else ("out",):
+            d = str(f.get(f"booked_{leg}_date", "")).strip()
+            if not d:
+                continue
+            try:
+                dt.date.fromisoformat(d)
+            except ValueError:
+                errs.append("Booked flight date must be YYYY-MM-DD.")
+                continue
+            cash = opt_int(f"booked_{leg}_cash", 1, 100_000)
+            points = opt_int(f"booked_{leg}_points", 1, 10_000_000)
+            if cash is None and points is None:
+                errs.append("For a booked flight, enter what you paid (cash or points).")
+                continue
+            booked.append({"leg": leg, "date": d, "cash": cash, "points": points,
+                           "flights": re.sub(r"[^0-9/ ,]", "", str(f.get(f"booked_{leg}_flights", "")))[:40].strip()})
+        w["booked"] = json.dumps(booked) if booked else None
         return w, errs
 
     def latest_legs(wid, day=None):
@@ -542,7 +561,8 @@ def create_app(worker=None, start_worker=True):
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
              "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,
-             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0}
+             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0,
+             "booked": None}
         return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True, limits=limits_for(u))
 
     @app.post("/watches")
