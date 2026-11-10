@@ -338,3 +338,22 @@ label:has(> .suggest) { position: relative; }
 .suggest li small { color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest li[aria-selected="true"], .suggest li:hover { background: var(--accent-soft); }
 .suggest li.not-swa { opacity: .7; }
+
+/* price history chart */
+.chart-card .row.between { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.hist-chart { width: 100%; min-height: 220px; }
+.hist-chart svg { width: 100%; height: 240px; display: block; overflow: visible; }
+.hist-chart .grid { stroke: var(--line); stroke-width: 1; }
+.hist-chart text { fill: var(--muted); font-size: 11px; }
+.hist-chart .cash { stroke: var(--blue); fill: none; stroke-width: 2.5; }
+.hist-chart .pts { stroke: #e07b00; fill: none; stroke-width: 2.5; }
+.hist-chart .any { stroke: var(--muted); fill: none; stroke-width: 1.5; stroke-dasharray: 4 4; }
+.hist-chart circle.cash { fill: var(--blue); } .hist-chart circle.pts { fill: #e07b00; }
+.hist-legend { display: flex; gap: .4rem 1rem; flex-wrap: wrap; align-items: center; color: var(--muted); }
+.hist-legend .k { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: .3rem; }
+.hist-legend .k.cash { background: var(--blue); } .hist-legend .k.pts { background: #e07b00; }
+.hist-legend .k.any { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px); }
+@media (prefers-color-scheme: dark) { .hist-chart .cash, .hist-legend .k.cash { stroke: var(--accent); background: var(--accent); }
+  .hist-chart circle.cash { fill: var(--accent); } }
+.chart-card label.small { display: flex; flex-direction: row; align-items: center; gap: .4rem; margin: 0; }
+.chart-card label.small select { width: auto; max-width: 16rem; }

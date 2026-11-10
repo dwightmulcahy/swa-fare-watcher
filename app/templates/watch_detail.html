@@ -94,9 +94,22 @@
 <p class="muted small">Last checked {{ last|when }}. Dates link to Southwest's booking page.</p>
 {% endif %}
 
+{% if trend %}
+<section class="card chart-card">
+  <div class="row between">
+    <h2>Price history</h2>
+    <label class="small">Show <select id="hist-pick">{% for k in history %}<option>{{ k }}</option>{% endfor %}</select></label>
+  </div>
+  <div id="hist-chart" class="hist-chart" role="img" aria-label="Cash and points over time"></div>
+  <div class="hist-legend small"><span class="k cash"></span>Best matching cash <span class="k pts"></span>Best matching points
+    <span class="k any"></span>Lowest cash (any flight)</div>
+  <script type="application/json" id="hist-data">{{ history|tojson }}</script>
+</section>
+{% endif %}
+
 <div class="cols">
   <section>
-    <h2>Price history</h2>
+    <h2>Price history by day</h2>
     {% if trend %}
     <table class="list compact">
       <thead><tr><th>Day</th><th class="num">Best matching cash</th><th class="num">Best matching points</th><th class="num">Lowest cash (any)</th></tr></thead>

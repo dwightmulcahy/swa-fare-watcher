@@ -492,3 +492,73 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   setTimeout(tail, 3000);
 })();
+
+// Price history chart: cash (left axis) and points (right axis) per search day, for all dates or one.
+document.addEventListener("DOMContentLoaded", () => {
+  const box = document.getElementById("hist-chart");
+  const data = document.getElementById("hist-data");
+  const pick = document.getElementById("hist-pick");
+  if (!box || !data || !pick) return;
+  const series = JSON.parse(data.textContent);
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v));
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  const nice = (lo, hi) => {   // round axis bounds with a little headroom
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.12;
+    return [Math.max(0, lo - pad), hi + pad];
+  };
+  const draw = () => {
+    const pts = series[pick.value] || [];
+    box.textContent = "";
+    if (!pts.length) { box.textContent = "No searches for this date yet."; return; }
+    const W = Math.max(box.clientWidth, 320), H = 240, L = 54, R = 64, T = 12, B = 28;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+    const xs = (i) => L + (pts.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (pts.length - 1));
+    const cashVals = pts.flatMap((p) => [p.cash, p.any_cash]).filter((v) => v != null);
+    const ptVals = pts.map((p) => p.points).filter((v) => v != null);
+    const [c0, c1] = cashVals.length ? nice(Math.min(...cashVals), Math.max(...cashVals)) : [0, 1];
+    const [p0, p1] = ptVals.length ? nice(Math.min(...ptVals), Math.max(...ptVals)) : [0, 1];
+    const yc = (v) => T + (H - T - B) * (1 - (v - c0) / (c1 - c0));
+    const yp = (v) => T + (H - T - B) * (1 - (v - p0) / (p1 - p0));
+    for (let k = 0; k <= 4; k++) {
+      const y = T + ((H - T - B) * k) / 4;
+      svg.append(el("line", { x1: L, x2: W - R, y1: y, y2: y, class: "grid" }));
+      if (cashVals.length) svg.append(el("text", { x: L - 6, y: y + 4, "text-anchor": "end" },
+        "$" + Math.round(c1 - ((c1 - c0) * k) / 4).toLocaleString()));
+      const pv = p1 - ((p1 - p0) * k) / 4;
+      if (ptVals.length) svg.append(el("text", { x: W - R + 6, y: y + 4 },
+        (pv >= 1000 ? (pv / 1000).toFixed(1) + "k" : Math.round(pv)) + " pts"));
+    }
+    const step = Math.ceil(pts.length / 8);
+    pts.forEach((p, i) => {
+      if (i % step === 0 || i === pts.length - 1)
+        svg.append(el("text", { x: xs(i), y: H - 8, "text-anchor": "middle" }, p.day.slice(5)));
+    });
+    const line = (key, y, cls) => {
+      let d = "";
+      pts.forEach((p, i) => { if (p[key] != null) d += (d ? " L" : "M") + xs(i).toFixed(1) + " " + y(p[key]).toFixed(1); });
+      if (d) svg.append(el("path", { d, class: cls }));
+    };
+    line("any_cash", yc, "any");
+    line("cash", yc, "cash");
+    line("points", yp, "pts");
+    pts.forEach((p, i) => {
+      [["cash", yc, (v) => "$" + Math.round(v).toLocaleString()], ["points", yp, (v) => Math.round(v).toLocaleString() + " pts"]]
+        .forEach(([key, y, fmt]) => {
+          if (p[key] == null) return;
+          const c = el("circle", { cx: xs(i), cy: y(p[key]), r: 3.5, class: key === "cash" ? "cash" : "pts" });
+          c.append(el("title", {}, `${p.day}: ${fmt(p[key])}`));
+          svg.append(c);
+        });
+    });
+    box.append(svg);
+  };
+  pick.addEventListener("change", draw);
+  window.addEventListener("resize", draw);
+  draw();
+});
