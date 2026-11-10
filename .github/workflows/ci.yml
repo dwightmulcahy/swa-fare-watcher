@@ -109,6 +109,10 @@ jobs:
           scanners: vuln
           vuln-type: os,library
           severity: CRITICAL,HIGH
+      - name: No pip in the image
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c \
+            'if ls -d /usr/local/lib/python3*/ensurepip /usr/local/bin/pip* 2>/dev/null; then echo "pip left in image"; exit 1; fi'
       - name: Container logs
         if: failure()
         run: docker logs app
@@ -116,4 +120,4 @@ jobs:
         if: failure()
         run: |
           docker run --rm --entrypoint sh "$IMAGE" -c \
-            'find / -xdev \( -name "*.dist-info" -o -name "*.egg-info" -o -name "*.whl" \) 2>/dev/null | grep -v "/site-packages/[a-z_]*-[0-9].*dist-info$" | head -50; ls /usr/local/lib/python3.13/site-packages'
+            'find / -xdev \( -name "*.dist-info" -o -name "*.egg-info" -o -name "*.whl" \) 2>/dev/null | grep -v "/site-packages/[a-z_]*-[0-9].*dist-info$" | head -50; ls /usr/local/lib/python3.*/site-packages'

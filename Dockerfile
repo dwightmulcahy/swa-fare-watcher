@@ -36,7 +36,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends fonts-liberation fonts-noto-color-emoji \
  && { pip uninstall -y setuptools wheel || true; } \
  && pip uninstall -y pip \
- && rm -rf /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip* /root/.cache \
+ && rm -rf /usr/local/lib/python3.*/ensurepip /usr/local/bin/pip* /root/.cache \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1000 --create-home --home-dir /home/app app \
  && mkdir -p /data && chown app /data
