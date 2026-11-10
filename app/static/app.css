@@ -6,14 +6,15 @@
   --yellow: #ffbf27;
   --navy: #1b2559;
 
-  --bg: #f3f5fb;
+  --bg: #f2f2f2;                 /* Southwest-style neutral grey page, white panels */
   --surface: #ffffff;
   --ink: var(--navy);
-  --muted: #5a6385;
-  --line: #dde2f0;
+  --muted: #636363;
+  --line: #d9d9d9;
+  --panel-head: #f7f7f7;
   --accent: var(--blue);
   --accent-ink: #ffffff;
-  --accent-soft: #e8edfb;
+  --accent-soft: #eef1fa;
   --cta: var(--yellow);          /* primary buttons: sunrise yellow with navy text */
   --cta-ink: var(--navy);
   --cta-hover: #ffcd52;
@@ -33,14 +34,15 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1430; --surface: #161e42; --ink: #e9edfb; --muted: #a3acd0; --line: #28325e;
-    --accent: #93a8ff; --accent-ink: #0e1430; --accent-soft: #212c5c;
+    --bg: #121316; --surface: #1c1d22; --ink: #ececef; --muted: #a6a8b0; --line: #34363d; --panel-head: #24262c;
+    --accent: #93a8ff; --accent-ink: #121316; --accent-soft: #262b3d;
     --cta: #ffbf27; --cta-ink: #1b2559; --cta-hover: #ffcd52;
     --bar: #22388f; --bar-ink: #ffffff; --bar-muted: #b9c5f3;
     --good: #6fd5a0; --good-soft: #13321f; --warn: #ffcb5c; --warn-soft: #3a2c0b;
     --bad: #ff6b7e; --bad-soft: #3d1520; --match: #352c10;
     --shadow: none; color-scheme: dark;
   }
+  .watch-form > fieldset > legend::before { background: var(--yellow); color: var(--navy); }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -156,6 +158,27 @@ textarea { font: .85rem ui-monospace, SFMono-Regular, Menlo, monospace; resize: 
 fieldset { border: 0; padding: 0; margin: 0 0 1.4rem; display: flex; flex-direction: column; gap: .9rem; }
 legend { font-weight: 700; font-size: 1rem; margin-bottom: .6rem; padding: 0; }
 legend .hint { font-weight: 400; margin-left: .4rem; }
+/* watch form: every section its own white panel with a numbered header, like Southwest's booking steps */
+form.watch-form { background: none; border: 0; box-shadow: none; padding: 0; counter-reset: step; }
+.watch-form > fieldset { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--blue);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 0 1.25rem 1.25rem; margin: 0 0 1rem; }
+.watch-form > fieldset > legend { float: left; width: calc(100% + 2.5rem); margin: 0 -1.25rem .25rem; padding: .7rem 1.25rem;
+  background: var(--panel-head); border-bottom: 1px solid var(--line); border-radius: 6px 6px 0 0;
+  font-size: 1.05rem; color: var(--ink); display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.watch-form > fieldset > legend::before { counter-increment: step; content: counter(step); flex: none;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--navy); color: var(--yellow);
+  display: inline-grid; place-items: center; font-size: .85rem; font-weight: 800; }
+.watch-form > fieldset > legend .hint { margin-left: 0; }
+.watch-form > fieldset.plain { border-top-width: 1px; padding-top: 1rem; }
+.watch-form .form-foot { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.25rem; box-shadow: var(--shadow); }
+/* one-way / round trip as a Southwest-style segmented switch */
+.watch-form .seg.trip-type { gap: 0; border: 1px solid var(--blue); border-radius: 7px; overflow: hidden; align-self: flex-start; }
+.watch-form .seg.trip-type label { padding: .5rem 1.1rem; cursor: pointer; color: var(--accent); font-weight: 650; }
+.watch-form .seg.trip-type label + label { border-left: 1px solid var(--blue); }
+.watch-form .seg.trip-type input { position: absolute; opacity: 0; pointer-events: none; }
+.watch-form .seg.trip-type label:has(input:checked) { background: var(--blue); color: #fff; }
+.watch-form .seg.trip-type label:has(input:focus-visible) { outline: 2px solid var(--yellow); outline-offset: -3px; }
 label.check, label.chip { display: inline-flex; align-items: center; gap: .45rem; font-weight: 500; }
 label.check > input, label.chip > input { margin: 0; display: inline; }
 .weekdays { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
