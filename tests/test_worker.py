@@ -284,3 +284,22 @@ def test_worker_alive_reflects_threads(worker):
     t.join()
     worker._threads = [t]
     assert worker.alive() is False
+
+
+def test_format_change_warns_admins_once_a_day(sent):
+    from app.worker import Worker
+    make_user(username="adm", email="adm@example.com", is_admin=1)
+    assert Worker.check_format(10, 1, 1, day="2027-01-01") is False     # a couple of odd days is normal
+    assert Worker.check_format(2, 2, 0, day="2027-01-01") is False      # too few searches to tell
+    assert Worker.check_format(6, 2, 2, day="2027-01-01") is True
+    assert Worker.check_format(6, 4, 0, day="2027-01-01") is True       # same day: no second email
+    assert len(sent) == 1 and "changed its fare data" in sent[0][1]
+    Worker.check_format(4, 0, 4, day="2027-01-02")
+    assert len(sent) == 2
+
+
+def test_priceless_detects_flights_without_fares():
+    from app import swa
+    assert swa.priceless({"a": {"fare": None}, "b": {"fare": None}})
+    assert not swa.priceless({"a": {"fare": None}, "b": {"fare": (100.0, 5.6)}})
+    assert not swa.priceless({}) and not swa.priceless(None)

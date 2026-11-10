@@ -276,6 +276,26 @@ class Worker:
         except Exception as e:
             applog.error(f"Stale-run check failed: {e.__class__.__name__}: {e}", source="scheduler")
 
+    @staticmethod
+    def check_format(attempts, shape_errors, priceless, day=None):
+        """If most of a run's searches came back in a shape the parser doesn't know, or with flights
+        but no prices, Southwest has likely changed its data: warn the admins (once a day)."""
+        odd = shape_errors + priceless
+        if attempts < 3 or odd < 3 or odd * 2 < attempts:
+            return False
+        day = day or db.today()
+        if db.get_state("format_alert_day") == day:
+            return True
+        msg = (f"{odd} of {attempts} fare searches in one run came back in a shape the app doesn't "
+               f"understand ({shape_errors} unrecognised, {priceless} with flights but no prices). "
+               "Southwest has probably changed its site; fares will be missing until the parser is updated. "
+               "Raw responses are saved under debug/.")
+        applog.error(msg, source="search")
+        for to in db.admin_emails():
+            mailer.send(to, "SWA fare watcher: Southwest changed its fare data", f"<p>{html.escape(msg)}</p>")
+        db.set_state("format_alert_day", day)
+        return True
+
     def alive(self):
         """False if a background thread this worker started has died."""
         return all(t.is_alive() for t in self._threads)
@@ -354,6 +374,7 @@ class Worker:
         state = decrypt_json(user["swa_state"])
         cap = user["max_searches_per_day"]
         hits, attempts, failures = [], 0, 0
+        priceless = 0   # searches whose flights had no price at all (data-format warning sign)
         limited = False
         signin = None
 
@@ -436,6 +457,8 @@ class Worker:
                                         db.add_searches(con, user_id, 1)
                                     attempts += 1
                                     w_s += 1
+                                    if swa.priceless(res[ft]):
+                                        priceless += 1
                                     if res[ft] is None:
                                         failures += 1
                                         w_f += 1
@@ -553,6 +576,7 @@ class Worker:
                 con.execute("UPDATE users SET swa_status=?, swa_status_at=? WHERE id=?",
                             (status, db.now(), user_id))
 
+        self.check_format(attempts, getattr(searcher, "shape_errors", 0), priceless)
         cancelled = self._stop(user_id)
         applog.info(f"Run {'cancelled' if cancelled else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
