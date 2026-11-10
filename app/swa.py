@@ -2,6 +2,7 @@
 import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import re
 import select
@@ -15,6 +16,8 @@ from urllib.parse import urlencode
 
 from . import applog
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
 # The Low Fare Calendar's "Shop in: Dollars | Points | $ + Points" switch: buttons labelled
@@ -776,15 +779,27 @@ def wipe_profile(key):
     shutil.rmtree(profile_dir(key), ignore_errors=True)
 
 
-def start_xvfb(timeout=10):
+def start_xvfb(timeout=10, attempts=3):
     """Start a private virtual display so Chrome can run headed without a desktop.
-    Returns (process, ':N')."""
+    Returns (process, ':N'). Retries: right after another Xvfb exits, a new one can pick the
+    display number still being released and quit straight away."""
     if not shutil.which("Xvfb"):
         raise RuntimeError("Xvfb not installed: install it or set SWA_HEADLESS=true")
+    for attempt in range(1, attempts + 1):
+        try:
+            return _start_xvfb_once(timeout)
+        except RuntimeError as e:
+            if attempt == attempts:
+                raise
+            log.warning("%s; retrying (%d/%d)", e, attempt, attempts - 1)
+            time.sleep(0.5 * attempt)
+
+
+def _start_xvfb_once(timeout):
     r, w = os.pipe()
     proc = subprocess.Popen(
         ["Xvfb", "-displayfd", str(w), "-screen", "0", f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp"],
-        pass_fds=(w,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pass_fds=(w,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     os.close(w)
     try:
         ready, _, _ = select.select([r], [], [], timeout)
@@ -793,7 +808,7 @@ def start_xvfb(timeout=10):
         os.close(r)
     if not num.isdigit():
         proc.kill()
-        raise RuntimeError("Xvfb did not start")
+        raise RuntimeError(f"Xvfb did not start{_xvfb_err(proc)}")
     # make sure it's really accepting connections (a display number just released by another
     # Xvfb can briefly look free while its socket is still going away)
     sock = Path(f"/tmp/.X11-unix/X{num}")
@@ -801,8 +816,19 @@ def start_xvfb(timeout=10):
     while time.monotonic() < deadline and proc.poll() is None and not sock.exists():
         time.sleep(0.05)
     if proc.poll() is not None:
-        raise RuntimeError("Xvfb exited right after starting")
+        raise RuntimeError(f"Xvfb exited right after starting on :{num}{_xvfb_err(proc)}")
+    proc.stderr.close()   # running: nothing more to read, and an unread pipe could fill up
     return proc, f":{num}"
+
+
+def _xvfb_err(proc):
+    try:
+        proc.wait(timeout=2)
+        err = proc.stderr.read().decode(errors="replace").strip().splitlines()
+        proc.stderr.close()
+        return f" ({err[-1][:200]})" if err else ""
+    except Exception:
+        return ""
 
 
 class BrowserSearcher:

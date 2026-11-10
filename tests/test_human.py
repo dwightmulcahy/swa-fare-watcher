@@ -205,3 +205,23 @@ def test_neighbour_keys():
     assert neighbour_key("A", rng).isupper()
     assert neighbour_key("!", rng) is None
     assert "g" not in human._NEIGHBOURS["g"] and {"f", "h", "t", "b"} <= set(human._NEIGHBOURS["g"])
+
+
+def test_xvfb_start_retries(monkeypatch):
+    from app import swa
+    calls = []
+
+    def flaky(timeout):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("Xvfb exited right after starting on :0")
+        return "proc", ":0"
+    monkeypatch.setattr(swa.shutil, "which", lambda name: "/usr/bin/Xvfb")
+    monkeypatch.setattr(swa, "_start_xvfb_once", flaky)
+    monkeypatch.setattr(swa.time, "sleep", lambda s: None)
+    assert swa.start_xvfb() == ("proc", ":0") and len(calls) == 3
+    calls.clear()
+    monkeypatch.setattr(swa, "_start_xvfb_once", lambda t: (_ for _ in ()).throw(RuntimeError("Xvfb did not start")))
+    import pytest
+    with pytest.raises(RuntimeError, match="did not start"):
+        swa.start_xvfb()
