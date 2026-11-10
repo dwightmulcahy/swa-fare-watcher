@@ -3,6 +3,7 @@ import html
 import smtplib
 from email.mime.text import MIMEText
 
+from . import swa
 from .config import settings
 
 
@@ -68,7 +69,8 @@ def render_hits(hits):
             def leg(f, url=None):
                 if not f:
                     return "—"
-                txt = f'{e(str(f["flights"]))} {e(f["depart"])}–{e(f["arrive"])}'
+                txt = (f'{e(str(f["flights"]))} {e(f["depart"])}–{e(f["arrive"])} '
+                       f'({e(swa.stops_label(f["stops"], f.get("via") or ""))})')
                 if f.get("origin"):
                     txt = f'{e(f["origin"])}→{e(f["dest"])} {txt}'
                 return f'<a href="{e(url)}">{txt}</a>' if url else txt
@@ -86,7 +88,8 @@ def render_hits(hits):
         pts = f'{int(r["points"]):,} + ${r["points_taxes"]:.2f}' if r["points"] else "—"
         cells = [
             f'<a href="{e(h["url"])}">{e(h["watch"])}</a>', e(h["date"]), e(str(r["flights"])),
-            f'{e(r["depart"])}–{e(r["arrive"])}', r["stops"], fmt_dur(r["duration"]),
+            f'{e(r["depart"])}–{e(r["arrive"])}', e(swa.stops_label(r["stops"], r.get("via") or "")),
+            fmt_dur(r["duration"]),
             f'${r["cash"]:.0f}' if r["cash"] else "—", pts,
             f'{r["cpp"]:.2f}' if r["cpp"] else "—", h["use"],
         ]

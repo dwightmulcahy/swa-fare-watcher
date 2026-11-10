@@ -195,6 +195,7 @@ MIGRATIONS = {
         "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret
         "origin": "TEXT",                        # airports of this flight (watches can have several)
         "dest": "TEXT",
+        "via": "TEXT",                           # stop airports, space-separated ("MCO HOU")
     },
     "calendar_fares": {
         "origin": "TEXT",

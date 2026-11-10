@@ -32,7 +32,7 @@
   <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
 </div>
 
-{% macro leg_flight(f) %}{% if f %}<span class="nowrap">{{ f.depart }}–{{ f.arrive }}</span> <span class="muted small">{{ f.flights }} · {% if f.stops == 0 %}nonstop{% else %}{{ f.stops }} stop{{ 's' if f.stops > 1 }}{% endif %} · {{ f.duration|dur }}</span>{% else %}—{% endif %}{% endmacro %}
+{% macro leg_flight(f) %}{% if f %}<span class="nowrap">{{ f.depart }}–{{ f.arrive }}</span> <span class="muted small">{{ f.flights }} · {{ stops_label(f) }} · {{ f.duration|dur }}</span>{% else %}—{% endif %}{% endmacro %}
 {% if rt %}
 <h2>Best round trips</h2>
 {% if not trips %}
@@ -80,7 +80,7 @@
     <td><a href="{{ book(f) }}" target="_blank" rel="noopener">{{ f.date }}</a></td>
     <td class="small">{{ f.flights }}</td>
     <td>{{ f.depart }}–{{ f.arrive }}</td>
-    <td class="num" data-sort="{{ f.stops if f.stops is not none else '' }}">{{ f.stops }}</td>
+    <td class="num" data-sort="{{ f.stops if f.stops is not none else '' }}">{{ f.stops }}{% if f.via %}<br><span class="muted small">{{ f.via.split()|join(', ') }}</span>{% endif %}</td>
     <td class="num" data-sort="{{ f.duration if f.duration is not none else '' }}">{{ f.duration|dur }}</td>
     <td class="num" data-sort="{{ f.cash if f.cash is not none else '' }}">{{ f.cash|money }}</td>
     <td class="num" data-sort="{{ f.points if f.points is not none else '' }}">{{ f.points|pts }}{% if f.points_taxes %}<span class="muted small"> + ${{ '%.2f'|format(f.points_taxes) }}</span>{% endif %}</td>

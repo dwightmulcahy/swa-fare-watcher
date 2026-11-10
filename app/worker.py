@@ -375,11 +375,11 @@ class Worker:
                                         matched = swa.passes(r, w) if not rt else swa.passes_leg(r, w, leg)
                                         con.execute(
                                             "INSERT INTO fares(watch_id, ts, date, leg, origin, dest, flight_key, flights,"
-                                            " depart, arrive, stops, duration, cash, points, points_taxes, cpp, matched)"
-                                            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                            " depart, arrive, stops, via, duration, cash, points, points_taxes, cpp, matched)"
+                                            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                             (w["id"], ts, date, leg, frm, to, r["key"], r["flights"], r["depart"],
-                                             r["arrive"], r["stops"], r["duration"], r["cash"], r["points"],
-                                             r["points_taxes"], r["cpp"], int(matched)))
+                                             r["arrive"], r["stops"], r.get("via") or "", r["duration"], r["cash"],
+                                             r["points"], r["points_taxes"], r["cpp"], int(matched)))
                                         if not matched or rt:
                                             continue
                                         w_m += 1
