@@ -53,8 +53,8 @@
     <td class="num" data-sort="{{ t.cash if t.cash is not none else '' }}"><span class="price">{{ t.cash|money }}</span></td>
     <td class="num" data-sort="{{ t.points if t.points is not none else '' }}">{{ t.points|pts }}{% if t.taxes %}<span class="muted small"> + ${{ '%.2f'|format(t.taxes) }}</span>{% endif %}</td>
     <td class="num" data-sort="{{ t.cpp or '' }}">{{ '%.2f'|format(t.cpp) if t.cpp else '—' }}</td>
-    <td>{% if t.matched %}<span class="pill {{ 'good' if 'oints' in t.use else '' }}">{{ t.use }}</span>{% endif %}
-      {% if w.mix_payment and t.mix[0].pay != t.mix[1].pay %}<br><span class="muted small">{{ t.mix_cash|money }} + {{ t.mix_points|pts }} pts</span>{% endif %}</td>
+    <td>{% if t.matched %}<span class="pill {{ 'good' if 'oints' in t.use else '' }}">{{ t.use }}</span>
+      <br><span class="muted small">{{ t.use_amount }}</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
@@ -85,7 +85,7 @@
     <td class="num" data-sort="{{ f.cash if f.cash is not none else '' }}">{{ f.cash|money }}</td>
     <td class="num" data-sort="{{ f.points if f.points is not none else '' }}">{{ f.points|pts }}{% if f.points_taxes %}<span class="muted small"> + ${{ '%.2f'|format(f.points_taxes) }}</span>{% endif %}</td>
     <td class="num" data-sort="{{ f.cpp or '' }}">{{ '%.2f'|format(f.cpp) if f.cpp else '—' }}</td>
-    <td>{% if f.matched and not rt %}<span class="pill {{ 'good' if recommend(f) == 'Points' else '' }}">{{ recommend(f) }}</span>{% elif rt and not f.matched %}<span class="muted small">filtered out</span>{% endif %}</td>
+    <td>{% if f.matched and not rt %}<span class="pill {{ 'good' if recommend(f) == 'Points' else '' }}">{{ recommend(f) }}</span><br><span class="muted small">{{ recommend_detail(f).split(': ', 1)[1] }}</span>{% elif rt and not f.matched %}<span class="muted small">filtered out</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

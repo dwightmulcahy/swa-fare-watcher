@@ -133,3 +133,21 @@ def test_round_trip_validation(client):
     assert r.status_code == 400 and "No return date" in r.text
     r = client.post("/watches", data=watch_form(token, trip_type="roundtrip", return_mode="dates", ret_dates="soon"))
     assert r.status_code == 400 and "YYYY-MM-DD" in r.text
+
+
+def test_pay_with_shows_amounts():
+    out = {"cash": 292.0, "points": 25000, "points_taxes": 5.6}
+    back = {"cash": 120.0, "points": 4000, "points_taxes": 5.6}
+    assert swa.pay_amount("cash", out) == "$292"
+    assert swa.pay_amount("points", back) == "4,000 pts + $5.60"
+    trip = {"mix": [{"pay": "cash", "flight": out}, {"pay": "points", "flight": back}],
+            "cash": 412.0, "points": 29000, "taxes": 11.2}
+    w = {"mix_payment": 1, "min_cpp": 1.4}
+    assert swa.use_detail(trip, w) == "Cash out ($292), points back (4,000 pts + $5.60)"
+    assert swa.use_amount(trip, w) == "$292 out · 4,000 pts + $5.60 back"
+    same = {**trip, "mix": [{"pay": "points", "flight": out}, {"pay": "points", "flight": back}]}
+    assert swa.use_detail(same, w) == "Points: 29,000 pts + $11.20"
+    assert swa.use_amount(same, w) == "29,000 pts + $11.20"
+    r = {"cash": 292.0, "points": 19000, "points_taxes": 5.6, "cpp": 1.5}
+    assert swa.recommend_detail(r, w) == "Points: 19,000 pts + $5.60"
+    assert swa.recommend_detail({**r, "cpp": 1.0}, w) == "Cash: $292"

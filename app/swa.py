@@ -669,6 +669,24 @@ def recommend(r, w):
     return "Points" if r["cpp"] >= (w["min_cpp"] or 0) else "Cash"
 
 
+def pay_amount(pay, f):
+    """What paying one way costs: '$292' cash, or '19,000 pts + $5.60' points."""
+    if not f:
+        return "—"
+    f = dict(f)
+    if pay == "cash":
+        return f"${f['cash']:,.0f}" if f.get("cash") is not None else "—"
+    if f.get("points") is None:
+        return "—"
+    return f"{int(f['points']):,} pts + ${f.get('points_taxes') or 0:.2f}"
+
+
+def recommend_detail(r, w):
+    """One-way 'Pay with' with its amount, e.g. 'Points: 19,000 pts + $5.60'."""
+    word = recommend(r, w)
+    return f"{word}: {pay_amount(word.lower(), r)}"
+
+
 def _cpp(cash, points, taxes):
     return round((cash - (taxes or 0)) / points * 100, 2) if cash and points else None
 
@@ -745,6 +763,8 @@ def _price_pair(w, o, r, o_rows, r_rows):
     trip["mix_points"] = sum(m["flight"]["points"] for m in mix if m["pay"] == "points" and m["flight"])
     trip["mix_taxes"] = sum(m["flight"]["points_taxes"] or 0 for m in mix if m["pay"] == "points" and m["flight"])
     trip["use"] = use_label(trip, w)
+    trip["use_detail"] = use_detail(trip, w)
+    trip["use_amount"] = use_amount(trip, w)
     trip["matched"] = price_ok(cash, points, trip["cpp"], w)
     first_o = trip["out_cash"] or trip["out_points"]
     first_r = trip["ret_cash"] or trip["ret_points"]
@@ -760,6 +780,33 @@ def _price_pair(w, o, r, o_rows, r_rows):
     else:
         trip["url"], trip["ret_url"] = booking_url(fo, to_, o, adults), booking_url(fr, tr, r, adults)
     return trip
+
+
+def use_detail(trip, w):
+    """'Pay with' plus amounts: 'Points out (51,500 pts + $5.60), cash back ($292)' or 'Cash: $584'."""
+    if _get(w, "mix_payment", 1):
+        legs = trip["mix"]
+        if legs[0]["pay"] != legs[1]["pay"]:
+            parts = [f"{m['pay']} {d} ({pay_amount(m['pay'], m['flight'])})"
+                     for m, d in zip(legs, ("out", "back"))]
+            return (parts[0][0].upper() + parts[0][1:]) + ", " + parts[1]
+        pay = legs[0]["pay"]
+    else:
+        pay = use_label(trip, w).lower()
+    if pay == "cash":
+        return f"Cash: ${trip['cash']:,.0f}" if trip["cash"] is not None else "Cash"
+    if trip["points"] is None:
+        return "Points"
+    return f"Points: {int(trip['points']):,} pts + ${trip['taxes'] or 0:.2f}"
+
+
+def use_amount(trip, w):
+    """Just the amounts for the page under the pill: '$292 out · 51,500 pts + $5.60 back'."""
+    legs = trip["mix"]
+    if _get(w, "mix_payment", 1) and legs[0]["pay"] != legs[1]["pay"]:
+        return " · ".join(f"{pay_amount(m['pay'], m['flight'])} {d}" for m, d in zip(legs, ("out", "back")))
+    d = use_detail(trip, w)
+    return d.split(": ", 1)[1] if ": " in d else ""
 
 
 def use_label(trip, w):
