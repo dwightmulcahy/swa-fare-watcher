@@ -71,3 +71,20 @@ def test_bad_app_password_is_explained(smtp):
     smtp.auth_fail = True
     assert not mailer.send("a@b.c", "s", "<p>x</p>")
     assert "app password" in db.one("SELECT message FROM logs WHERE source='mail' ORDER BY id DESC")["message"]
+
+
+def test_alert_email_is_southwest_styled_cards():
+    from app import mailer
+    f = {"flights": "502/52", "depart": "6:00 AM", "arrive": "4:10 PM", "stops": 2, "via": "MCO HOU",
+         "duration": 610, "cash": 292.0, "points": 19000, "points_taxes": 5.6, "cpp": 1.5}
+    trip = {"nights": 3, "out_date": "2027-04-05", "ret_date": "2027-04-08", "out_cash": f, "ret_cash": f,
+            "out_points": f, "ret_points": f, "cash": 584.0, "points": 38000, "taxes": 11.2, "cpp": 1.5}
+    out = mailer.render_hits([
+        {"watch": "Spring <trip>", "url": "https://x/o", "ret_url": "https://x/r", "trip": trip,
+         "use": "Points: 38,000 pts + $11.20"},
+        {"watch": "One", "url": "https://x/1", "date": "2027-04-05", "row": f, "use": "Cash: $292"},
+    ])
+    assert "#304CB2" in out and "#FFBF27" in out and "Book on Southwest" in out
+    assert "2 new deals" in out and "Spring &lt;trip&gt;" in out
+    assert "2 stops (MCO, HOU)" in out and "$584" in out and "38,000 pts + $11.20" in out
+    assert "Pay with: <b>Cash: $292</b>" in out and "https://x/r" in out
