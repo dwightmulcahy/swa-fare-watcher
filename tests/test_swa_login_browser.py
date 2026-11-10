@@ -295,3 +295,16 @@ def test_block_pages_stop_the_search(site, monkeypatch, tmp_path):
         with pytest.raises(swa.Blocked) as e:
             b.calendar("LIR", "HOU", "2026-11-09", 1, "USD")
     assert "rejected" in e.value.reason.lower() and e.value.screenshot
+
+
+def test_browser_screen_matches_the_users_desk(site, monkeypatch, tmp_path):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    key = next(k for k in range(100, 200) if swa.window_size_for(k) == (1366, 768))
+    (sw, sh), _ = swa.screen_for(key)
+    with swa.BrowserSearcher(profile_key=key, human=False) as b:
+        b.page.goto(site)
+        got = b.page.evaluate("() => [screen.width, screen.height, outerWidth, outerHeight]")
+    assert got[:2] == [sw, sh] and got[2] == 1366 and (got[0], got[1]) != (got[2], got[3])

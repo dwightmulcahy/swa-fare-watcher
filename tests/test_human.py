@@ -211,7 +211,7 @@ def test_xvfb_start_retries(monkeypatch):
     from app import swa
     calls = []
 
-    def flaky(timeout):
+    def flaky(timeout, screen=None):
         calls.append(1)
         if len(calls) < 3:
             raise RuntimeError("Xvfb exited right after starting on :0")
@@ -221,7 +221,20 @@ def test_xvfb_start_retries(monkeypatch):
     monkeypatch.setattr(swa.time, "sleep", lambda s: None)
     assert swa.start_xvfb() == ("proc", ":0") and len(calls) == 3
     calls.clear()
-    monkeypatch.setattr(swa, "_start_xvfb_once", lambda t: (_ for _ in ()).throw(RuntimeError("Xvfb did not start")))
+    monkeypatch.setattr(swa, "_start_xvfb_once", lambda *a: (_ for _ in ()).throw(RuntimeError("Xvfb did not start")))
     import pytest
     with pytest.raises(RuntimeError, match="did not start"):
         swa.start_xvfb()
+
+
+def test_screen_per_user_is_bigger_than_the_window_and_stable():
+    from app import swa
+    seen = set()
+    for key in range(60):
+        (sw, sh), (x, y) = swa.screen_for(key)
+        w, h = swa.window_size_for(key)
+        assert (sw, sh) in swa.SCREENS and sw >= w and sh >= h + 40     # room for a taskbar
+        assert 0 <= x <= sw - w and 0 <= y <= sh - h
+        assert swa.screen_for(key) == ((sw, sh), (x, y))                # same desk every run
+        seen.add((sw, sh))
+    assert len(seen) >= 3                                               # users differ
