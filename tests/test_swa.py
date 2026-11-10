@@ -127,3 +127,20 @@ def test_booking_links_carry_the_full_search_query():
     assert (q["tripType"], q["returnDate"], q["adultsCount"]) == ("oneway", "", "2")
     rt = parse_qs(urlsplit(swa.booking_url("SJO", "HOU", "2026-11-09", 1, "2026-11-12")).query)
     assert rt["tripType"] == ["roundtrip"] and rt["returnDate"] == ["2026-11-12"]
+
+
+def test_parse_real_southwest_shopping_response():
+    from pathlib import Path
+    data = json.loads((Path(__file__).parent / "fixtures" / "shopping-SJO-JAX-2027-04-05-USD.json").read_text())
+    flights = {f["flights"]: f for f in swa.parse_flights(data).values()}
+    assert len(flights) == 6
+    f = flights["502/52/4972"]                    # SJO-MCO, MCO-HOU, HOU-JAX: two connections
+    assert (f["stops"], f["duration"], f["depart"], f["arrive"]) == (2, 780, "08:45", "23:45")
+    assert f["fare"] == (441.07, 123.07)          # cheapest available class (Wanna Get Away), per adult
+    assert flights["1203/4972"]["stops"] == 1
+    assert flights["502/4422/961"]["fare"][0] == 632.87      # WGA unavailable -> next cheapest (Plus)
+    assert flights["1203/174/976"]["arrive"] == "10:20 +1"    # lands the next day
+    rule = {**{k: None for k in ("max_stops", "max_duration_min", "max_price", "max_points",
+                                 "depart_after", "depart_before")}, "min_cpp": 0, "max_stops": 1}
+    row = lambda k: {**flights[k], "cash": flights[k]["fare"][0], "points": None, "cpp": None}
+    assert swa.passes_leg(row("1203/4972"), rule, "out") and not swa.passes_leg(row("502/52/4972"), rule, "out")
