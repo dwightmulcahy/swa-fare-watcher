@@ -342,3 +342,25 @@ def test_next_dates_by_clicking_the_date_strip(site, monkeypatch, tmp_path):
     assert far == {}
     assert len([u for u in loads if "select-depart" in u]) == 2       # Jan 1 and Jan 9 loaded; 2 and 3 clicked
     assert calls is None or calls[-1] == "2027-01-09"
+
+
+def test_saved_cookies_only_restored_into_a_profile_without_them(site, monkeypatch, tmp_path):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "home_url", site)
+    names = lambda b: {c["name"] for c in b._ctx.cookies()}
+    with swa.BrowserSearcher(profile_key="t-cookies", human=False) as b:      # first run
+        b.page.goto(site)
+        b.page.evaluate("document.cookie = 'TSsess=1; path=/'; "
+                        "document.cookie = 'keep=1; path=/; max-age=86400'")
+    saved = b.state
+    assert {"TSsess", "keep"} <= {c["name"] for c in saved["cookies"]}
+    with swa.BrowserSearcher(saved, profile_key="t-cookies", human=False) as b:  # next run
+        got = names(b)
+    assert "keep" in got and "TSsess" not in got          # Chrome dropped the session cookie; not re-added
+    imported = {"cookies": [{"name": "imported", "value": "1", "domain": "127.0.0.1", "path": "/",
+                             "expires": -1, "httpOnly": False, "secure": False, "sameSite": "Lax"}], "origins": []}
+    with swa.BrowserSearcher(imported, profile_key="t-cookies", human=False) as b:  # cookies imported in Settings
+        assert "imported" in names(b)
