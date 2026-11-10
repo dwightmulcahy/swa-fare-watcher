@@ -198,6 +198,11 @@ def parse_flights(payload):
     return out
 
 
+def priceless(flights):
+    """Flights came back but none has a price: Southwest probably moved the fares in its data."""
+    return bool(flights) and all(f.get("fare") is None for f in flights.values())
+
+
 # ---------- low-fare calendar ----------
 _ISO_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _PRICE_KEYS = ("lowest", "price", "fare", "amount", "points", "value")
@@ -996,6 +1001,7 @@ class BrowserSearcher:
         self.humanize = settings.humanize if human is None else human
         self._pw = self._ctx = self.page = self.human = None
         self._tmp_profile = None
+        self.shape_errors = 0     # fare responses the parser didn't recognise this session
         self._warmed = False
         self.channel = None
 
@@ -1531,6 +1537,7 @@ class BrowserSearcher:
     def _parse(self, payload, tag):
         flights = parse_flights(payload)
         if flights is None:
+            self.shape_errors += 1
             self._save_json(tag, payload)
             applog.warn(f"{tag}: Southwest's fare data has a shape the parser doesn't know; raw JSON saved "
                         "to debug/", source="search", user_id=self._uid(), attachment=self.capture(tag))
