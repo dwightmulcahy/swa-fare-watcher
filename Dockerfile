@@ -24,6 +24,7 @@ COPY requirements.txt ./
 # Browser + its OS libraries, and Xvfb so it runs headed (far less likely to be blocked).
 # amd64 gets real Google Chrome (the app prefers it); Chrome has no Linux arm64 build, so
 # arm64 uses Playwright's Chromium. The app starts its own Xvfb display per run.
+# A desktop-sized font set: a near-empty font list is a common sign of a bare server.
 # pip is removed afterwards: the runtime doesn't need it, and its vendored packages trip
 # the vulnerability scan.
 RUN apt-get update \
@@ -33,7 +34,9 @@ RUN apt-get update \
  && retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i: $*" >&2; sleep $((i * 10)); done; return 1; } \
  && retry playwright install --with-deps chromium \
  && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "amd64" ]; then retry playwright install --with-deps chrome; fi \
- && apt-get install -y --no-install-recommends fonts-liberation fonts-noto-color-emoji \
+ && apt-get install -y --no-install-recommends fonts-liberation fonts-liberation2 fonts-noto-color-emoji \
+      fonts-dejavu-core fonts-dejavu-extra fonts-noto-core fonts-noto-cjk fonts-freefont-ttf \
+      fonts-croscore fonts-crosextra-carlito fonts-crosextra-caladea fonts-urw-base35 \
  && { pip uninstall -y setuptools wheel || true; } \
  && pip uninstall -y pip \
  && rm -rf /usr/local/lib/python3.*/ensurepip /usr/local/bin/pip* /root/.cache \
