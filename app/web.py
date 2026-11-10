@@ -561,6 +561,12 @@ def create_app(worker=None, start_worker=True):
                 (u["id"], db.now(), *w.values())).lastrowid
         raise Redirect(f"/watches/{wid}?ok=Watch+created")
 
+    def _lows(trips):
+        m = [x for x in trips if x["matched"]]
+        return {"cash": min((x["cash"] for x in m if x["cash"]), default=None),
+                "points": min((x["points"] for x in m if x["points"]), default=None),
+                "any_cash": min((x["cash"] for x in trips if x["cash"]), default=None)}
+
     @app.get("/watches/{wid}", response_class=HTMLResponse)
     def watch_detail(request: Request, wid: int):
         u, s = require(request)
@@ -576,21 +582,34 @@ def create_app(worker=None, start_worker=True):
         if rt:  # best matching round trip as it stood at the end of each day
             days = [r["day"] for r in db.query("SELECT DISTINCT substr(ts,1,10) day FROM fares WHERE watch_id=?"
                                                " ORDER BY day DESC LIMIT 30", (wid,))]
-            trend = []
+            trend, per = [], {}
             for d in days:
                 t = swa.roundtrips(w, latest_legs(wid, d))
-                m = [x for x in t if x["matched"]]
-                trend.append({"day": d, "cash": min((x["cash"] for x in m if x["cash"]), default=None),
-                              "points": min((x["points"] for x in m if x["points"]), default=None),
-                              "any_cash": min((x["cash"] for x in t if x["cash"]), default=None)})
+                trend.append({"day": d, **_lows(t)})
+                pairs = {}
+                for x in t:   # one series per date pair: that pair's best trip at the end of each day
+                    pairs.setdefault((x["out_date"], x["ret_date"]), []).append(x)
+                for k, xs in pairs.items():
+                    per.setdefault(k, []).insert(0, {"day": d, **_lows(xs)})
+            history = {"All dates": list(reversed(trend))}
+            for (o, r), pts in sorted(per.items())[:60]:
+                history[f"{o} → {r}"] = pts
         else:
             trend = db.query(
                 "SELECT substr(ts,1,10) AS day, MIN(CASE WHEN matched=1 THEN cash END) AS cash,"
                 " MIN(CASE WHEN matched=1 THEN points END) AS points, MIN(cash) AS any_cash"
                 " FROM fares WHERE watch_id=? GROUP BY day ORDER BY day DESC LIMIT 30", (wid,))
+            history = {"All dates": [dict(r) for r in reversed(trend)]}
+            for r in db.query(
+                    "SELECT date, substr(ts,1,10) AS day, MIN(CASE WHEN matched=1 THEN cash END) AS cash,"
+                    " MIN(CASE WHEN matched=1 THEN points END) AS points, MIN(cash) AS any_cash"
+                    " FROM fares WHERE watch_id=? AND leg='out' AND ts >= date('now', '-60 days')"
+                    " GROUP BY date, day ORDER BY date, day", (wid,)):
+                history.setdefault(r["date"], []).append({k: r[k] for k in ("day", "cash", "points", "any_cash")})
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
+                      history=history,
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,

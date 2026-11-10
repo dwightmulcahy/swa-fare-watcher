@@ -246,3 +246,20 @@ def test_cancel_button_posts_and_reports(client):
     r = client.post("/run/cancel", data={"csrf": t}, follow_redirects=False,
                     headers={"referer": "https://evil.example/x"})
     assert r.headers["location"].startswith("/?err=")
+
+
+def test_watch_page_has_price_history_chart_data(client):
+    import json
+    t = admin_client(client)
+    loc = client.post("/watches", data=watch_form(t), follow_redirects=False).headers["location"].split("?")[0]
+    wid = int(loc.rstrip("/").split("/")[-1])
+    d = future(10)
+    with db.tx() as con:
+        for ts, cash in (("2026-11-01T07:00:00", 300.0), ("2026-11-02T07:00:00", 280.0)):
+            con.execute("INSERT INTO fares(watch_id, ts, date, flight_key, cash, points, matched) VALUES (?,?,?,?,?,?,1)",
+                        (wid, ts, d, "1|x", cash, 20000))
+    html = client.get(loc).text
+    data = json.loads(re.search(r'id="hist-data">(.*?)</script>', html, re.S).group(1))
+    assert [p["cash"] for p in data["All dates"]] == [300.0, 280.0]
+    assert data[d][-1] == {"day": "2026-11-02", "cash": 280.0, "points": 20000, "any_cash": 280.0}
+    assert 'id="hist-chart"' in html
