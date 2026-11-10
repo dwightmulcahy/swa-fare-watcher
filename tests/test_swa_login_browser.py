@@ -421,3 +421,19 @@ def test_missing_form_falls_back_to_the_search_address(site, monkeypatch, tmp_pa
         got = b.search("SJO", "JAX", "2027-01-02", 1, "USD")
         works = b._form_works
     assert next(iter(got.values()))["fare"][0] == 150.0 and works is False
+
+
+def test_points_calendar_opened_from_the_form(site, monkeypatch, tmp_path):
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar.html"))
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    # form_share is 0 in tests: points calendars use the form anyway (their address is rejected)
+    with swa.BrowserSearcher(profile_key="t-form-cal", human=False) as b:
+        b._warmed = True
+        days = b.calendar("LIR", "HOU", "2026-11-09", 1, "POINTS")
+        url = b.page.url
+    assert days == {"2026-11-09": 38000.0, "2026-11-10": 19500.0, "2026-11-11": None}
+    assert "calendar.html" in url and "fareType=POINTS" in url and b._form_works is True

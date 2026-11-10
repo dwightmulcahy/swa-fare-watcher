@@ -1528,6 +1528,11 @@ class BrowserSearcher:
             if days is not None:
                 self._cal_shown = (*key, fare_type)
                 return days
+        if self._form_works is not False and (fare_type == "POINTS" or random.random() < settings.form_share):
+            days = self._form_calendar(origin, dest, date, adults, fare_type, tag)
+            if days is not None:
+                self._cal_shown = (*key, fare_type)
+                return days
         q = {
             "adultPassengersCount": adults, "adultsCount": adults,
             "currencyCode": "PTS" if fare_type == "POINTS" else "USD",
@@ -1557,6 +1562,34 @@ class BrowserSearcher:
                     f"{_api_errors(payloads)}; saved to {raw}. Falling back to searching each date.",
                     source="search", user_id=self._uid(), attachment=self.capture(tag))
         return None
+
+    def _form_calendar(self, origin, dest, date, adults, fare_type, tag):
+        """Open the calendar from the Book a Flight form ("Search with low fare calendar", plus
+        "Show fares in points" for points), like a person. Points calendars always try this:
+        Southwest rejects the points calendar address. None if the form didn't work."""
+        try:
+            submit = self._fill_form(origin, dest, date, adults, fare_type, calendar=True)
+
+            def go():
+                if self.humanize:
+                    self.human.pause(0.6, 2.0)
+                self._click(submit)
+            days, payloads = self._collect_calendar(go, tag, wait=CALENDAR_WAIT)
+        except Blocked:
+            raise
+        except Exception as e:
+            self.check_blocked("calendar")
+            self._form_failed(tag, e)
+            return None
+        if not days or not any(d.startswith(date[:7]) for d in days):
+            self.check_blocked("calendar")
+            self._form_failed(tag, RuntimeError(f"no fares for {date[:7]} came back{_api_errors(payloads)}"))
+            return None
+        if self._form_works is None:
+            applog.info(f"{tag}: opened the calendar from the home page's Book a Flight form", source="search",
+                        user_id=self._uid())
+        self._form_works = True
+        return {d: v for d, v in days.items() if d.startswith(date[:7])}
 
     def _calendar_click(self, date, fare_type, tag):
         """Show another month (its tab) or currency (Dollars/Points) on the open calendar and
