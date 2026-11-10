@@ -333,15 +333,18 @@ def test_next_dates_by_clicking_the_date_strip(site, monkeypatch, tmp_path):
         b.page.on("load", lambda pg: loads.append(pg.url))            # real page loads, not pushState
         first = b.search("SJO", "JAX", "2027-01-01", 1, "USD")
         assert b.shown_currency("SJO", "JAX", 1) == "USD" and b.shown_currency("JAX", "SJO", 1) is None
+        assert b.page.locator('[aria-label="Flight date calendar"] [role=tab]'
+                              '[aria-label="Saturday January 2"]').count() == 1   # found by Southwest's label
         second = b.search("SJO", "JAX", "2027-01-02", 1, "USD")       # click "Sat Jan 2"
         third = b.search("SJO", "JAX", "2027-01-03", 1, "USD")        # click "Sun Jan 3"
-        far = b.search("SJO", "JAX", "2027-01-09", 1, "USD")          # not on the strip: load (no flights)
-        calls = b.page.evaluate("window.shoppingCalls") if "select-depart" in b.page.url else None
+        far = b.search("SJO", "JAX", "2027-02-20", 1, "USD")          # far along the strip: scrolled to and clicked
+        selected = b.page.get_attribute('[role=tab][aria-selected="true"]', "aria-label") \
+            if "select-depart" in b.page.url else None
     price = lambda r: next(iter(r.values()))["fare"][0]
     assert (price(first), price(second), price(third)) == (150.0, 120.0, 175.0)
-    assert far == {}
-    assert len([u for u in loads if "select-depart" in u]) == 2       # Jan 1 and Jan 9 loaded; 2 and 3 clicked
-    assert calls is None or calls[-1] == "2027-01-09"
+    assert far == {}                                                   # no flights that day (redirect)
+    assert len([u for u in loads if "select-depart" in u]) == 1       # one page load; the rest were clicks
+    assert selected in (None, "Saturday February 20")
 
 
 def test_saved_cookies_only_restored_into_a_profile_without_them(site, monkeypatch, tmp_path):
