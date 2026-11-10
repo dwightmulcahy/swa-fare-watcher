@@ -271,6 +271,6 @@ def test_protection_signals_names_only(site, monkeypatch, tmp_path):
         b.page.goto(site.replace("index.html", "protected.html"))
         b.page.wait_for_timeout(800)
         sig = b.protection_signals()
-    assert sig["F5 BIG-IP ASM / Bot Defense"] == ["TSPD_101", "TS…"]
+    assert sig["F5 BIG-IP ASM / Bot Defense"] == ["TSPD_101", "TS…", "f5_cspm"]
     assert sig["F5 Distributed Cloud / Shape (request headers)"] == ["x-…-a", "x-…-b"]
     assert "opaque" not in str(sig) and "ordinary" not in str(sig)

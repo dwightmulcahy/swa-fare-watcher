@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 # (TSPD_101 is its Bot Defense); Shape (F5 Distributed Cloud Bot Defense) sends per-site
 # request headers like X-AbCd1234-a ... -z.
 PROTECTION_COOKIES = [
-    ("F5 BIG-IP ASM / Bot Defense", re.compile(r"^(TS[0-9a-f]{6,}|TSPD_\w+|BIGipServer\w*|f5avr\w*)$")),
+    ("F5 BIG-IP ASM / Bot Defense", re.compile(r"^(TS[0-9a-f]{6,}|TSPD_\w+|BIGipServer\w*|f5avr\w*|f5_cspm|F5_ST)$")),
+    ("F5 BIG-IP APM (access sessions)", re.compile(r"^(LastMRH_Session|MRHSession|F5_fullWT|F5_HT_shrinked)$")),
     ("Akamai Bot Manager", re.compile(r"^(_abck|bm_sz|bm_sv|bm_mi|ak_bmsc)$")),
     ("Imperva", re.compile(r"^(reese84|incap_ses_\w+|visid_incap_\w+|nlbi_\w+)$")),
     ("PerimeterX / HUMAN", re.compile(r"^(_px\w*|_pxhd|_pxvid)$")),
