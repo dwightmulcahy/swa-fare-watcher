@@ -1186,6 +1186,7 @@ class BrowserSearcher:
         except Exception as e:
             if self._no_flights_page(3_000):
                 return self._no_flights(tag)
+            self.check_blocked("flight search")
             self._strip_works = False
             applog.warn(f"{tag}: clicking {day} on the date strip didn't bring fares ({e.__class__.__name__}); "
                         "loading each date's address instead", source="search", user_id=self._uid(),
