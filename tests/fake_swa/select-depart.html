@@ -1,12 +1,34 @@
 <!doctype html><title>Select departing flight</title>
-<body><h1>Select departing flight</h1>
+<body><h1>Depart</h1>
+<!-- a date strip like Southwest's: Thu Dec 31 · Fri Jan 1 · Sat Jan 2 · ... -->
+<div id="strip" role="tablist"></div>
 <script>
 // Asks for fares like the real page; on a day with no flights, Southwest sends you to the
 // Low Fare Calendar with a "Wanna look for another day?" banner.
 const q = new URLSearchParams(location.search);
-fetch("/api/air-booking/v1/air-booking/page/air/booking/shopping", {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ fareType: q.get("fareType") }) })
-  .then((r) => r.json())
-  .then((d) => { if (!d.data) location.replace("calendar.html?noflights=1&" + q.toString()); });
+window.shoppingCalls = [];
+const fmt = (d, o) => d.toLocaleDateString("en-US", { timeZone: "UTC", ...o });
+function strip(center) {
+  const c = new Date(center + "T00:00:00Z"), box = document.getElementById("strip");
+  box.replaceChildren();
+  for (let i = -2; i <= 2; i++) {
+    const d = new Date(c.getTime() + i * 864e5), iso = d.toISOString().slice(0, 10);
+    const b = document.createElement("button");
+    b.setAttribute("role", "tab");
+    b.innerHTML = `<span>${fmt(d, { weekday: "short" })}</span><br><span>${fmt(d, { month: "short", day: "numeric" })}</span>`;
+    b.onclick = () => { q.set("departureDate", iso); history.pushState({}, "", "?" + q.toString()); load(); };
+    box.append(b);
+  }
+}
+function load() {
+  const date = q.get("departureDate");
+  strip(date);
+  window.shoppingCalls.push(date);
+  fetch("/api/air-booking/v1/air-booking/page/air/booking/shopping", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fareType: q.get("fareType"), departureDate: date }) })
+    .then((r) => r.json())
+    .then((d) => { if (!d.data) location.replace("calendar.html?noflights=1&" + q.toString()); });
+}
+load();
 </script>

@@ -1120,11 +1120,95 @@ class BrowserSearcher:
             return swa_login.LoginResult("error", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200]}",
                                          screenshot=rec.shot("exception"))
 
+    _shown = None          # (origin, dest, date, adults, fare_type) of the flight results on screen
+    _strip_works = None    # None = untried, False = no usable date strip this session
+
+    def shown_currency(self, origin, dest, adults):
+        """The currency of the results on screen for that route, if any: the worker searches it
+        first for the next date, so that date is a click on the date strip."""
+        sh = self._shown
+        return sh[4] if sh and sh[:2] == (origin, dest) and sh[3] == adults else None
+
     def search(self, origin, dest, date, adults, fare_type):
         tag = f"{origin}-{dest}-{date}-{fare_type}"
         if not self._warmed:
             self.warm_up()
-        return self._load(origin, dest, date, adults, fare_type, tag)
+        sh = self._shown
+        if (sh and sh[:2] == (origin, dest) and sh[3] == adults and sh[4] == fare_type and sh[2] != date
+                and self._strip_works is not False):
+            got = self._strip(date, tag)
+            if got is not None:
+                self._shown = (origin, dest, date, adults, fare_type) if got else None
+                return got
+        self._shown = None
+        flights = self._load(origin, dest, date, adults, fare_type, tag)
+        if flights:
+            self._shown = (origin, dest, date, adults, fare_type)
+        return flights
+
+    def _strip(self, date, tag):
+        """Show another date via the results page's date strip ("Thu Dec 31 · Fri Jan 1 · ..."),
+        like a person checking the next day. Returns the flights ({} = no flights that day), or
+        None if the day isn't on the strip or the click didn't bring that day's fares (then the
+        caller loads its address; a strip that never works is not tried again this session)."""
+        d = dt.date.fromisoformat(date)
+        day = f"{d:%b} {d.day}"                       # "Jan 2"
+        el = None
+        for cand in self.page.locator(f'button:has-text("{day}"), a:has-text("{day}"), '
+                                      f'[role=tab]:has-text("{day}"), [role=button]:has-text("{day}")').all()[:12]:
+            try:
+                text = " ".join(cand.inner_text(timeout=1000).split())
+            except Exception:
+                continue
+            # a date-strip cell: short, and says the weekday and that day (not a flight card)
+            if len(text) <= 40 and f"{d:%a}".lower() in text.lower() and cand.is_visible():
+                el = cand
+                break
+        if el is None:
+            if self._strip_works is None:
+                self._strip_works = False
+                applog.info(f"{tag}: no date strip with {day} on the results page; loading each date's "
+                            "address instead", source="search", user_id=self._uid(),
+                            attachment=self.capture(tag + "-no-strip"))
+            return None
+        try:
+            with self.page.expect_response(
+                lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=20_000
+            ) as info:
+                if self.humanize:
+                    self.human.pause(1.5, 4.0)        # glance over this day's flights, then the next
+                    self.human.click(el)
+                else:
+                    el.click()
+            resp = info.value
+            payload = resp.json()
+            asked = (resp.request.post_data or "") + " " + self.page.url
+        except Exception as e:
+            if self._no_flights_page(3_000):
+                return self._no_flights(tag)
+            self._strip_works = False
+            applog.warn(f"{tag}: clicking {day} on the date strip didn't bring fares ({e.__class__.__name__}); "
+                        "loading each date's address instead", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag + "-strip"))
+            return None
+        if date not in asked:                          # not verifiably that day's fares
+            self._strip_works = False
+            applog.warn(f"{tag}: the date strip's fare request didn't mention {date}; loading each date's "
+                        "address instead", source="search", user_id=self._uid())
+            return None
+        flights = parse_flights(payload)
+        if flights is None and self._no_flights_page(6_000):
+            return self._no_flights(tag)
+        if self._strip_works is None:
+            applog.info(f"{tag}: clicked {day} on the results page's date strip", source="search",
+                        user_id=self._uid())
+        self._strip_works = True
+        if self.humanize:
+            try:
+                self.human.read()
+            except Exception:
+                pass
+        return self._parse(payload, tag) if flights is None else flights
 
     def _parse(self, payload, tag):
         flights = parse_flights(payload)
