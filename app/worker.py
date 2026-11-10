@@ -1,5 +1,6 @@
 """Background worker: runs one user's watches at a time in a single browser, plus a daily scheduler."""
 import datetime as dt
+import html
 import math
 import queue
 import random
@@ -176,7 +177,8 @@ class Worker:
     def eligible_users(self):
         rows = db.query("SELECT DISTINCT u.* FROM users u JOIN watches w ON w.user_id=u.id "
                         "WHERE w.active=1 AND u.active=1")
-        return [u["id"] for u in rows if db.user_can_run(u)]
+        now = db.now()
+        return [u["id"] for u in rows if db.user_can_run(u) and not (u["blocked_until"] and u["blocked_until"] > now)]
 
     def enqueue_all(self):
         """Queue everyone now (admin 'Run all now'), in a shuffled order."""
@@ -287,6 +289,8 @@ class Worker:
                     if creds and hasattr(searcher, "ensure_signed_in"):
                         self.phase(user_id, "Opening southwest.com and checking you're signed in")
                         signin = self._sign_in(user, creds, searcher, manual=signin_only)
+                        if signin.status == "blocked":
+                            raise swa.Blocked("sign-in", signin.detail or "blocked", signin.screenshot)
                     elif plan:
                         self.phase(user_id, "Opening southwest.com")
                     for w, dates in plan:
@@ -427,8 +431,12 @@ class Worker:
                     raise
         except Exception as e:
             reason = f"Error: {e.__class__.__name__}: {str(e).splitlines()[0][:160] if str(e) else ''}".rstrip(": ")
-            applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=user_id, source="run",
-                         exc=True, attachment=getattr(e, "screenshot", None))
+            if isinstance(e, swa.Blocked):
+                reason = f"Stopped: Southwest blocked the {e.where} ({e.reason})"
+                self._pause_after_block(user, e)
+            else:
+                applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=user_id,
+                             source="run", exc=True, attachment=getattr(e, "screenshot", None))
             e.logged = True
             for wid, rid in open_runs.items():
                 self._finish_run(rid, wid, reason, 0, 0, 0)
@@ -552,6 +560,25 @@ class Worker:
         to_search = swa.calendar_routes(w, cal_routes, picked)
         picked = [x for x in picked if to_search.get(x)]
         return search_order(picked), to_search, used, False
+
+    @staticmethod
+    def _pause_after_block(user, e):
+        """Stop pushing: pause this user's scheduled runs and tell them, once per block."""
+        until = (dt.datetime.now() + dt.timedelta(hours=settings.block_pause_hours)).isoformat(timespec="minutes")
+        with db.tx() as con:
+            con.execute("UPDATE users SET blocked_until=?, blocked_reason=? WHERE id=?",
+                        (until, f"{e.where}: {e.reason}", user["id"]))
+        applog.error(f"Southwest blocked the {e.where} ({e.reason}). Run stopped; scheduled runs paused "
+                     f"until {until.replace('T', ' ')}.", user_id=user["id"], source="run",
+                     attachment=getattr(e, "screenshot", None))
+        if user["email"]:
+            mailer.send(user["email"], "Fare Watcher paused: Southwest blocked a request",
+                        f"<p>While checking fares, Southwest showed a block or challenge page "
+                        f"(<b>{html.escape(e.where)}</b>: {html.escape(e.reason)}).</p>"
+                        f"<p>The run stopped straight away, and scheduled runs are paused until "
+                        f"<b>{until.replace('T', ' ')}</b>. You can still press <i>Search now</i>; "
+                        f"opening southwest.com yourself in a normal browser first can help.</p>"
+                        f"<p>A screenshot is in the Log tab.</p>")
 
     @staticmethod
     def _finish_run(run_id, watch_id, note, searches, failures, matches):

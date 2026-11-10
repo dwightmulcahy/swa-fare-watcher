@@ -34,6 +34,23 @@ PROTECTION_COOKIES = [
 ]
 SHAPE_HEADER = re.compile(r"^x-[a-z0-9]{8}-([a-z])$", re.I)
 
+# Pages that mean "stop now": bot challenges and block pages (F5 ASM's "The requested URL was
+# rejected ... Your support ID is", its JavaScript challenge, and the usual wording elsewhere).
+CHALLENGE_TEXT = re.compile(
+    r"the requested url was rejected|your support id is|please enable javascript to view the page content|"
+    r"access denied|request (?:was )?(?:unsuccessful|blocked|rejected)|pardon our interruption|"
+    r"verify (?:that )?you(?:'re| are) (?:a )?human|are you a robot|unusual (?:traffic|activity)|"
+    r"too many requests|you have been blocked", re.I)
+
+
+class Blocked(RuntimeError):
+    """Southwest answered with a challenge or block page. The run stops at once: pressing on
+    after a challenge is the clearest bot signal there is."""
+
+    def __init__(self, where, reason, screenshot=None):
+        super().__init__(f"Southwest blocked the {where}: {reason}")
+        self.where, self.reason, self.screenshot = where, reason, screenshot
+
 
 def _site_host():
     """southwest.com (or the test site's host): the site whose protection is being looked at."""
@@ -951,6 +968,33 @@ class BrowserSearcher:
         self._xvfb, display = start_xvfb()
         kw.setdefault("env", {})["DISPLAY"] = display
 
+    def blocked_reason(self, response=None):
+        """Why the current page looks like a challenge or block, or None."""
+        try:
+            if response is not None and response.status in (403, 429):
+                return f"HTTP {response.status}"
+        except Exception:
+            pass
+        try:
+            text = self.page.evaluate(
+                "() => (document.title || '') + ' ' + (document.body ? document.body.innerText.slice(0, 4000) : '')")
+        except Exception:
+            return None
+        hit = CHALLENGE_TEXT.search(text or "")
+        if hit:
+            return f'page says "{hit.group(0)}"'
+        try:   # F5 ASM's JavaScript challenge: its /TSPD/ script on an otherwise empty page
+            if len((text or "").strip()) < 200 and self.page.locator('script[src*="/TSPD/"]').count():
+                return "F5 JavaScript challenge page"
+        except Exception:
+            pass
+        return None
+
+    def check_blocked(self, where, response=None):
+        reason = self.blocked_reason(response)
+        if reason:
+            raise Blocked(where, reason, self.capture(f"blocked-{where}"))
+
     def _note_request(self, req):
         """Remember protection-style request header names (names only) sent to Southwest."""
         try:
@@ -1018,8 +1062,11 @@ class BrowserSearcher:
         if not self.humanize:
             return
         try:
-            self.page.goto(settings.home_url, wait_until="domcontentloaded", timeout=60_000)
+            resp = self.page.goto(settings.home_url, wait_until="domcontentloaded", timeout=60_000)
+            self.check_blocked("home page", resp)
             self.human.read(self.human.rng.uniform(3, 7))
+        except Blocked:
+            raise
         except Exception as e:
             applog.warn(f"Home page visit failed ({e.__class__.__name__}: {str(e).splitlines()[0][:150]})",
                         source="browser", user_id=self._uid(), attachment=self.capture("home-failed"))
@@ -1085,6 +1132,7 @@ class BrowserSearcher:
         except Exception as e:
             if self._no_flights_page(3_000):
                 return self._no_flights(tag)
+            self.check_blocked("flight search")
             applog.warn(f"{tag}: no fare data ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
                         f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
                         attachment=self.capture(tag))
@@ -1092,6 +1140,8 @@ class BrowserSearcher:
         flights = parse_flights(payload)
         if flights is None and self._no_flights_page(6_000):
             return self._no_flights(tag)
+        if flights is None:
+            self.check_blocked("flight search")
         if self.humanize:
             try:
                 self.human.read()  # look over the results before moving on
@@ -1173,6 +1223,7 @@ class BrowserSearcher:
         try:
             days, payloads = self._collect_calendar(go, tag, wait=CALENDAR_WAIT)
         except Exception as e:
+            self.check_blocked("calendar")
             applog.warn(f"{tag}: calendar didn't load ({e.__class__.__name__}: {str(e).splitlines()[0][:150]}); "
                         f"page {self.page.url[:120]}", source="search", user_id=self._uid(),
                         attachment=self.capture(tag))
@@ -1180,6 +1231,7 @@ class BrowserSearcher:
         if days is not None:
             self._cal_shown = (*key, fare_type)
             return days
+        self.check_blocked("calendar")
         # Nothing recognisable: keep every JSON response so the parser can be fixed from them
         raw = self._save_json(tag + "-all", [{"url": u, "data": d} for u, d in payloads], sub="calendar")
         applog.warn(f"{tag}: couldn't find daily fares in {len(payloads)} data response(s)"
@@ -1212,6 +1264,8 @@ class BrowserSearcher:
             else:
                 el.click()
         days, payloads = self._collect_calendar(click, tag, wait=20)
+        if not days:
+            self.check_blocked("calendar")
         if days and any(d.startswith(date[:7]) for d in days):
             self._note_click(month_tab, True, f"{tag}: clicked {what} on the calendar page")
             return {d: v for d, v in days.items() if d.startswith(date[:7])} if month_tab else days

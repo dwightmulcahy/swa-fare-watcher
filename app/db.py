@@ -173,6 +173,8 @@ MIGRATIONS = {
         "auto_login_day": "TEXT",                # day of the attempt counter below
         "auto_login_attempts": "INTEGER NOT NULL DEFAULT 0",
         "auto_login_failures": "INTEGER NOT NULL DEFAULT 0",   # consecutive
+        "blocked_until": "TEXT",                 # scheduled runs paused after a block page, until then
+        "blocked_reason": "TEXT",
     },
     "logs": {
         "attachment": "TEXT",                    # screenshot, relative to the data directory

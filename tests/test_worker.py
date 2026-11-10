@@ -185,3 +185,31 @@ def test_no_flights_day_skips_the_other_currency(worker, sent):
     assert len(FakeSearcher.calls) == 2      # one currency per date, not two
     assert res["attempts"] == 2 and res["failures"] == 0 and res["hits"] == 0
     assert "failed" not in (db.one("SELECT last_status FROM watches WHERE id=?", (wid,))["last_status"] or "")
+
+
+def test_block_page_stops_run_pauses_schedule_and_emails(worker, sent):
+    import pytest
+
+    from app import swa
+    from tests.conftest import FakeSearcher
+
+    class BlockedAfterOne(FakeSearcher):
+        n = 0
+
+        def search(self, origin, dest, date, adults, fare_type):
+            BlockedAfterOne.n += 1
+            if BlockedAfterOne.n > 1:
+                raise swa.Blocked("flight search", 'page says "Access Denied"')
+            return super().search(origin, dest, date, adults, fare_type)
+
+    worker.searcher_factory = BlockedAfterOne
+    uid = make_user(email="me@example.com")
+    wid = make_watch(uid)
+    with pytest.raises(swa.Blocked):
+        worker.run_user(uid)
+    assert BlockedAfterOne.n == 2                                   # nothing after the block page
+    u = db.one("SELECT * FROM users WHERE id=?", (uid,))
+    assert u["blocked_until"] > db.now() and "Access Denied" in u["blocked_reason"]
+    assert uid not in worker.eligible_users()                       # scheduler skips this user
+    assert "blocked" in db.one("SELECT last_status FROM watches WHERE id=?", (wid,))["last_status"]
+    assert any("paused" in s[1] for s in sent)                      # user told once

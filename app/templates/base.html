@@ -36,6 +36,12 @@
     <div class="flash warn" role="alert"><strong>Southwest sent you a verification code.</strong>
       The fare watcher is waiting for it to finish signing in. <a href="/verify">Enter the code</a></div>
     {% endif %}
+    {% if user and user.blocked_until and user.blocked_until > now_str %}
+    <div class="flash warn" role="alert"><strong>Scheduled runs are paused until {{ user.blocked_until.replace('T', ' ') }}.</strong>
+      Southwest showed a block or challenge page ({{ user.blocked_reason }}), so the last run stopped. <em>Search now</em> still works.
+      <form method="post" action="/resume" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="link" type="submit">Resume scheduled runs now</button></form></div>
+    {% endif %}
     {% if user and not user.must_change_pw %}
     <!-- Live run status: filled and kept current by static/app.js polling /api/status -->
     <div class="live" id="live" role="status" aria-live="polite" hidden>

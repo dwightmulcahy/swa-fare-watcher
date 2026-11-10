@@ -274,3 +274,24 @@ def test_protection_signals_names_only(site, monkeypatch, tmp_path):
     assert sig["F5 BIG-IP ASM / Bot Defense"] == ["TSPD_101", "TS…", "f5_cspm"]
     assert sig["F5 Distributed Cloud / Shape (request headers)"] == ["x-…-a", "x-…-b"]
     assert "opaque" not in str(sig) and "ordinary" not in str(sig)
+
+
+def test_block_pages_stop_the_search(site, monkeypatch, tmp_path):
+    import pytest
+
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "blocked.html"))
+    monkeypatch.setattr(swa, "CALENDAR_WAIT", 1)
+    with swa.BrowserSearcher(profile_key="t-blocked", human=False) as b:
+        b._warmed = True
+        b.page.goto(site.replace("index.html", "tspd.html"))
+        assert b.blocked_reason() in ("F5 JavaScript challenge page", 'page says "Please enable JavaScript to view the page content"')
+        b.page.goto(site)
+        assert b.blocked_reason() is None                          # an ordinary page isn't a block
+        with pytest.raises(swa.Blocked) as e:
+            b.calendar("LIR", "HOU", "2026-11-09", 1, "USD")
+    assert "rejected" in e.value.reason.lower() and e.value.screenshot

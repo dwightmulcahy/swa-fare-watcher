@@ -44,6 +44,9 @@ class Settings:
         self.home_url = _env("SWA_HOME_URL", "https://www.southwest.com/")  # tests point this at a fake site
         # Low-fare calendar: one page load per month instead of one per date; full searches
         # only for the days that can beat the target (at most this many per direction).
+        # After Southwest shows a challenge or block page: stop the run and skip that user's
+        # scheduled runs for this many hours ("Search now" still works)
+        self.block_pause_hours = float(_env("SWA_BLOCK_PAUSE_HOURS", "36"))
         self.calendar = _bool("SWA_CALENDAR", True)
         self.calendar_url = _env("SWA_CALENDAR_URL", "https://www.southwest.com/air/low-fare-calendar/select-dates")
         self.calendar_detail_dates = int(_env("SWA_CALENDAR_DETAIL_DATES", "6"))

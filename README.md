@@ -190,6 +190,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |
 | `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
 | `SWA_SEARCH_DELAY` | `8,20` | Random pause range between searches (seconds) |
+| `SWA_BLOCK_PAUSE_HOURS` | `36` | If Southwest shows a block or challenge page, the run stops immediately and that user's scheduled runs pause this long (they're emailed; *Search now* and a *Resume* button still work) |
 | `SWA_CALENDAR` | `true` | Read the low-fare calendar first; search only days whose low can beat the target. Falls back to every date if the calendar can't be read; raw calendar data is saved under `debug/calendar/` |
 | `SWA_CALENDAR_DETAIL_DATES` | `6` | Most days (round trip: date pairs) given a full search after the calendar |
 | `SWA_HEADLESS` | `false` | `true` runs the browser headless (no Xvfb; more likely blocked) |
