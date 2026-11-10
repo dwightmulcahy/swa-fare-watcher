@@ -47,7 +47,9 @@
     <div class="live" id="live" role="status" aria-live="polite" hidden>
       <div class="live-row"><span class="spinner" aria-hidden="true"></span>
         <strong class="live-state"></strong> <span class="live-phase"></span>
-        <span class="live-count muted"></span></div>
+        <span class="live-count muted"></span>
+        <form method="post" action="/run/cancel" class="inline live-cancel"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <button type="submit" class="small">Cancel</button></form></div>
       <div class="live-bar"><span></span></div>
     </div>
     {% endif %}

@@ -127,6 +127,8 @@ class Worker:
         self.progress = {}         # user_id -> what the running search is doing right now
         self.next_window = None    # (start, end) of the next daily window
         self.planned = {}          # user_id -> start time within today's window
+        self.cancelled = set()     # users who pressed Cancel: stop after the current search, keep results
+        self._wake = threading.Event()   # cuts a pause short when the running user cancels
         self._threads = []
 
     # ----- queueing -----
@@ -148,6 +150,30 @@ class Worker:
             self.pending[user_id] = set()
             self.signin_only.add(user_id)
         self.q.put(user_id)
+
+    def cancel(self, user_id):
+        """Stop this user's run after the search in flight (results so far are kept), or drop it
+        from the queue. Returns what was cancelled: 'running', 'queued' or None."""
+        state = self.status(user_id)
+        if state:
+            with self.lock:
+                self.cancelled.add(user_id)
+            if state == "running":
+                self._wake.set()
+                self.phase(user_id, "Cancelling: finishing the current search and saving results")
+        return state
+
+    def _stop(self, user_id):
+        return user_id in self.cancelled
+
+    def _pause(self, user_id, seconds):
+        """Pause between searches; a real pause ends early on Cancel."""
+        if self._stop(user_id):
+            return
+        if self.sleep is time.sleep:
+            self._wake.wait(seconds)
+        else:
+            self.sleep(seconds)
 
     # ----- live progress (shown in the UI while a run is going) -----
     def phase(self, user_id, text, watch_id=None, done=None, total=None, log=True, level="info", source="run",
@@ -216,7 +242,11 @@ class Worker:
                 ids = self.pending.pop(uid, None)
                 only = uid in self.signin_only
                 self.signin_only.discard(uid)
+                if uid in self.cancelled:   # cancelled while queued
+                    self.cancelled.discard(uid)
+                    continue
                 self.running_user = uid
+                self._wake.clear()
             try:
                 self.run_user(uid, ids, signin_only=only)
             except Exception as e:
@@ -224,7 +254,9 @@ class Worker:
                     applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=uid,
                                  source="run", exc=True)
             finally:
-                self.running_user = None
+                with self.lock:
+                    self.running_user = None
+                    self.cancelled.discard(uid)
                 self.progress.pop(uid, None)
 
     def _sleep_until(self, when):
@@ -294,6 +326,8 @@ class Worker:
                     elif plan:
                         self.phase(user_id, "Opening southwest.com")
                     for w, dates in plan:
+                        if self._stop(user_id):
+                            break
                         route = f'{w["name"]} ({swa.route_label(w)})'
                         with db.tx() as con:
                             open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
@@ -327,6 +361,8 @@ class Worker:
                         for leg, date in dates:
                             ts = db.now()   # one timestamp per date, shared by its airport pairs
                             for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
+                                if self._stop(user_id):
+                                    break
                                 if cap is not None and db.searches_today(user_id) + 2 > cap:
                                     note, limited = "Daily search limit reached", True
                                     self.phase(user_id, f"{route}: daily search limit reached, stopping",
@@ -338,6 +374,8 @@ class Worker:
                                 if shown in order:   # results already on screen: next date is a date-strip click
                                     order = [shown, "POINTS" if shown == "USD" else "USD"]
                                 for ft in order:
+                                    if res and self._stop(user_id):
+                                        break   # keep the currency already read
                                     done += 1
                                     self.phase(user_id, f"{route}: searching {frm}→{to} {date} "
                                                f"({'cash' if ft == 'USD' else 'points'})",
@@ -360,11 +398,11 @@ class Worker:
                                     pause = search_pause(*settings.search_delay)
                                     self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                                                watch_id=w["id"], log=False, until=time.time() + pause)
-                                    self.sleep(pause)
+                                    self._pause(user_id, pause)
                                     if no_flights:
                                         break
                                 n_flights = n_match = 0
-                                rows = swa.combine(res["USD"], res["POINTS"])
+                                rows = swa.combine(res.get("USD"), res.get("POINTS"))
                                 for r in rows:
                                     r["origin"], r["dest"] = frm, to
                                 legs[leg].setdefault(date, []).extend(rows)
@@ -398,7 +436,7 @@ class Worker:
                                 applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
                                             + ("" if rt else f", {n_match} matching"),
                                             user_id=user_id, watch_id=w["id"], source="run")
-                            if limited:
+                            if limited or self._stop(user_id):
                                 break
                         if rt:
                             trips = swa.roundtrips(w, legs)
@@ -421,6 +459,8 @@ class Worker:
                             applog.info(f"{route}: nothing cheaper than the fares already emailed",
                                         user_id=user_id, watch_id=w["id"], source="run")
                         hits.extend(new)
+                        if self._stop(user_id):
+                            note = f"Cancelled after {w_s} search(es), {w_m} matching"
                         if note is None:
                             note = ("All searches failed" if w_s and w_f == w_s
                                     else f"{w_m} matching {'round trip' if rt else 'flight'}(s)" if w_s
@@ -462,7 +502,8 @@ class Worker:
                 con.execute("UPDATE users SET swa_status=?, swa_status_at=? WHERE id=?",
                             (status, db.now(), user_id))
 
-        applog.info(f"Run finished: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
+        cancelled = self._stop(user_id)
+        applog.info(f"Run {'cancelled' if cancelled else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
         if hits:
@@ -478,7 +519,7 @@ class Worker:
                         f"have expired. Upload a fresh one under <a href='{settings.base_url}/settings'>"
                         "Settings</a>.</p>")
         out = {"attempts": attempts, "failures": failures, "hits": len(hits),
-               "emailed": sent, "limited": limited}
+               "emailed": sent, "limited": limited, "cancelled": cancelled}
         if signin is not None:
             out["signin"] = signin.status
         return out
@@ -505,6 +546,8 @@ class Worker:
             lows = {rt_: {} for rt_ in swa.routes(w, leg)}
             failed = set()   # (route, currency) whose calendar couldn't be read
             for j, ((frm, to), month, first, ft) in enumerate(jobs):
+                if self._stop(user_id):
+                    return [], {}, used, False
                 if cap is not None and db.searches_today(user_id) + 1 > cap:
                     self.phase(user_id, f"{route}: daily search limit reached, stopping",
                                watch_id=w["id"], level="warn")
@@ -528,7 +571,7 @@ class Worker:
                 pause = search_pause(*settings.search_delay)
                 self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                            watch_id=w["id"], log=False, until=time.time() + pause)
-                self.sleep(pause)
+                self._pause(user_id, pause)
             # a route is unreadable only if neither currency's calendar could be read; with one,
             # its days are still ranked by the currency that came back
             broken = {rt_ for rt_ in swa.routes(w, leg) if {(rt_, "USD"), (rt_, "POINTS")} <= failed}
