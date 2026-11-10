@@ -592,7 +592,8 @@ def create_app(worker=None, start_worker=True):
                       book=lambda f: swa.booking_url(*fare_route(w, f), f["date"], w["adults"]),
                       fare_route=lambda f: "→".join(fare_route(w, f)),
                       multi=len(swa.routes(w)) > 1, searches=swa.searches_per_run(w),
-                      recommend=lambda r: swa.recommend(r, w))
+                      recommend=lambda r: swa.recommend(r, w),
+                      recommend_detail=lambda r: swa.recommend_detail(r, w))
 
     @app.get("/watches/{wid}/edit", response_class=HTMLResponse)
     def edit_watch(request: Request, wid: int):

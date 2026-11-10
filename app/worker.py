@@ -386,7 +386,7 @@ class Worker:
                                         n_match += 1
                                         cands.append({
                                             "watch_id": w["id"], "row": r, "date": date,
-                                            "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend(r, w),
+                                            "watch": f'{w["name"]} ({frm}→{to})', "use": swa.recommend_detail(r, w),
                                             "url": swa.booking_url(frm, to, date, w["adults"]),
                                         })
                                 cheap_c = min((r["cash"] for r in rows if r["cash"] is not None), default=None)
@@ -410,7 +410,7 @@ class Worker:
                                     "watch_id": w["id"], "trip": t, "date": t["out_date"],
                                     "row": {"cash": t["cash"], "points": t["points"]},
                                     "watch": f'{w["name"]} ({t["out_route"]}, {t["ret_route"]})'
-                                             if multi else route, "use": t["use"],
+                                             if multi else route, "use": t["use_detail"],
                                     "url": t["url"], "ret_url": t["ret_url"],
                                 })
                             applog.info(f"{route}: {len(trips)} round trip(s) priced, {w_m} matching",
