@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dwightmulcahy/swa-fare-watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/dwightmulcahy/swa-fare-watcher/actions/workflows/ci.yml)
 [![Release](https://github.com/dwightmulcahy/swa-fare-watcher/actions/workflows/release.yml/badge.svg)](https://github.com/dwightmulcahy/swa-fare-watcher/actions/workflows/release.yml)
-[![GitHub release](https://img.shields.io/github/v/release/dwightmulcahy/swa-fare-watcher?sort=semver)](https://github.com/dwightmulcahy/swa-fare-watcher/releases/latest)
+[![Releases](https://img.shields.io/badge/releases-latest-blue?logo=github)](https://github.com/dwightmulcahy/swa-fare-watcher/releases/latest)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](.github/dependabot.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
