@@ -191,7 +191,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
 | `SWA_SEARCH_DELAY` | `8,20` | Random pause range between searches (seconds) |
 | `SWA_BLOCK_PAUSE_HOURS` | `36` | If Southwest shows a block or challenge page, the run stops immediately and that user's scheduled runs pause this long (they're emailed; *Search now* and a *Resume* button still work) |
-| `SWA_FORM_SHARE` | `0.5` | Share of flight-search page loads started from the home page's *Book a Flight* form (typing airports, date, passengers, ticking *Show fares in points*) like a person, instead of the search address like a bookmark. Falls back to the address for the session if the form doesn't work. `0` turns it off |
+| `SWA_FORM_SHARE` | `0.5` | Share of flight-search page loads started from the *Book a Flight* page's form (reached via FLIGHT → Book a Flight; `SWA_BOOK_URL`) (typing airports, date, passengers, ticking *Show fares in points*) like a person, instead of the search address like a bookmark. Falls back to the address for the session if the form doesn't work. `0` turns it off |
 | `SWA_CALENDAR` | `true` | Read the low-fare calendar first; search only days whose low can beat the target. Falls back to every date if the calendar can't be read; raw calendar data is saved under `debug/calendar/` |
 | `SWA_CALENDAR_DETAIL_DATES` | `6` | Most days (round trip: date pairs) given a full search after the calendar |
 | `SWA_HEADLESS` | `false` | `true` runs the browser headless (no Xvfb; more likely blocked) |
