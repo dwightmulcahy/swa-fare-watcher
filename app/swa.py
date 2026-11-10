@@ -929,7 +929,11 @@ class BrowserSearcher:
         try:
             self._pw = sync_playwright().start()
             self._ctx = self._launch(kw)
-            if self.state and self.state.get("cookies"):
+            if self.state and self.state.get("cookies") and not self._profile_has_state():
+                # only into a profile that doesn't already hold this session (new or wiped
+                # profile, or cookies imported under Settings). Otherwise the profile is what a
+                # returning browser really has: re-adding saved session cookies after a restart
+                # would bring back cookies Chrome had dropped, and break F5-style cookie chains.
                 self._ctx.add_cookies(self.state["cookies"])
             self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
             self.page.set_default_timeout(30_000)
@@ -1045,6 +1049,32 @@ class BrowserSearcher:
         applog.info(f"Bot protection seen on southwest.com this session: {text}", source="browser",
                     user_id=self._uid())
 
+    STATE_MARK = ".saved-state"
+
+    @staticmethod
+    def _state_digest(state):
+        cookies = sorted((c.get("domain", ""), c.get("name", ""), c.get("value", ""))
+                         for c in (state or {}).get("cookies", []))
+        return hashlib.sha256(json.dumps(cookies).encode()).hexdigest()
+
+    def _profile_has_state(self):
+        """True if the profile already matches the saved state (written at the end of its last run)."""
+        if self.profile_key is None:
+            return False
+        try:
+            mark = (profile_dir(self.profile_key) / self.STATE_MARK).read_text().strip()
+        except OSError:
+            return False
+        return mark == self._state_digest(self.state)
+
+    def _mark_state(self):
+        if self.profile_key is None or not self.state:
+            return
+        try:
+            (profile_dir(self.profile_key) / self.STATE_MARK).write_text(self._state_digest(self.state))
+        except OSError:
+            pass
+
     def __exit__(self, *exc):
         if self._ctx and self._warmed:
             try:
@@ -1054,6 +1084,7 @@ class BrowserSearcher:
         try:
             if self._ctx:
                 self.state = self._ctx.storage_state()
+                self._mark_state()   # the profile now holds exactly what gets saved
         except Exception:
             pass
         try:
