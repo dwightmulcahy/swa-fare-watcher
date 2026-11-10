@@ -334,6 +334,9 @@ class Worker:
                                     break
                                 res = {}
                                 order = random.sample(("USD", "POINTS"), 2)   # cash or points first
+                                shown = getattr(searcher, "shown_currency", lambda *a: None)(frm, to, w["adults"])
+                                if shown in order:   # results already on screen: next date is a date-strip click
+                                    order = [shown, "POINTS" if shown == "USD" else "USD"]
                                 for ft in order:
                                     done += 1
                                     self.phase(user_id, f"{route}: searching {frm}→{to} {date} "

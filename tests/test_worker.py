@@ -213,3 +213,19 @@ def test_block_page_stops_run_pauses_schedule_and_emails(worker, sent):
     assert uid not in worker.eligible_users()                       # scheduler skips this user
     assert "blocked" in db.one("SELECT last_status FROM watches WHERE id=?", (wid,))["last_status"]
     assert any("paused" in s[1] for s in sent)                      # user told once
+
+
+def test_currency_on_screen_is_searched_first(worker, sent):
+    from tests.conftest import FakeSearcher
+
+    class OnScreen(FakeSearcher):
+        def shown_currency(self, origin, dest, adults):
+            return "POINTS"                    # e.g. the last results shown were in points
+
+    FakeSearcher.calls = []
+    worker.searcher_factory = OnScreen
+    uid = make_user()
+    make_watch(uid)                            # 2 dates
+    worker.run_user(uid)
+    firsts = [c[3] for c in FakeSearcher.calls[::2]]
+    assert firsts == ["POINTS", "POINTS"]      # each date starts in the currency on screen

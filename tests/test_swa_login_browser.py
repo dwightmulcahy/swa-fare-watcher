@@ -308,3 +308,37 @@ def test_browser_screen_matches_the_users_desk(site, monkeypatch, tmp_path):
         b.page.goto(site)
         got = b.page.evaluate("() => [screen.width, screen.height, outerWidth, outerHeight]")
     assert got[:2] == [sw, sh] and got[2] == 1366 and (got[0], got[1]) != (got[2], got[3])
+
+
+def test_next_dates_by_clicking_the_date_strip(site, monkeypatch, tmp_path):
+    import json
+
+    from app import swa
+    from app.config import settings
+    from tests.conftest import detail, payload
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    loads = []
+    with swa.BrowserSearcher(profile_key="t-strip", human=False) as b:
+        b._warmed = True
+
+        def shopping(route):
+            body = json.loads(route.request.post_data)
+            price = {"2027-01-01": "150.00", "2027-01-02": "120.00", "2027-01-03": "175.00"}.get(body["departureDate"])
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload(detail(price, "20.00")) if price else {"success": False}))
+        b.page.route("**/air-booking/page/air/booking/shopping", shopping)
+        b.page.on("load", lambda pg: loads.append(pg.url))            # real page loads, not pushState
+        first = b.search("SJO", "JAX", "2027-01-01", 1, "USD")
+        assert b.shown_currency("SJO", "JAX", 1) == "USD" and b.shown_currency("JAX", "SJO", 1) is None
+        second = b.search("SJO", "JAX", "2027-01-02", 1, "USD")       # click "Sat Jan 2"
+        third = b.search("SJO", "JAX", "2027-01-03", 1, "USD")        # click "Sun Jan 3"
+        far = b.search("SJO", "JAX", "2027-01-09", 1, "USD")          # not on the strip: load (no flights)
+        calls = b.page.evaluate("window.shoppingCalls") if "select-depart" in b.page.url else None
+    price = lambda r: next(iter(r.values()))["fare"][0]
+    assert (price(first), price(second), price(third)) == (150.0, 120.0, 175.0)
+    assert far == {}
+    assert len([u for u in loads if "select-depart" in u]) == 2       # Jan 1 and Jan 9 loaded; 2 and 3 clicked
+    assert calls is None or calls[-1] == "2027-01-09"
