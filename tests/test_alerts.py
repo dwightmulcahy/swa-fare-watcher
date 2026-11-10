@@ -46,3 +46,27 @@ def test_worker_emails_once_until_cheaper(worker, sent):
     FakeSearcher.calls = []
     assert worker.run_user(uid)["hits"] == 0 and sent == []
     assert any(call[2] == future(15) for call in FakeSearcher.calls)   # the new date was searched
+
+
+def test_price_drop_and_history_line():
+    from app import mailer
+    from app.worker import price_drop
+    assert price_drop({"cash": 250.0, "points": 12000}, None) is None
+    assert price_drop({"cash": 250.0, "points": 12000}, {"cash": 298.0, "points": 15000}) == "$48 / 3,000 pts"
+    assert price_drop({"cash": 300.0, "points": 12000}, {"cash": 298.0, "points": 15000}) == "3,000 pts"
+    line = mailer._history({"drop": "$48", "low": (310.0, "2027-03-03T07:30:00")})
+    assert "↓ $48</b> since your last alert" in line and "lowest seen before: $310 on Mar 3" in line
+    assert mailer._history({}) == ""
+
+
+def test_lowest_seen_ignores_this_run():
+    from app.worker import lowest_seen
+    uid = make_user()
+    wid = make_watch(uid)
+    d = future(10)
+    with db.tx() as con:
+        for ts, cash in (("2027-01-01T07:00:00", 320.0), ("2027-01-02T07:00:00", 299.0), ("2027-01-03T07:00:00", 250.0)):
+            con.execute("INSERT INTO fares(watch_id, ts, date, flight_key, cash) VALUES (?,?,?,?,?)",
+                        (wid, ts, d, "1|x", cash))
+        assert lowest_seen(con, wid, d, "2027-01-03T06:00:00") == (299.0, "2027-01-02T07:00:00")
+        assert lowest_seen(con, wid, d, "2027-01-01T06:00:00") is None

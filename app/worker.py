@@ -98,7 +98,28 @@ def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
                     key=lambda c: c["row"]["points"], default=None)
     if by_points is not None and all(by_points is not c for c in out):
         out.append(by_points)
+    for c in out:   # for the email: how much cheaper than the best already sent
+        c["drop"] = price_drop(c["row"], best)
     return out
+
+
+def price_drop(row, best):
+    """'↓ $48 / 3,000 pts since the last alert' parts, or None on a watch's first alert."""
+    if best is None:
+        return None
+    parts = []
+    if row["cash"] is not None and best["cash"] is not None and row["cash"] < best["cash"]:
+        parts.append(f'${best["cash"] - row["cash"]:,.0f}')
+    if row["points"] is not None and best["points"] is not None and row["points"] < best["points"]:
+        parts.append(f'{int(best["points"] - row["points"]):,} pts')
+    return " / ".join(parts) or None
+
+
+def lowest_seen(con, watch_id, date, before):
+    """Cheapest cash fare stored for this watch and date before `before` -> (cash, ts) or None."""
+    r = con.execute("SELECT cash, ts FROM fares WHERE watch_id=? AND date=? AND ts<? AND cash IS NOT NULL "
+                    "AND leg='out' ORDER BY cash, ts LIMIT 1", (watch_id, date, before)).fetchone()
+    return (r["cash"], r["ts"]) if r else None
 
 
 def record_alerted(con, hits):
@@ -401,9 +422,10 @@ class Worker:
                         if self._stop(user_id):
                             break
                         route = f'{w["name"]} ({swa.route_label(w)})'
+                        w_started = db.now()
                         with db.tx() as con:
                             open_runs[w["id"]] = con.execute("INSERT INTO runs(watch_id, started) VALUES (?,?)",
-                                                             (w["id"], db.now())).lastrowid
+                                                             (w["id"], w_started)).lastrowid
                         with db.tx() as con:
                             con.execute("UPDATE watches SET last_status=? WHERE id=?", ("Running…", w["id"]))
                         rt = swa.is_roundtrip(w)
@@ -529,6 +551,9 @@ class Worker:
                                         user_id=user_id, watch_id=w["id"], source="run")
                         with db.tx() as con:
                             new = pick_alerts(con, w["id"], cands, 1 if swa.best_only(w) else ALERT_LIMIT)
+                            for c in new:
+                                if not c.get("trip"):
+                                    c["low"] = lowest_seen(con, w["id"], c["date"], w_started)
                         if cands and not new:
                             applog.info(f"{route}: nothing cheaper than the fares already emailed",
                                         user_id=user_id, watch_id=w["id"], source="run")

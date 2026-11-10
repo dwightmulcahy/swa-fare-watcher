@@ -1,4 +1,5 @@
 """Gmail SMTP alerts."""
+import datetime as dt
 import html
 import smtplib
 from email.mime.text import MIMEText
@@ -79,7 +80,21 @@ def _leg_line(label, date, f, url=None):
             f"<span style='font-size:12px;color:#636363'>{detail}</span></td></tr>")
 
 
-def _card(title, url, sub, legs, cash, points, cpp, use):
+def _history(h):
+    """'↓ $48 since your last alert · lowest seen before $310 on Mar 3' line, or ''."""
+    bits = []
+    if h.get("drop"):
+        bits.append(f"<b style='color:#1a7f37'>↓ {html.escape(h['drop'])}</b> since your last alert")
+    low = h.get("low")
+    if low:
+        when = dt.date.fromisoformat(low[1][:10]).strftime("%b %-d")
+        bits.append(f"lowest seen before: ${low[0]:,.0f} on {when}")
+    if not bits:
+        return ""
+    return f"<div style='{FONT};font-size:12px;color:#636363;padding:0 0 8px'>{' · '.join(bits)}</div>"
+
+
+def _card(title, url, sub, legs, cash, points, cpp, use, extra=""):
     e = html.escape
     price = f"<div style='{FONT};font-size:26px;font-weight:bold;color:{NAVY}'>{cash}</div>" if cash else ""
     pts = f"<div style='{FONT};font-size:13px;color:#636363'>{points}</div>" if points else ""
@@ -93,7 +108,7 @@ def _card(title, url, sub, legs, cash, points, cpp, use):
   <tr><td style="padding:10px 14px;vertical-align:top">
     <table role="presentation" cellpadding="0" cellspacing="0">{legs}</table></td>
     <td style="padding:10px 14px;text-align:right;vertical-align:top;white-space:nowrap">{price}{pts}{cpp_txt}</td></tr>
-  <tr><td colspan="2" style="padding:0 14px 12px">
+  <tr><td colspan="2" style="padding:0 14px 12px">{extra}
     <span style="{FONT};font-size:13px;color:{NAVY};background:#FFF4D6;border-left:4px solid {YELLOW};
                  padding:6px 10px;display:inline-block">Pay with: <b>{e(use)}</b></span>
     <a href="{e(url)}" style="{FONT};float:right;background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
@@ -113,13 +128,13 @@ def render_hits(hits):
             pts = f'{int(t["points"]):,} pts + ${t["taxes"] or 0:.2f}' if t["points"] else ""
             cards += _card(h["watch"], h["url"], f"Round trip · {n} night{'s' if n != 1 else ''}", legs,
                            f'${t["cash"]:,.0f}' if t["cash"] else "", pts,
-                           f'{t["cpp"]:.2f}' if t["cpp"] else "", h["use"])
+                           f'{t["cpp"]:.2f}' if t["cpp"] else "", h["use"], _history(h))
             continue
         r = h["row"]
         pts = f'{int(r["points"]):,} pts + ${r["points_taxes"] or 0:.2f}' if r["points"] else ""
         cards += _card(h["watch"], h["url"], "One way", _leg_line("Flight", h["date"], r, None),
                        f'${r["cash"]:,.0f}' if r["cash"] else "", pts,
-                       f'{r["cpp"]:.2f}' if r["cpp"] else "", h["use"])
+                       f'{r["cpp"]:.2f}' if r["cpp"] else "", h["use"], _history(h))
     n = len(hits)
     return f"""<!doctype html><html><body style="margin:0;padding:0;background:#F2F2F2">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F2F2F2">
