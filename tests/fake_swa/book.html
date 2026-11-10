@@ -1,0 +1,56 @@
+<!doctype html><title>Southwest (fake home)</title>
+<body>
+<!-- Southwest's Book a Flight form, trimmed to the parts the watcher uses (real ids, roles, labels) -->
+<form novalidate onsubmit="return false">
+  <div aria-controls="trip-list" aria-expanded="false" aria-label="Trip type options" role="combobox" tabindex="0" id="trip"><span>Round-trip</span></div>
+  <ul id="trip-list" role="listbox" hidden>
+    <li role="option" aria-selected="false">One-way</li><li role="option" aria-selected="true">Round-trip</li></ul>
+  <input aria-autocomplete="list" aria-controls="origin-list" id="originationAirportCode" role="combobox" type="text" value="LIR">
+  <ul id="origin-list" role="listbox"></ul>
+  <input aria-autocomplete="list" aria-controls="dest-list" id="destinationAirportCode" role="combobox" type="text" value="HOU">
+  <ul id="dest-list" role="listbox"></ul>
+  <input aria-label="Depart date in M M, D D format" id="departureDate" name="departureDate" placeholder="__/__" type="text" value="04/05">
+  <input aria-label="Passenger Selector" name="adultPassengersCount" role="combobox" type="text" value="2" readonly>
+  <div id="paxbox" hidden><button aria-label="dec" type="button">-</button><button aria-label="inc" type="button">+</button></div>
+  <span><input aria-hidden="true" data-test="showFareInPointsField" name="showFareInPoints" type="checkbox" hidden>
+    <div aria-checked="false" aria-labelledby="showFareInPoints-id" role="checkbox" tabindex="0">[ ]</div>
+    <span id="showFareInPoints-id">Show fares in points</span></span>
+  <span><input aria-hidden="true" data-test="lowFareCalendarField" name="lowFareCalendar" type="checkbox" hidden>
+    <div aria-checked="false" aria-labelledby="lowFareCalendar-id" role="checkbox" tabindex="0">[ ]</div>
+    <span id="lowFareCalendar-id">Search with low fare calendar</span></span>
+  <button id="flightBookingSubmit" role="button" type="submit">Search flights</button>
+</form>
+<script>
+const NAMES = { SJO: "San Jose, Costa Rica - SJO", LIR: "Liberia, Costa Rica - LIR", JAX: "Jacksonville, FL - JAX",
+                HOU: "Houston (Hobby), TX - HOU", JAN: "Jackson, MS - JAN" };
+const trip = document.getElementById("trip"), tripList = document.getElementById("trip-list");
+trip.onclick = () => { tripList.hidden = false; };
+tripList.querySelectorAll("[role=option]").forEach((o) => o.onclick = () => {
+  trip.querySelector("span").textContent = o.textContent; tripList.hidden = true; });
+for (const [id, list] of [["originationAirportCode", "origin-list"], ["destinationAirportCode", "dest-list"]]) {
+  const input = document.getElementById(id), ul = document.getElementById(list);
+  input.addEventListener("input", () => {
+    const t = input.value.toUpperCase();
+    ul.replaceChildren(...Object.entries(NAMES).filter(([c, n]) => t && (c.startsWith(t) || n.toUpperCase().includes(t)))
+      .map(([c, n]) => { const li = document.createElement("li"); li.setAttribute("role", "option"); li.textContent = n;
+        li.onclick = () => { input.value = c; ul.replaceChildren(); }; return li; }));
+  });
+}
+const pax = document.querySelector('[name="adultPassengersCount"]'), paxbox = document.getElementById("paxbox");
+pax.onclick = () => { paxbox.hidden = false; };
+paxbox.querySelector('[aria-label="inc"]').onclick = () => { pax.value = String(+pax.value + 1); };
+paxbox.querySelector('[aria-label="dec"]').onclick = () => { pax.value = String(Math.max(1, +pax.value - 1)); };
+pax.addEventListener("keydown", (e) => { if (e.key === "Escape") paxbox.hidden = true; });
+document.querySelectorAll("[role=checkbox]").forEach((c) => c.onclick = () =>
+  c.setAttribute("aria-checked", String(c.getAttribute("aria-checked") !== "true")));
+document.getElementById("flightBookingSubmit").onclick = () => {
+  const [m, d] = document.getElementById("departureDate").value.split("/");
+  const now = new Date(), y = (+m < now.getMonth() + 1) ? now.getFullYear() + 1 : now.getFullYear();
+  const pts = document.querySelector('[aria-labelledby="showFareInPoints-id"]').getAttribute("aria-checked") === "true";
+  const cal = document.querySelector('[aria-labelledby="lowFareCalendar-id"]').getAttribute("aria-checked") === "true";
+  const q = new URLSearchParams({ originationAirportCode: document.getElementById("originationAirportCode").value,
+    destinationAirportCode: document.getElementById("destinationAirportCode").value,
+    departureDate: `${y}-${m}-${d}`, fareType: pts ? "POINTS" : "USD", adultPassengersCount: pax.value, tripType: "oneway" });
+  location.href = (cal ? "calendar.html?" : "select-depart.html?") + q.toString();
+};
+</script>

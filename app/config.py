@@ -47,6 +47,9 @@ class Settings:
         # After Southwest shows a challenge or block page: stop the run and skip that user's
         # scheduled runs for this many hours ("Search now" still works)
         self.block_pause_hours = float(_env("SWA_BLOCK_PAUSE_HOURS", "36"))
+        # Share of flight-search page loads started from the home page's Book a Flight form
+        # (like a person) rather than the search address (like a bookmark); 0 turns it off
+        self.form_share = max(0.0, min(1.0, float(_env("SWA_FORM_SHARE", "0.5"))))
         self.calendar = _bool("SWA_CALENDAR", True)
         self.calendar_url = _env("SWA_CALENDAR_URL", "https://www.southwest.com/air/low-fare-calendar/select-dates")
         self.calendar_detail_dates = int(_env("SWA_CALENDAR_DETAIL_DATES", "6"))

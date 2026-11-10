@@ -71,6 +71,7 @@ def tmp_data(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "admin_username", "admin")
     monkeypatch.setattr(settings, "admin_password", "admin-password-123")
     monkeypatch.setattr(settings, "_secret", "test-secret")
+    monkeypatch.setattr(settings, "form_share", 0.0)   # tests opt in to the Book a Flight form
     FakeSearcher.calls = []
     FakeSearcher.fail = False
     FakeSearcher.signin = []
