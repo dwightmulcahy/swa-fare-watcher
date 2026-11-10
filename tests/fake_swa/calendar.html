@@ -10,19 +10,28 @@
   <button aria-label="Select points currency" role="button" type="button" aria-pressed="false" data-ft="POINTS"><div><span>Points</span></div></button>
   <button aria-label="Select dollars plus points currency" role="button" type="button" aria-pressed="false" data-ft="MIX"><div><span>$ + Points</span></div></button>
 </div></div></div>
+<div role="tablist">
+  <button role="tab" type="button" aria-label="November 2026" aria-selected="true" data-month="2026-11">NOV</button>
+  <button role="tab" type="button" aria-label="December 2026" aria-selected="false" data-month="2026-12">DEC</button>
+</div>
 <script>
-// like the real page: its build manifest first, then the fares
 const q = new URLSearchParams(location.search);
 window.calendarFetches = [];
-const load = (ft) => { window.calendarFetches.push(ft);
-  return fetch("calendar-data-" + ft + ".json" + location.search); };
+const state = { ft: q.get("fareType") || "USD", month: "2026-11" };
+const load = () => { window.calendarFetches.push(state.ft + " " + state.month);
+  return fetch("calendar-data-" + state.ft + (state.month === "2026-11" ? "" : "-" + state.month) + ".json" + location.search); };
 const buttons = document.querySelectorAll("[role=group] button");
 buttons.forEach((b) => b.addEventListener("click", () => {
   buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-  load(b.dataset.ft);
+  state.ft = b.dataset.ft; load();
+}));
+const tabs = document.querySelectorAll("[role=tab]");
+tabs.forEach((t) => t.addEventListener("click", () => {
+  tabs.forEach((x) => x.setAttribute("aria-selected", String(x === t)));
+  state.month = t.dataset.month; load();
 }));
 // like the real page: build manifest and the signed-in user's account info first, then the fares
 fetch("v2/air/low-fare-calendar/manifest.json")
   .then(() => fetch("api/security/userinfo.json"))
-  .then(() => setTimeout(() => load(q.get("fareType") || "USD"), 300));
+  .then(() => setTimeout(load, 300));
 </script>

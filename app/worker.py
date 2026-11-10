@@ -482,11 +482,14 @@ class Worker:
             if not leg_dates:
                 continue
             months = list(swa.calendar_months(leg_dates).items())
-            # each route and month: both currencies back to back (the second can be a click on the
-            # same page), in random order; the pairs themselves in random order
-            pairs = [(rt_, m, first) for rt_ in swa.routes(w, leg) for m, first in months]
-            jobs = [(rt_, m, first, ft) for rt_, m, first in random.sample(pairs, len(pairs))
-                    for ft in random.sample(("USD", "POINTS"), 2)]
+            # Per route, like a person on one calendar page: every month in one currency (month
+            # tabs), switch currency on the last month, then back through the months. Routes,
+            # currency order and month direction are random.
+            jobs = []
+            for rt_ in random.sample(swa.routes(w, leg), len(swa.routes(w, leg))):
+                ms = months if random.random() < 0.5 else months[::-1]
+                a, b = random.sample(("USD", "POINTS"), 2)
+                jobs += [(rt_, m, first, a) for m, first in ms] + [(rt_, m, first, b) for m, first in ms[::-1]]
             lows = {rt_: {} for rt_ in swa.routes(w, leg)}
             broken = set()
             for j, ((frm, to), month, first, ft) in enumerate(jobs):
@@ -506,8 +509,10 @@ class Worker:
                     field = "cash" if ft == "USD" else "points"
                     for d, v in days.items():
                         lows[(frm, to)].setdefault(d, {"cash": None, "points": None})[field] = v
-                if j % 2 == 0 and getattr(searcher, "calendar_switches_currency", False):
-                    continue   # the other currency is a click on this calendar page
+                nxt = jobs[j + 1] if j + 1 < len(jobs) else None
+                can_click = getattr(searcher, "calendar_can_click", None)
+                if nxt and can_click and can_click(nxt[0][0], nxt[0][1], nxt[2], w["adults"], nxt[3]):
+                    continue   # the next calendar is a click on this page (with its own short look)
                 pause = search_pause(*settings.search_delay)
                 self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                            watch_id=w["id"], log=False, until=time.time() + pause)
