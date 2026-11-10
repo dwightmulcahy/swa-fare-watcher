@@ -257,3 +257,30 @@ def test_cancel_queued_run_is_dropped(worker):
     worker.enqueue(uid)
     assert worker.cancel(uid) == "queued"
     assert worker.cancel(make_user(username="u2", email="b@x")) is None
+
+
+def test_stale_runs_email_admins_once(worker, sent, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "scheduler", True)
+    admin = make_user(username="adm", email="adm@example.com", is_admin=1)
+    make_watch(admin)
+    worker.started_at = dt.datetime(2027, 1, 1, 8, 0)
+    assert worker.check_stale(now=dt.datetime(2027, 1, 2, 9, 0)) is False      # 25 h
+    assert worker.check_stale(now=dt.datetime(2027, 1, 2, 11, 0)) is True      # 27 h
+    assert worker.check_stale(now=dt.datetime(2027, 1, 2, 12, 0)) is True
+    assert [s[0] for s in sent] == ["adm@example.com"] and "no searches" in sent[0][1]
+    with db.tx() as con:   # a run finishes: the alert resets
+        wid = con.execute("SELECT id FROM watches").fetchone()[0]
+        con.execute("INSERT INTO runs(watch_id, started, finished) VALUES (?,?,?)",
+                    (wid, "2027-01-02T12:30:00", "2027-01-02T12:40:00"))
+    assert worker.check_stale(now=dt.datetime(2027, 1, 2, 13, 0)) is False
+    assert db.get_state("stale_alerted") == ""
+
+
+def test_worker_alive_reflects_threads(worker):
+    import threading
+    t = threading.Thread(target=lambda: None)
+    t.start()
+    t.join()
+    worker._threads = [t]
+    assert worker.alive() is False

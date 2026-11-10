@@ -62,6 +62,8 @@ class Settings:
         self.default_max_searches = int(_env("DEFAULT_MAX_SEARCHES_PER_DAY", "40"))
         # Nightly copy of the database into <data>/backups, keeping this many days (0 = off)
         self.backup_keep = max(0, int(_env("SWA_BACKUP_KEEP", "7")))
+        # Email the admins when no search run has finished for this many hours (0 = off)
+        self.stale_hours = max(0.0, float(_env("SWA_STALE_HOURS", "26")))
         self._secret = _env("SECRET_KEY")
 
     @property

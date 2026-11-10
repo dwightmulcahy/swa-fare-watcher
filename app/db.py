@@ -105,6 +105,10 @@ CREATE TABLE IF NOT EXISTS logs(
   attachment TEXT
 );
 CREATE INDEX IF NOT EXISTS logs_user ON logs(user_id, id);
+CREATE TABLE IF NOT EXISTS app_state(
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 CREATE TABLE IF NOT EXISTS runs(
   id INTEGER PRIMARY KEY,
   watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
@@ -215,6 +219,20 @@ def init():
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
     finally:
         con.close()
+
+
+def get_state(key, default=None):
+    row = one("SELECT value FROM app_state WHERE key=?", (key,))
+    return row["value"] if row else default
+
+
+def set_state(key, value):
+    with tx() as con:
+        con.execute("INSERT OR REPLACE INTO app_state VALUES (?,?)", (key, value))
+
+
+def admin_emails():
+    return [r["email"] for r in query("SELECT email FROM users WHERE is_admin=1 AND active=1 AND email<>''")]
 
 
 def backup(keep=None, day=None):

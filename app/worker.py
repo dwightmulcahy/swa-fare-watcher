@@ -130,6 +130,7 @@ class Worker:
         self.cancelled = set()     # users who pressed Cancel: stop after the current search, keep results
         self._wake = threading.Event()   # cuts a pause short when the running user cancels
         self._threads = []
+        self.started_at = dt.datetime.now()
 
     # ----- queueing -----
     def enqueue(self, user_id, watch_ids=None):
@@ -270,6 +271,39 @@ class Worker:
                 applog.info(f"Database backed up to {made.relative_to(settings.data_dir)}", source="backup")
         except Exception as e:
             applog.error(f"Database backup failed: {e.__class__.__name__}: {e}", source="backup")
+        try:
+            self.check_stale()
+        except Exception as e:
+            applog.error(f"Stale-run check failed: {e.__class__.__name__}: {e}", source="scheduler")
+
+    def alive(self):
+        """False if a background thread this worker started has died."""
+        return all(t.is_alive() for t in self._threads)
+
+    def check_stale(self, now=None):
+        """Email the admins once when no run has finished for settings.stale_hours while there are
+        watches to run; reset when runs finish again."""
+        if not settings.stale_hours or not settings.scheduler:
+            return None
+        now = now or dt.datetime.now()
+        last = db.one("SELECT MAX(finished) f FROM runs")["f"]
+        since = max(filter(None, [dt.datetime.fromisoformat(last) if last else None, self.started_at]))
+        flagged = db.get_state("stale_alerted")
+        if now - since < dt.timedelta(hours=settings.stale_hours) or not self.eligible_users():
+            if flagged:
+                db.set_state("stale_alerted", "")
+            return False
+        if flagged:
+            return True
+        hours = (now - since).total_seconds() / 3600
+        msg = (f"No fare search has finished for {hours:.0f} hours (last: {last or 'never'}). "
+               "Check the app's Log tab and that the container and browser are running.")
+        applog.warn(msg, source="scheduler")
+        for to in db.admin_emails():
+            mailer.send(to, "SWA fare watcher: no searches have run",
+                        f"<p>{html.escape(msg)}</p><p><a href='{settings.base_url}/log'>Open the log</a></p>")
+        db.set_state("stale_alerted", now.isoformat(timespec="seconds"))
+        return True
 
     def _housekeeping_loop(self):
         while True:

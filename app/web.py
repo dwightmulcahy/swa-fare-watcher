@@ -171,9 +171,15 @@ def create_app(worker=None, start_worker=True):
 
     # ---------- public ----------
     @app.get("/health")
+    @app.get("/healthz")
     def health():
+        """Container health: the database answers and the worker threads are alive (503 if not)."""
         db.one("SELECT 1")
-        return JSONResponse({"status": "ok"})
+        worker = getattr(app.state, "worker", None)
+        ok = worker is None or worker.alive()
+        last = db.one("SELECT MAX(finished) f FROM runs")["f"]
+        return JSONResponse({"status": "ok" if ok else "worker stopped", "last_run_finished": last},
+                            status_code=200 if ok else 503)
 
     @app.get("/api/status")
     def api_status(request: Request):

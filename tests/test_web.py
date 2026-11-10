@@ -40,7 +40,8 @@ def watch_form(token, **kw):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    r = client.get("/healthz")
+    assert r.status_code == 200 and r.json() == {"status": "ok", "last_run_finished": None}
 
 
 def test_requires_login_and_bad_password(client):
