@@ -1,0 +1,6 @@
+{"success": true, "data": {"searchResults": [{"originationAirportCode": "LIR", "destinationAirportCode": "HOU",
+ "currencyCode": "USD", "lowFareCalendarDays": [
+  {"date": "2026-12-05", "fares": {"WGA": {"totalFare": {"currencyCode": "USD", "value": "301.00"}},
+                                   "PLU": {"totalFare": {"currencyCode": "USD", "value": "520.00"}}}},
+  {"date": "2026-12-06", "fares": {"WGA": {"totalFare": {"currencyCode": "USD", "value": "199.00"}}}},
+  {"date": "2026-12-07", "fares": {}}]}]}}

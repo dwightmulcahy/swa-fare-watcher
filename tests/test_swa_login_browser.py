@@ -195,7 +195,7 @@ def test_calendar_skips_manifest_and_reads_fares(site, monkeypatch, tmp_path):
         points = b.calendar("LIR", "HOU", "2026-11-09", 1, "POINTS")      # a click, not a page load
         fetches = b.page.evaluate("window.calendarFetches")
     assert points == {"2026-11-09": 38000.0, "2026-11-10": 19500.0, "2026-11-11": None}
-    assert fetches == ["USD", "POINTS"]                                 # same page: both on its log
+    assert fetches == ["USD 2026-11", "POINTS 2026-11"]                 # same page: both on its log
     saved = sorted(p.read_text() for p in (tmp_path / "debug" / "calendar").glob("*.json"))
     assert any("calendar-data-USD.json" in t for t in saved) and any("calendar-data-POINTS" in t for t in saved)
     assert not any("someone@example.com" in t or "userinfo" in t for t in saved)   # account data never saved
@@ -233,3 +233,28 @@ def test_calendar_read_from_page_cells_when_data_is_missed(site, monkeypatch, tm
         b._warmed = True
         days = b.calendar("SJO", "JAX", "2026-12-19", 1, "USD")
     assert days == {"2026-12-01": None, "2026-12-19": 342.0, "2026-12-20": 418.0}   # selected month only
+
+
+def test_calendar_months_by_tab_and_currency_by_switch_on_one_page(site, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.swa import BrowserSearcher
+
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    loads = []
+    with BrowserSearcher(profile_key="t-cal-tabs", human=False) as b:
+        b._warmed = True
+        b.page.on("framenavigated", lambda f: f == b.page.main_frame and loads.append(f.url))
+        nov_usd = b.calendar("LIR", "HOU", "2026-11-09", 1, "USD")
+        assert b.calendar_can_click("LIR", "HOU", "2026-12-05", 1, "USD")          # month tab
+        assert not b.calendar_can_click("LIR", "HOU", "2026-12-05", 1, "POINTS")   # two changes
+        assert not b.calendar_can_click("SJO", "HOU", "2026-12-05", 1, "USD")      # other route
+        dec_usd = b.calendar("LIR", "HOU", "2026-12-05", 1, "USD")
+        dec_pts = b.calendar("LIR", "HOU", "2026-12-05", 1, "POINTS")
+        nov_pts = b.calendar("LIR", "HOU", "2026-11-09", 1, "POINTS")
+        fetches = b.page.evaluate("window.calendarFetches")
+    assert len(loads) == 1                                                       # one page load
+    assert fetches == ["USD 2026-11", "USD 2026-12", "POINTS 2026-12", "POINTS 2026-11"]
+    assert nov_usd["2026-11-10"] == 256 and dec_usd == {"2026-12-05": 301.0, "2026-12-06": 199.0, "2026-12-07": None}
+    assert dec_pts["2026-12-06"] == 15000 and nov_pts["2026-11-09"] == 38000

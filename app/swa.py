@@ -1061,52 +1061,40 @@ class BrowserSearcher:
 
     _cal_shown = None        # (origin, dest, month, adults, fare_type) of the calendar on screen
     _cal_toggle_works = None
+    _cal_tabs_work = None
 
     @property
     def calendar_switches_currency(self):
         """True when the next calendar for the same route and month will be a click on the open page."""
         return self._cal_shown is not None and self._cal_toggle_works is not False
 
+    def calendar_can_click(self, origin, dest, date, adults, fare_type):
+        """True if that calendar is one click away on the open page: the same route showing,
+        and only the month (a month tab) or only the currency (Dollars/Points) differs."""
+        sh = self._cal_shown
+        if not sh or sh[:2] != (origin, dest) or sh[3] != adults:
+            return False
+        month_differs, currency_differs = sh[2] != date[:7], sh[4] != fare_type
+        if month_differs and not currency_differs:
+            return self._cal_tabs_work is not False
+        if currency_differs and not month_differs:
+            return self._cal_toggle_works is not False
+        return False
+
     def calendar(self, origin, dest, date, adults, fare_type):
         """Lowest fare for each day of the month containing `date`, as {YYYY-MM-DD: amount or None},
-        or None if the calendar couldn't be read. The other currency for the same month is a click
-        on the page's Dollars/Points switch. Raw data is saved to debug/calendar/."""
+        or None if the calendar couldn't be read. When the same route's calendar is already open,
+        another month is a click on its month tab, and the other currency a click on its
+        Dollars/Points switch, instead of a new page load. Raw data is saved to debug/calendar/."""
         tag = f"calendar-{origin}-{dest}-{date[:7]}-{fare_type}"
         if not self._warmed:
             self.warm_up()
         key = (origin, dest, date[:7], adults)
-        if (self._cal_shown and self._cal_shown[:4] == key and self._cal_shown[4] != fare_type
-                and self._cal_toggle_works is not False):
-            el = None
-            from .swa_login import find
-            el = find(self.page, FARE_TOGGLE[fare_type], timeout=3)
-            if el is not None and (el.get_attribute("aria-pressed") or "").lower() == "true":
-                el = None   # already showing that currency (shouldn't happen): load its address instead
-                self._cal_toggle_works = None
-            if el is not None:
-                def click():
-                    if self.humanize:
-                        self.human.pause(1.5, 4.5)
-                        self.human.click(el)
-                    else:
-                        el.click()
-                days, payloads = self._collect_calendar(click, tag, wait=20)
-                if days is not None:
-                    if self._cal_toggle_works is None:
-                        applog.info(f"{tag}: switched currency on the calendar page", source="search",
-                                    user_id=self._uid())
-                    self._cal_toggle_works = True
-                    self._cal_shown = (*key, fare_type)
-                    return days
-                self._cal_toggle_works = False
-                applog.warn(f"{tag}: the calendar's Dollars/Points switch didn't bring daily fares"
-                            f"{_api_errors(payloads)}; loading the {fare_type.lower()} calendar address "
-                            "instead", source="search", user_id=self._uid(), attachment=self.capture(tag))
-            else:
-                self._cal_toggle_works = False
-                applog.info(f"{tag}: no Dollars/Points switch on the calendar page; loading each currency's "
-                            "address instead", source="search", user_id=self._uid(),
-                            attachment=self.capture(tag + "-no-toggle"))
+        if self.calendar_can_click(origin, dest, date, adults, fare_type):
+            days = self._calendar_click(date, fare_type, tag)
+            if days is not None:
+                self._cal_shown = (*key, fare_type)
+                return days
         q = {
             "adultPassengersCount": adults, "adultsCount": adults,
             "currencyCode": "PTS" if fare_type == "POINTS" else "USD",
@@ -1134,6 +1122,49 @@ class BrowserSearcher:
                     f"{_api_errors(payloads)}; saved to {raw}. Falling back to searching each date.",
                     source="search", user_id=self._uid(), attachment=self.capture(tag))
         return None
+
+    def _calendar_click(self, date, fare_type, tag):
+        """Show another month (its tab) or currency (Dollars/Points) on the open calendar and
+        read it. None if the control isn't there or no fares for that month come back; that
+        kind of click is then not tried again this session."""
+        from .swa_login import find
+        month_tab = self._cal_shown[2] != date[:7]
+        if month_tab:
+            label = dt.date.fromisoformat(date[:7] + "-01").strftime("%B %Y")   # "March 2027"
+            el = find(self.page, [("css", f'[role=tab][aria-label="{label}"]')], timeout=3)
+            what, pressed = f"the {label} tab", "aria-selected"
+        else:
+            el = find(self.page, FARE_TOGGLE[fare_type], timeout=3)
+            what, pressed = "the Dollars/Points switch", "aria-pressed"
+        if el is None or (el.get_attribute(pressed) or "").lower() == "true":
+            self._note_click(month_tab, False, f"{tag}: {what} isn't on the calendar page; loading "
+                             "its address instead", tag + "-no-control")
+            return None
+
+        def click():
+            if self.humanize:
+                self.human.pause(1.5, 4.5)       # look at this month's prices, then move on
+                self.human.click(el)
+            else:
+                el.click()
+        days, payloads = self._collect_calendar(click, tag, wait=20)
+        if days and any(d.startswith(date[:7]) for d in days):
+            self._note_click(month_tab, True, f"{tag}: clicked {what} on the calendar page")
+            return {d: v for d, v in days.items() if d.startswith(date[:7])} if month_tab else days
+        self._note_click(month_tab, False, f"{tag}: {what} didn't bring that month's fares"
+                         f"{_api_errors(payloads)}; loading its address instead", tag)
+        return None
+
+    def _note_click(self, month_tab, worked, message, shot=None):
+        attr = "_cal_tabs_work" if month_tab else "_cal_toggle_works"
+        first = getattr(self, attr) is None
+        setattr(self, attr, worked)
+        if worked:
+            if first:   # log the first success of each kind per session
+                applog.info(message, source="search", user_id=self._uid())
+        else:
+            applog.warn(message, source="search", user_id=self._uid(),
+                        attachment=self.capture(shot) if shot else None)
 
     def _collect_calendar(self, action, tag, wait):
         """Run `action` (a page load or a click) and read the JSON responses it brings until one
