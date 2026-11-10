@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -650,6 +650,18 @@ def create_app(worker=None, start_worker=True):
             raise Redirect(f"/watches/{wid}?err=Daily+search+limit+reached")
         app.state.worker.enqueue(u["id"], [wid])
         raise Redirect(f"/watches/{wid}?ok=Search+queued+({need}+searches).+Refresh+in+a+few+minutes.")
+
+    @app.post("/run/cancel")
+    async def cancel_run(request: Request):
+        u, s = require(request)
+        await form(request, s)
+        state = app.state.worker.cancel(u["id"])
+        ref = request.headers.get("referer") or ""
+        back = urlsplit(ref).path if ref.startswith(str(request.base_url)) else ""
+        back = back if back.startswith("/") and not back.startswith("//") else "/"
+        msg = {"running": "Cancelling+after+the+current+search.+Results+so+far+are+saved.",
+               "queued": "Queued+search+cancelled."}.get(state)
+        raise Redirect(back + (f"?ok={msg}" if msg else "?err=Nothing+is+running"))
 
     # ---------- settings ----------
     @app.get("/settings", response_class=HTMLResponse)

@@ -234,3 +234,14 @@ def test_block_pause_banner_and_resume(client):
     assert "Scheduled runs are paused until 2999-01-01 00:00" in page and "calendar: HTTP 403" in page
     assert client.post("/resume", data={"csrf": token}, follow_redirects=False).status_code == 303
     assert "Scheduled runs are paused" not in client.get("/").text
+
+
+def test_cancel_button_posts_and_reports(client):
+    t = admin_client(client)
+    assert 'action="/run/cancel"' in client.get("/").text
+    r = client.post("/run/cancel", data={"csrf": t}, follow_redirects=False,
+                    headers={"referer": "http://testserver/settings?x=1"})
+    assert r.headers["location"] == "/settings?err=Nothing+is+running"
+    r = client.post("/run/cancel", data={"csrf": t}, follow_redirects=False,
+                    headers={"referer": "https://evil.example/x"})
+    assert r.headers["location"].startswith("/?err=")

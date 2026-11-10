@@ -30,7 +30,7 @@ def test_run_stores_fares_and_emails_new_matches(worker, sent):
     uid = make_user()
     wid = make_watch(uid)
     res = worker.run_user(uid)
-    assert res == {"attempts": 4, "failures": 0, "hits": 2, "emailed": True, "limited": False}
+    assert res == {"attempts": 4, "failures": 0, "hits": 2, "emailed": True, "limited": False, "cancelled": False}
     assert len(FakeSearcher.calls) == 4
     fares = db.query("SELECT * FROM fares WHERE watch_id=?", (wid,))
     assert len(fares) == 4 and sum(f["matched"] for f in fares) == 2
@@ -229,3 +229,31 @@ def test_currency_on_screen_is_searched_first(worker, sent):
     worker.run_user(uid)
     firsts = [c[3] for c in FakeSearcher.calls[::2]]
     assert firsts == ["POINTS", "POINTS"]      # each date starts in the currency on screen
+
+
+def test_cancel_stops_after_current_search_and_keeps_results(worker, sent):
+    uid = make_user()
+    wid = make_watch(uid)
+    make_watch(uid, name="Second")
+    worker.running_user = uid
+    calls = []
+
+    def sleep(_):   # cancel during the pause after the first search
+        calls.append(1)
+        worker.cancel(uid)
+    worker.sleep = sleep
+    out = worker.run_user(uid)
+    assert out["cancelled"] and out["attempts"] == 1
+    assert len(FakeSearcher.calls) == 1   # the other currency, date and watch were skipped
+    assert db.query("SELECT COUNT(*) n FROM fares")[0]["n"] > 0   # the first search's fares are saved
+    notes = [r["note"] for r in db.query("SELECT note FROM runs")]
+    assert len(notes) == 1 and notes[0].startswith("Cancelled after 1 search")
+    assert db.one("SELECT last_status FROM watches WHERE id=?", (wid,)) is not None
+
+
+def test_cancel_queued_run_is_dropped(worker):
+    uid = make_user()
+    make_watch(uid)
+    worker.enqueue(uid)
+    assert worker.cancel(uid) == "queued"
+    assert worker.cancel(make_user(username="u2", email="b@x")) is None
