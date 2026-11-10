@@ -388,7 +388,8 @@ def test_search_from_the_book_a_flight_form(site, monkeypatch, tmp_path, human):
     from app.config import settings
 
     monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
-    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "home-menu.html"))
+    monkeypatch.setattr(settings, "book_url", site.replace("index.html", "book.html"))
     monkeypatch.setattr(settings, "form_share", 1.0)
     monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
     with swa.BrowserSearcher(profile_key=f"t-form-{human}", human=human) as b:
@@ -396,7 +397,8 @@ def test_search_from_the_book_a_flight_form(site, monkeypatch, tmp_path, human):
         if human:
             b.human.speed = 0.15
         _shopping_route(b, {("POINTS", "2027-01-02"): "12,000"})
-        got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")
+        b.page.goto(settings.home_url)                                  # starts on the home page
+        got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")         # FLIGHT → Book a Flight → form
         url = b.page.url
     (f,) = got.values()
     assert f["fare"][0] == 12000 and b._form_works is True
@@ -411,7 +413,7 @@ def test_missing_form_falls_back_to_the_search_address(site, monkeypatch, tmp_pa
     from app.config import settings
 
     monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
-    monkeypatch.setattr(settings, "home_url", site)                    # a home page without the form
+    monkeypatch.setattr(settings, "book_url", site.replace("index.html", "home-menu.html"))  # no full form there
     monkeypatch.setattr(settings, "form_share", 1.0)
     monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
     with swa.BrowserSearcher(profile_key="t-noform", human=False) as b:
@@ -427,7 +429,7 @@ def test_points_calendar_opened_from_the_form(site, monkeypatch, tmp_path):
     from app import swa
     from app.config import settings
 
-    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "book_url", site.replace("index.html", "book.html"))
     monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar.html"))
     monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
     # form_share is 0 in tests: points calendars use the form anyway (their address is rejected)

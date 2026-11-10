@@ -59,7 +59,8 @@ def _site_host():
     host = urlsplit(settings.home_url).hostname or "southwest.com"
     return host[4:] if host.startswith("www.") else host
 
-# The home page's "Book a Flight" form (from the live page's HTML)
+# The "Book a Flight" page's form (FLIGHT menu → Book a Flight; from the live page's HTML).
+# The home page's booking box is a different, smaller widget.
 FORM = {
     "trip": '[role=combobox][aria-label="Trip type options"]',
     "origin": "#originationAirportCode",            # role=combobox, suggestions after typing
@@ -1228,13 +1229,35 @@ class BrowserSearcher:
         except Exception:
             pass
 
+    def _open_booking_page(self):
+        """Get to the Book a Flight page (FLIGHT → Book a Flight), where the full form is: by its
+        menu link when one is on screen, like a person, else by its address."""
+        page = self.page
+        if urlsplit(page.url).path.rstrip("/").endswith(urlsplit(settings.book_url).path.rstrip("/")) \
+                and _site_host() in page.url:
+            return
+        link = page.locator(f'a[href*="{urlsplit(settings.book_url).path.rstrip("/")}"]:visible')
+        resp = None
+        try:
+            if link.count():
+                with page.expect_navigation(timeout=30_000) as nav:
+                    self._click(link.first)
+                resp = nav.value
+        except Exception:
+            resp = None
+        if resp is None:
+            resp = page.goto(settings.book_url, wait_until="domcontentloaded", timeout=60_000)
+        self.check_blocked("Book a Flight page", resp)
+        if self.humanize:
+            self.human.read(self.human.rng.uniform(2, 5))
+
     def _pick_airport(self, selector, code):
         """Type an airport code into a Book-a-Flight combobox and pick its suggestion."""
         el = self.page.locator(selector).first
-        if (el.input_value() or "").strip().upper() == code:
+        if (el.input_value(timeout=5000) or "").strip().upper() == code:
             return
         self._type(el, code)
-        listbox = el.get_attribute("aria-controls")
+        listbox = el.get_attribute("aria-controls", timeout=5000)
         options = self.page.locator(f'[id="{listbox}"] [role=option]') if listbox else None
         try:
             options.first.wait_for(state="visible", timeout=6000)
@@ -1251,43 +1274,43 @@ class BrowserSearcher:
         else:
             el.press("Enter")
         self.page.wait_for_timeout(300)
-        if code not in (el.input_value() or "").upper():
+        if code not in (el.input_value(timeout=5000) or "").upper():
             raise RuntimeError(f"{code} didn't stick in {selector}")
 
     def _set_checkbox(self, selector, on):
         box = self.page.locator(selector).first
-        if ((box.get_attribute("aria-checked") or "false") == "true") != on:
+        if ((box.get_attribute("aria-checked", timeout=5000) or "false") == "true") != on:
             self._click(box)
-            if ((box.get_attribute("aria-checked") or "false") == "true") != on:
+            if ((box.get_attribute("aria-checked", timeout=5000) or "false") == "true") != on:
                 raise RuntimeError(f"couldn't {'tick' if on else 'untick'} {selector}")
 
     def _fill_form(self, origin, dest, date, adults, fare_type, calendar=False):
-        """Fill the home page's Book a Flight form like a person (one-way). Returns the submit
+        """Fill the Book a Flight form like a person (one-way). Returns the submit
         button. Raises on anything unexpected; the caller then loads the address instead."""
         page = self.page
-        if urlsplit(page.url).path.rstrip("/") not in ("", "/index.html") or _site_host() not in page.url:
-            resp = page.goto(settings.home_url, wait_until="domcontentloaded", timeout=60_000)
-            self.check_blocked("home page", resp)
-            if self.humanize:
-                self.human.read(self.human.rng.uniform(2, 5))
+        self._open_booking_page()
         self._dismiss_cookie_banner()
         page.locator(FORM["origin"]).first.wait_for(state="visible", timeout=15_000)
+        missing = [k for k in ("origin", "dest", "date", "pax", "points", "submit")
+                   if not page.locator(FORM[k]).count()]
+        if missing:
+            raise RuntimeError(f"form fields not on {urlsplit(page.url).path}: {', '.join(missing)}")
         trip = page.locator(FORM["trip"]).first
-        if trip.count() and "one-way" not in trip.inner_text().lower():
+        if trip.count() and "one-way" not in trip.inner_text(timeout=5000).lower():
             self._click(trip)
-            listbox = trip.get_attribute("aria-controls")
+            listbox = trip.get_attribute("aria-controls", timeout=5000)
             self._click(page.locator(f'[id="{listbox}"] [role=option]', has_text="One-way").first)
         self._pick_airport(FORM["origin"], origin)
         self._pick_airport(FORM["dest"], dest)
         d = dt.date.fromisoformat(date)
         when = page.locator(FORM["date"]).first
-        if (when.input_value() or "") != f"{d:%m/%d}":
+        if (when.input_value(timeout=5000) or "") != f"{d:%m/%d}":
             self._type(when, f"{d:%m/%d}")
             when.press("Escape")             # close the date picker it opens
-            if (when.input_value() or "") != f"{d:%m/%d}":
+            if (when.input_value(timeout=5000) or "") != f"{d:%m/%d}":
                 raise RuntimeError("the date didn't stick")
         pax = page.locator(FORM["pax"]).first
-        have = int(num(pax.input_value()) or 1)
+        have = int(num(pax.input_value(timeout=5000)) or 1)
         if have != adults:
             self._click(pax)
             step = page.locator('button[aria-label="inc"]' if adults > have else 'button[aria-label="dec"]').first
@@ -1295,7 +1318,7 @@ class BrowserSearcher:
                 self._click(step)
                 page.wait_for_timeout(150)
             pax.press("Escape")
-            if int(num(pax.input_value()) or 0) != adults:
+            if int(num(pax.input_value(timeout=5000)) or 0) != adults:
                 raise RuntimeError("the passenger count didn't stick")
         self._set_checkbox(FORM["points"], fare_type == "POINTS")
         if page.locator(FORM["calendar"]).count():
@@ -1309,7 +1332,7 @@ class BrowserSearcher:
                     "this session", source="search", user_id=self._uid(), attachment=self.capture(tag + "-form"))
 
     def _form_search(self, origin, dest, date, adults, fare_type, tag):
-        """A flight search started from the home page's form. None if the form didn't work."""
+        """A flight search started from the Book a Flight form. None if the form didn't work."""
         try:
             submit = self._fill_form(origin, dest, date, adults, fare_type)
             with self.page.expect_response(
@@ -1333,7 +1356,7 @@ class BrowserSearcher:
             self._form_failed(tag, RuntimeError(f"the search it sent didn't mention {origin} {date}"))
             return None
         if self._form_works is None:
-            applog.info(f"{tag}: searched from the home page's Book a Flight form", source="search",
+            applog.info(f"{tag}: searched from the Book a Flight form", source="search",
                         user_id=self._uid())
         self._form_works = True
         flights = parse_flights(payload)
@@ -1586,7 +1609,7 @@ class BrowserSearcher:
             self._form_failed(tag, RuntimeError(f"no fares for {date[:7]} came back{_api_errors(payloads)}"))
             return None
         if self._form_works is None:
-            applog.info(f"{tag}: opened the calendar from the home page's Book a Flight form", source="search",
+            applog.info(f"{tag}: opened the calendar from the Book a Flight form", source="search",
                         user_id=self._uid())
         self._form_works = True
         return {d: v for d, v in days.items() if d.startswith(date[:7])}

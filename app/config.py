@@ -50,6 +50,7 @@ class Settings:
         # Share of flight-search page loads started from the home page's Book a Flight form
         # (like a person) rather than the search address (like a bookmark); 0 turns it off
         self.form_share = max(0.0, min(1.0, float(_env("SWA_FORM_SHARE", "0.5"))))
+        self.book_url = _env("SWA_BOOK_URL", "https://www.southwest.com/air/booking/")   # Book a Flight page
         self.calendar = _bool("SWA_CALENDAR", True)
         self.calendar_url = _env("SWA_CALENDAR_URL", "https://www.southwest.com/air/low-fare-calendar/select-dates")
         self.calendar_detail_dates = int(_env("SWA_CALENDAR_DETAIL_DATES", "6"))
