@@ -776,7 +776,10 @@ def normalize_state(raw: str) -> dict:
 HOME_URL = "https://www.southwest.com/"
 # Common real desktop window sizes; each user always gets the same one (stable fingerprint).
 WINDOW_SIZES = [(1366, 768), (1440, 900), (1536, 864), (1600, 900), (1680, 1050), (1920, 1080), (1280, 800)]
-SCREEN = (1920, 1080)
+# Common monitor sizes. Each user's virtual screen is one bigger than their window (with room
+# for a taskbar), so the window isn't exactly screen-sized, which few real desktops have.
+SCREENS = [(1440, 900), (1600, 900), (1680, 1050), (1920, 1080), (1920, 1200), (2560, 1440)]
+SCREEN = (1920, 1080)   # selftest and unkeyed sessions
 LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",  # navigator.webdriver stays false, like a real browser
     "--no-first-run",
@@ -810,6 +813,17 @@ def window_size_for(key):
     return WINDOW_SIZES[h % len(WINDOW_SIZES)]
 
 
+def screen_for(key):
+    """(screen size, window position) for a user: the same every run, like one desk and monitor."""
+    w, h = window_size_for(key)
+    fits = [sc for sc in SCREENS if sc[0] >= w and sc[1] >= h + 40] or [SCREENS[-1]]
+    hsh = int(hashlib.sha256(f"screen:{key}".encode()).hexdigest(), 16)
+    sw, sh = fits[hsh % len(fits)]
+    slack_x, slack_y = sw - w, sh - h - 40
+    pos = ((hsh >> 8) % (slack_x + 1) if slack_x else 0, (hsh >> 20) % (slack_y + 1) if slack_y > 0 else 0)
+    return (sw, sh), pos
+
+
 def profile_dir(key):
     return settings.data_dir / "profiles" / str(key)
 
@@ -818,7 +832,7 @@ def wipe_profile(key):
     shutil.rmtree(profile_dir(key), ignore_errors=True)
 
 
-def start_xvfb(timeout=10, attempts=3):
+def start_xvfb(timeout=10, attempts=3, screen=SCREEN):
     """Start a private virtual display so Chrome can run headed without a desktop.
     Returns (process, ':N'). Retries: right after another Xvfb exits, a new one can pick the
     display number still being released and quit straight away."""
@@ -826,7 +840,7 @@ def start_xvfb(timeout=10, attempts=3):
         raise RuntimeError("Xvfb not installed: install it or set SWA_HEADLESS=true")
     for attempt in range(1, attempts + 1):
         try:
-            return _start_xvfb_once(timeout)
+            return _start_xvfb_once(timeout, screen)
         except RuntimeError as e:
             if attempt == attempts:
                 raise
@@ -834,10 +848,10 @@ def start_xvfb(timeout=10, attempts=3):
             time.sleep(0.5 * attempt)
 
 
-def _start_xvfb_once(timeout):
+def _start_xvfb_once(timeout, screen=SCREEN):
     r, w = os.pipe()
     proc = subprocess.Popen(
-        ["Xvfb", "-displayfd", str(w), "-screen", "0", f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp"],
+        ["Xvfb", "-displayfd", str(w), "-screen", "0", f"{screen[0]}x{screen[1]}x24", "-nolisten", "tcp"],
         pass_fds=(w,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     os.close(w)
     try:
@@ -891,9 +905,10 @@ class BrowserSearcher:
         from .human import Human
 
         width, height = window_size_for(self.profile_key)
+        self._screen, (left, top) = screen_for(self.profile_key) if self.profile_key is not None else (SCREEN, (0, 0))
         env = {**os.environ, "LANG": "en_US.UTF-8"}
         if not settings.headless and not os.environ.get("DISPLAY") and sys.platform.startswith("linux"):
-            self._xvfb, display = start_xvfb()
+            self._xvfb, display = start_xvfb(screen=self._screen)
             env["DISPLAY"] = display
         if self.profile_key is None:
             self._tmp_profile = tempfile.mkdtemp(prefix="swa-profile-")
@@ -903,7 +918,7 @@ class BrowserSearcher:
             user_dir.mkdir(parents=True, exist_ok=True)
         kw = dict(
             user_data_dir=str(user_dir), headless=settings.headless, env=env,
-            args=[*LAUNCH_ARGS, f"--window-size={width},{height}", "--window-position=0,0"],
+            args=[*LAUNCH_ARGS, f"--window-size={width},{height}", f"--window-position={left},{top}"],
             ignore_default_args=IGNORE_DEFAULT_ARGS,
             no_viewport=True,  # page size comes from the real window, so inner/outer/screen sizes agree
             # No Playwright `locale`: its override trims languages to ["en-US"] / "en-US". With just
@@ -965,7 +980,7 @@ class BrowserSearcher:
             self._xvfb.wait(timeout=5)
         except Exception:
             pass
-        self._xvfb, display = start_xvfb()
+        self._xvfb, display = start_xvfb(screen=getattr(self, "_screen", SCREEN))
         kw.setdefault("env", {})["DISPLAY"] = display
 
     def blocked_reason(self, response=None):
