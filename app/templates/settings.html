@@ -8,8 +8,14 @@
   <form method="post" action="/settings" class="row end">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="grow">Email alerts to <input name="email" type="email" value="{{ user.email }}" placeholder="you@example.com"></label>
+    <label>Send
+      <select name="alert_mode">
+        {% for v, t in [("instant", "each deal as it's found"), ("daily", "a daily digest"), ("weekly", "a weekly digest")] %}
+        <option value="{{ v }}" {{ "selected" if (user.alert_mode or "instant") == v }}>{{ t }}</option>{% endfor %}
+      </select></label>
     <button type="submit" class="primary">Save</button>
   </form>
+  <p class="hint">Digests go out around {{ digest_at }} with the best new deal per trip found since the last one.</p>
 </section>
 
 <section class="card">

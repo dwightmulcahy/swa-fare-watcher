@@ -105,6 +105,12 @@ CREATE TABLE IF NOT EXISTS logs(
   attachment TEXT
 );
 CREATE INDEX IF NOT EXISTS logs_user ON logs(user_id, id);
+CREATE TABLE IF NOT EXISTS digest_hits(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created TEXT NOT NULL,
+  hit TEXT NOT NULL                          -- JSON of the alert, as the instant email would show it
+);
 CREATE TABLE IF NOT EXISTS app_state(
   key TEXT PRIMARY KEY,
   value TEXT
@@ -179,6 +185,8 @@ MIGRATIONS = {
         "auto_login_failures": "INTEGER NOT NULL DEFAULT 0",   # consecutive
         "blocked_until": "TEXT",                 # scheduled runs paused after a block page, until then
         "blocked_reason": "TEXT",
+        "alert_mode": "TEXT NOT NULL DEFAULT 'instant'",   # instant | daily | weekly
+        "digest_sent_at": "TEXT",
     },
     "logs": {
         "attachment": "TEXT",                    # screenshot, relative to the data directory

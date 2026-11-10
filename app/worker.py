@@ -1,6 +1,7 @@
 """Background worker: runs one user's watches at a time in a single browser, plus a daily scheduler."""
 import datetime as dt
 import html
+import json
 import math
 import queue
 import random
@@ -293,9 +294,47 @@ class Worker:
         except Exception as e:
             applog.error(f"Database backup failed: {e.__class__.__name__}: {e}", source="backup")
         try:
+            self.send_digests()
+        except Exception as e:
+            applog.error(f"Digest emails failed: {e.__class__.__name__}: {e}", source="digest")
+        try:
             self.check_stale()
         except Exception as e:
             applog.error(f"Stale-run check failed: {e.__class__.__name__}: {e}", source="scheduler")
+
+    @staticmethod
+    def send_digests(now=None):
+        """Email each daily/weekly user their saved alerts once settings.digest_at has passed and a
+        day (or week) has gone by since the last digest. Keeps only the newest alert per trip."""
+        now = now or dt.datetime.now()
+        h, m = (int(x) for x in settings.digest_at.split(":"))
+        sent = 0
+        for u in db.query("SELECT u.* FROM users u WHERE u.active=1 "
+                          "AND EXISTS (SELECT 1 FROM digest_hits d WHERE d.user_id=u.id)"):
+            mode = u["alert_mode"] or "instant"
+            if mode != "instant":   # switched back to instant: send what's waiting right away
+                if now.time() < dt.time(h, m):
+                    continue
+                gap = dt.timedelta(days=7 if mode == "weekly" else 1) - dt.timedelta(hours=2)
+                if u["digest_sent_at"] and now - dt.datetime.fromisoformat(u["digest_sent_at"]) < gap:
+                    continue
+            rows = db.query("SELECT id, hit FROM digest_hits WHERE user_id=? ORDER BY id", (u["id"],))
+            latest = {}
+            for r in rows:
+                hit = json.loads(r["hit"])
+                t = hit.get("trip") or {}
+                latest[(hit["watch_id"], hit.get("date"), t.get("ret_date"), hit.get("watch"))] = hit
+            hits = sorted(latest.values(), key=lambda x: (x["watch"], x.get("date") or ""))
+            period = "week" if mode == "weekly" else "day"
+            if u["email"] and mailer.send(u["email"], f"SWA fare digest: {len(hits)} deal(s) this {period}",
+                                          mailer.render_hits(hits)):
+                with db.tx() as con:
+                    con.execute(f"DELETE FROM digest_hits WHERE user_id=? AND id<={rows[-1]['id']}", (u["id"],))
+                    con.execute("UPDATE users SET digest_sent_at=? WHERE id=?",
+                                (now.isoformat(timespec="seconds"), u["id"]))
+                applog.info(f"Digest emailed: {len(hits)} deal(s)", user_id=u["id"], source="digest")
+                sent += 1
+        return sent
 
     @staticmethod
     def check_format(attempts, shape_errors, priceless, day=None):
@@ -606,7 +645,18 @@ class Worker:
         applog.info(f"Run {'cancelled' if cancelled else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
-        if hits:
+        if hits and (user["alert_mode"] or "instant") != "instant":
+            with db.tx() as con:   # saved for the digest; counts as alerted so it isn't queued again
+                for h in hits:
+                    con.execute("INSERT INTO digest_hits(user_id, created, hit) VALUES (?,?,?)",
+                                (user_id, db.now(), json.dumps(h, default=str)))
+                record_alerted(con, hits)
+            applog.info(f"{len(hits)} fare alert(s) saved for your {user['alert_mode']} digest",
+                        user_id=user_id, source="run")
+            hits_for_email = []
+        else:
+            hits_for_email = hits
+        if hits_for_email:
             self.phase(user_id, f"Emailing {len(hits)} fare alert(s)", log=False)
             sent = mailer.send(user["email"], f"SWA fare alert: {len(hits)} match(es)",
                                mailer.render_hits(hits))
