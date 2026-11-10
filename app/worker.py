@@ -488,6 +488,7 @@ class Worker:
         pair) and keep the dates and pairs worth a full search.
         Returns (dates, {(leg, date): airport pairs}, calendar loads used, hit the daily cap)."""
         cal, cal_routes, used = {}, {"out": {}, "ret": {}}, 0
+        one_currency = set()
         for leg in ("out", "ret"):
             leg_dates = [d for lg, d in dates if lg == leg]
             if not leg_dates:
@@ -502,7 +503,7 @@ class Worker:
                 a, b = random.sample(("USD", "POINTS"), 2)
                 jobs += [(rt_, m, first, a) for m, first in ms] + [(rt_, m, first, b) for m, first in ms[::-1]]
             lows = {rt_: {} for rt_ in swa.routes(w, leg)}
-            broken = set()
+            failed = set()   # (route, currency) whose calendar couldn't be read
             for j, ((frm, to), month, first, ft) in enumerate(jobs):
                 if cap is not None and db.searches_today(user_id) + 1 > cap:
                     self.phase(user_id, f"{route}: daily search limit reached, stopping",
@@ -515,7 +516,7 @@ class Worker:
                     db.add_searches(con, user_id, 1)
                 used += 1
                 if days is None:
-                    broken.add((frm, to))
+                    failed.add(((frm, to), ft))
                 else:
                     field = "cash" if ft == "USD" else "points"
                     for d, v in days.items():
@@ -528,6 +529,10 @@ class Worker:
                 self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                            watch_id=w["id"], log=False, until=time.time() + pause)
                 self.sleep(pause)
+            # a route is unreadable only if neither currency's calendar could be read; with one,
+            # its days are still ranked by the currency that came back
+            broken = {rt_ for rt_ in swa.routes(w, leg) if {(rt_, "USD"), (rt_, "POINTS")} <= failed}
+            one_currency |= {ft for rt_, ft in failed if rt_ not in broken}
             ts = db.now()
             with db.tx() as con:
                 con.executemany(
@@ -559,8 +564,16 @@ class Worker:
                             if v[f] is not None and (m[f] is None or v[f] < m[f]):
                                 m[f] = v[f]
                 cal[leg] = merged
-        picked = swa.calendar_pick(w, cal, dates, settings.calendar_detail_dates)
-        to_search = swa.calendar_routes(w, cal_routes, picked)
+        w_pick = w
+        if one_currency:
+            # one currency's calendar was unreadable, so its target can't be checked: keep the days
+            # cheapest in the currency that did come back (cash and points prices move together)
+            missing = " and ".join(sorted("cash" if c == "USD" else "points" for c in one_currency))
+            applog.warn(f"{route}: {missing} calendar unreadable; choosing dates by the other currency's lows",
+                        user_id=user_id, watch_id=w["id"], source="run")
+            w_pick = {**dict(w), "max_price": None, "max_points": None}
+        picked = swa.calendar_pick(w_pick, cal, dates, settings.calendar_detail_dates)
+        to_search = swa.calendar_routes(w_pick, cal_routes, picked)
         picked = [x for x in picked if to_search.get(x)]
         return search_order(picked), to_search, used, False
 

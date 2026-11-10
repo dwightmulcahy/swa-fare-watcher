@@ -401,7 +401,9 @@ def calendar_pick(w, cal, legs, limit):
             elif (c is not None or p is not None) and price_ok(c, p, None, w):
                 keep.append((_rank(c, p), d))
         keep.sort()
-        return [("out", d) for _, d in keep[:limit]]
+        # the cap is for days the calendar priced; days it couldn't price are all searched
+        keep = [x for x in keep if x[0] != float("inf")][:limit] + [x for x in keep if x[0] == float("inf")]
+        return [("out", d) for _, d in keep]
 
     pairs = [(o, r) for o, r in trip_pairs(w) if o in by_leg["out"] and r in by_leg["ret"]]
     scored = []
@@ -418,7 +420,7 @@ def calendar_pick(w, cal, legs, limit):
         elif (cash is not None or pts is not None) and price_ok(cash, pts, None, w):
             scored.append((_rank(cash, pts), o, r))
     scored.sort()
-    chosen = scored[:limit]
+    chosen = [x for x in scored if x[0] != float("inf")][:limit] + [x for x in scored if x[0] == float("inf")]
     outs = {o for _, o, _ in chosen}
     rets = {r for _, _, r in chosen}
     return [(leg, d) for leg, d in legs if (d in outs if leg == "out" else d in rets)]
