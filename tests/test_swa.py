@@ -144,3 +144,19 @@ def test_parse_real_southwest_shopping_response():
                                  "depart_after", "depart_before")}, "min_cpp": 0, "max_stops": 1}
     row = lambda k: {**flights[k], "cash": flights[k]["fare"][0], "points": None, "cpp": None}
     assert swa.passes_leg(row("1203/4972"), rule, "out") and not swa.passes_leg(row("502/52/4972"), rule, "out")
+
+
+def test_stop_airports_from_real_response():
+    from pathlib import Path
+    data = json.loads((Path(__file__).parent / "fixtures" / "shopping-SJO-JAX-2027-04-05-USD.json").read_text())
+    flights = {f["flights"]: f for f in swa.parse_flights(data).values()}
+    assert flights["502/52/4972"]["via"] == "MCO HOU"
+    assert flights["1203/4972"]["via"] == "HOU"
+    assert swa.stops_label(2, "MCO HOU") == "2 stops (MCO, HOU)"
+    assert swa.stops_label(1, "HOU") == "1 stop (HOU)" and swa.stops_label(0, "") == "nonstop"
+
+
+def test_stop_within_one_flight_counts_and_is_named():
+    d = {"segments": [{"destinationAirportCode": "JAX", "numberOfStops": 1,
+                       "stopsDetails": [{"destinationAirportCode": "BNA"}, {"destinationAirportCode": "JAX"}]}]}
+    assert swa._stops(d) == 1 and swa._via(d) == "BNA"

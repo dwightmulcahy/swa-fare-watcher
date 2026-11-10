@@ -148,6 +148,31 @@ def _stops(d):
     return max(len(d.get("stopsDetails") or [None]) - 1, 0)
 
 
+def _via(d):
+    """Airports the itinerary stops at, in order ("MCO HOU"): each connection (the end of
+    every segment but the last) and any stop a single flight makes on the way."""
+    out = []
+    segs = d.get("segments") if isinstance(d.get("segments"), list) else []
+    for i, seg in enumerate(segs):
+        if not isinstance(seg, dict):
+            continue
+        legs = [x for x in (seg.get("stopsDetails") or []) if isinstance(x, dict)]
+        for leg in legs[:-1]:                         # stops within one flight
+            if leg.get("destinationAirportCode"):
+                out.append(leg["destinationAirportCode"])
+        if i < len(segs) - 1 and seg.get("destinationAirportCode"):
+            out.append(seg["destinationAirportCode"])  # change of plane
+    return " ".join(out)
+
+
+def stops_label(stops, via=""):
+    """"nonstop", "1 stop (HOU)", "2 stops (MCO, HOU)"."""
+    if not stops:
+        return "nonstop"
+    where = f" ({', '.join(via.split())})" if via else ""
+    return f"{stops} stop{'s' if stops > 1 else ''}{where}"
+
+
 def parse_flights(payload):
     """Return {key: flight dict} or None if the payload shape is unrecognized."""
     try:
@@ -167,6 +192,7 @@ def parse_flights(payload):
                           + (" +1" if d.get("nextDay") else ""),
                 "duration": int(num(d.get("totalDuration")) or 0),
                 "stops": int(stops),
+                "via": _via(d),
                 "fare": lowest_fare(d),
             }
     return out
@@ -487,7 +513,7 @@ def combine(cash, points):
         base = cash.get(k) or points.get(k)
         c = (cash.get(k) or {}).get("fare")
         pf = (points.get(k) or {}).get("fare")
-        r = {key: base[key] for key in ("flights", "depart", "arrive", "duration", "stops")}
+        r = {key: base.get(key) for key in ("flights", "depart", "arrive", "duration", "stops", "via")}
         r["key"] = k
         r["cash"] = c[0] if c else None
         r["points"] = pf[0] if pf else None
