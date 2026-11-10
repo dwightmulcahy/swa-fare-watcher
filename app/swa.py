@@ -19,6 +19,27 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
+# Bot-protection products recognisable by cookie name (diagnostics only: which signals matter
+# depends on which one Southwest uses). F5 BIG-IP ASM / Advanced WAF sets TS<hex> cookies
+# (TSPD_101 is its Bot Defense); Shape (F5 Distributed Cloud Bot Defense) sends per-site
+# request headers like X-AbCd1234-a ... -z.
+PROTECTION_COOKIES = [
+    ("F5 BIG-IP ASM / Bot Defense", re.compile(r"^(TS[0-9a-f]{6,}|TSPD_\w+|BIGipServer\w*|f5avr\w*)$")),
+    ("Akamai Bot Manager", re.compile(r"^(_abck|bm_sz|bm_sv|bm_mi|ak_bmsc)$")),
+    ("Imperva", re.compile(r"^(reese84|incap_ses_\w+|visid_incap_\w+|nlbi_\w+)$")),
+    ("PerimeterX / HUMAN", re.compile(r"^(_px\w*|_pxhd|_pxvid)$")),
+    ("DataDome", re.compile(r"^datadome$")),
+    ("Kasada", re.compile(r"^(x-kpsdk-\w+|KP_UIDz\w*)$", re.I)),
+]
+SHAPE_HEADER = re.compile(r"^x-[a-z0-9]{8}-([a-z])$", re.I)
+
+
+def _site_host():
+    """southwest.com (or the test site's host): the site whose protection is being looked at."""
+    from urllib.parse import urlsplit
+    host = urlsplit(settings.home_url).hostname or "southwest.com"
+    return host[4:] if host.startswith("www.") else host
+
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
 # The Low Fare Calendar's "Shop in: Dollars | Points | $ + Points" switch: buttons labelled
 # aria-label="Select points currency" / "Select dollars currency", aria-pressed when chosen.
@@ -880,6 +901,8 @@ class BrowserSearcher:
             self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
             self.page.set_default_timeout(30_000)
             self.human = Human(self.page)
+            self._protection_headers = set()
+            self._ctx.on("request", self._note_request)
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -927,7 +950,47 @@ class BrowserSearcher:
         self._xvfb, display = start_xvfb()
         kw.setdefault("env", {})["DISPLAY"] = display
 
+    def _note_request(self, req):
+        """Remember protection-style request header names (names only) sent to Southwest."""
+        try:
+            if _site_host() in req.url:
+                for name in req.headers:
+                    if SHAPE_HEADER.match(name):
+                        self._protection_headers.add(SHAPE_HEADER.sub(r"x-…-\1", name))
+        except Exception:
+            pass
+
+    def protection_signals(self):
+        """{vendor: [signal names]} for bot-protection products recognisable from the cookie
+        names this browser holds for southwest.com and the request headers its pages sent.
+        Names only: values are never read into the log."""
+        try:
+            names = {c["name"] for c in self._ctx.cookies() if _site_host() in c.get("domain", "")}
+        except Exception:
+            names = set()
+        found = {}
+        for vendor, pattern in PROTECTION_COOKIES:
+            hits = sorted(n for n in names if pattern.match(n))
+            if hits:
+                found.setdefault(vendor, []).extend(
+                    sorted({re.sub(r"[0-9a-f]{6,}$", "…", h) for h in hits}))
+        if getattr(self, "_protection_headers", None):
+            found.setdefault("F5 Distributed Cloud / Shape (request headers)", []).extend(
+                sorted(self._protection_headers))
+        return found
+
+    def _log_protection(self):
+        sig = self.protection_signals()
+        text = "; ".join(f"{v}: {', '.join(n)}" for v, n in sig.items()) or "none recognised"
+        applog.info(f"Bot protection seen on southwest.com this session: {text}", source="browser",
+                    user_id=self._uid())
+
     def __exit__(self, *exc):
+        if self._ctx and self._warmed:
+            try:
+                self._log_protection()
+            except Exception:
+                pass
         try:
             if self._ctx:
                 self.state = self._ctx.storage_state()

@@ -258,3 +258,19 @@ def test_calendar_months_by_tab_and_currency_by_switch_on_one_page(site, monkeyp
     assert fetches == ["USD 2026-11", "USD 2026-12", "POINTS 2026-12", "POINTS 2026-11"]
     assert nov_usd["2026-11-10"] == 256 and dec_usd == {"2026-12-05": 301.0, "2026-12-06": 199.0, "2026-12-07": None}
     assert dec_pts["2026-12-06"] == 15000 and nov_pts["2026-11-09"] == 38000
+
+
+def test_protection_signals_names_only(site, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.swa import BrowserSearcher
+
+    monkeypatch.setattr(settings, "home_url", site)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with BrowserSearcher(profile_key="t-protect", human=False) as b:
+        b.page.goto(site.replace("index.html", "protected.html"))
+        b.page.wait_for_timeout(800)
+        sig = b.protection_signals()
+    assert sig["F5 BIG-IP ASM / Bot Defense"] == ["TSPD_101", "TS…"]
+    assert sig["F5 Distributed Cloud / Shape (request headers)"] == ["x-…-a", "x-…-b"]
+    assert "opaque" not in str(sig) and "ordinary" not in str(sig)
