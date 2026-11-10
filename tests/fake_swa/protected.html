@@ -4,6 +4,7 @@
 // what protected pages leave behind: F5 ASM cookies and Shape-style request headers
 document.cookie = "TS01a2b3c4d5=opaque; path=/";
 document.cookie = "TSPD_101=opaque; path=/";
+document.cookie = "f5_cspm=opaque; path=/";
 document.cookie = "ordinary=1; path=/";
 fetch("calendar-data-USD.json", { headers: { "X-AbCd1234-a": "x", "X-AbCd1234-b": "y" } });
 </script>
