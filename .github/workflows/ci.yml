@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  PYTHON_VERSION: "3.13"
+  PYTHON_VERSION: "3.15"   # same as the Docker image
   IMAGE: app:ci
   PORT: "8080"
 
