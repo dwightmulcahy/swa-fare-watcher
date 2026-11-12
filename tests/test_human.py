@@ -238,3 +238,22 @@ def test_screen_per_user_is_bigger_than_the_window_and_stable():
         assert swa.screen_for(key) == ((sw, sh), (x, y))                # same desk every run
         seen.add((sw, sh))
     assert len(seen) >= 3                                               # users differ
+
+
+def test_persona_is_stable_per_user_and_differs_between_users():
+    from app.human import persona
+    a, b = persona(1), persona(2)
+    assert persona(1) == a and a != b
+    assert persona(None) == {}
+    people = [persona(i) for i in range(200)]
+    assert 0.2 < sum(p["scroll"] == "trackpad" for p in people) / 200 < 0.5
+    assert all(0.8 <= p["speed"] <= 1.35 and 0.01 <= p["typo_rate"] <= 0.06 for p in people)
+
+
+def test_trackpad_scroll_is_many_small_coasting_events():
+    page, h, _ = make(persona={"scroll": "trackpad", "speed": 1.0})
+    h.scroll(600)
+    deltas = [e[1] for e in page.log if e[0] == "wheel"]
+    assert len(deltas) >= 15 and all(0 < d < 100 for d in deltas)
+    assert abs(sum(deltas) - 600) < 40
+    assert max(deltas) > deltas[-1]                     # slows down at the end of a swipe

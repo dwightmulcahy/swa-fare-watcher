@@ -1040,7 +1040,7 @@ class BrowserSearcher:
     def __enter__(self):
         from playwright.sync_api import sync_playwright
 
-        from .human import Human
+        from .human import Human, persona
 
         width, height = window_size_for(self.profile_key)
         self._screen, (left, top) = screen_for(self.profile_key) if self.profile_key is not None else (SCREEN, (0, 0))
@@ -1075,7 +1075,7 @@ class BrowserSearcher:
                 self._ctx.add_cookies(self.state["cookies"])
             self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
             self.page.set_default_timeout(30_000)
-            self.human = Human(self.page)
+            self.human = Human(self.page, persona=persona(self.profile_key))
             self._protection_headers = set()
             self._ctx.on("request", self._note_request)
         except BaseException:

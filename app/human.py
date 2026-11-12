@@ -4,6 +4,7 @@ Everything goes through page.mouse / page.keyboard, so the browser sees trusted
 input events (mousemove, mousedown, keydown, input, wheel) with realistic timing,
 not synthetic element.click() / fill() calls.
 """
+import hashlib
 import math
 import random
 import time
@@ -46,7 +47,7 @@ def _ease(t):
     return t**3 * (10 - 15 * t + 6 * t * t)
 
 
-def path(start, end, rng, steps=None):
+def path(start, end, rng, steps=None, tremor=0.6):
     """Points along a curved, eased path from start to end with slight hand tremor."""
     (x0, y0), (x1, y1) = start, end
     dist = math.hypot(x1 - x0, y1 - y0)
@@ -65,10 +66,27 @@ def path(start, end, rng, steps=None):
         t = _ease(i / steps)
         x, y = _bezier((x0, y0), c1, c2, (x1, y1), t)
         if i < steps:  # hand tremor, independent on each axis
-            x += rng.gauss(0, 0.6)
-            y += rng.gauss(0, 0.6)
+            x += rng.gauss(0, tremor)
+            y += rng.gauss(0, tremor)
         pts.append((x, y))
     return pts
+
+
+def persona(key):
+    """One person's habits, the same every run for the same key (user): how fast they move and
+    type, how often they mistype, whether they scroll with a mouse wheel or a trackpad, how long
+    they read and how often they overshoot. Each run still varies within those habits."""
+    if key is None:
+        return {}
+    r = random.Random(int(hashlib.sha256(f"persona:{key}".encode()).hexdigest(), 16))
+    return {
+        "speed": round(r.uniform(0.8, 1.35), 3),           # >1 = slower
+        "typo_rate": round(r.uniform(0.01, 0.06), 3),
+        "scroll": "trackpad" if r.random() < 0.35 else "wheel",
+        "reading": round(r.uniform(0.7, 1.5), 3),          # how long pages are looked at
+        "overshoot": round(r.uniform(0.15, 0.45), 3),      # chance a long mouse move overshoots
+        "tremor": round(r.uniform(0.35, 0.9), 3),          # hand steadiness (px)
+    }
 
 
 class Human:
@@ -77,12 +95,17 @@ class Human:
 
     WHEEL_NOTCH = 100  # Chrome on Windows/Linux reports 100 px per wheel notch at 100% zoom
 
-    def __init__(self, page, rng=None, sleep=time.sleep, typo_rate=0.03, speed=1.0):
+    def __init__(self, page, rng=None, sleep=time.sleep, typo_rate=0.03, speed=1.0, persona=None):
         self.page = page
         self.rng = rng or random.Random()
         self.sleep = sleep
-        self.typo_rate = typo_rate
-        self.speed = speed  # >1 = slower person
+        p = persona or {}
+        self.typo_rate = p.get("typo_rate", typo_rate)
+        self.speed = p.get("speed", speed)  # >1 = slower person
+        self.scroll_device = p.get("scroll", "wheel")
+        self.reading = p.get("reading", 1.0)
+        self.overshoot_rate = p.get("overshoot", 0.3)
+        self.tremor = p.get("tremor", 0.6)
         vp = page.viewport_size
         if not vp:  # real window size (no_viewport contexts)
             try:
@@ -119,7 +142,7 @@ class Human:
         x = min(max(x, 1), self.w - 2)
         y = min(max(y, 1), self.h - 2)
         dist = math.hypot(x - self.pos[0], y - self.pos[1])
-        if overshoot and dist > 250 and self.rng.random() < 0.3:
+        if overshoot and dist > 250 and self.rng.random() < self.overshoot_rate:
             ang = math.atan2(y - self.pos[1], x - self.pos[0])
             over = self.rng.uniform(8, 25)
             self._glide((x + math.cos(ang) * over, y + math.sin(ang) * over))
@@ -127,7 +150,7 @@ class Human:
         self._glide((x, y))
 
     def _glide(self, target):
-        pts = path(self.pos, target, self.rng)
+        pts = path(self.pos, target, self.rng, tremor=self.tremor)
         per_step = self.rng.uniform(0.006, 0.014) * self.speed
         for px, py in pts:
             self.page.mouse.move(px, py)
@@ -240,6 +263,8 @@ class Human:
     def scroll(self, dy):
         """Wheel-scroll roughly dy pixels. Every event is one notch of the same size, like a real
         wheel; speed shows up as timing: quick bursts of notches with short gaps, then pauses."""
+        if self.scroll_device == "trackpad":
+            return self._swipe(dy)
         notches = max(1, round(abs(dy) / self.WHEEL_NOTCH))
         step = self.WHEEL_NOTCH if dy > 0 else -self.WHEEL_NOTCH
         while notches > 0:
@@ -252,6 +277,24 @@ class Human:
                 self.sleep(self.rng.uniform(0.08, 0.35) * self.speed)
                 if self.rng.random() < 0.12:
                     self.pause(0.3, 0.9)
+
+    def _swipe(self, dy):
+        """Trackpad scrolling: one or more two-finger swipes, each a run of small wheel events
+        (~60 per second) that speed up and then coast down, with a little sideways drift."""
+        left = abs(dy)
+        sign = 1 if dy > 0 else -1
+        while left > 2:
+            part = min(left, self.rng.uniform(250, 700))
+            n = max(4, int(part / self.rng.uniform(14, 26)))
+            weights = [math.sin(math.pi * (i + 0.5) / n) ** 1.5 * (1 - 0.5 * i / n) for i in range(n)]
+            total = sum(weights)
+            for wgt in weights:
+                step = part * wgt / total
+                self.page.mouse.wheel(round(self.rng.gauss(0, 0.6)), sign * max(1, round(step)))
+                self.sleep(self.rng.uniform(0.012, 0.02))
+            left -= part
+            if left > 2:
+                self.sleep(self.rng.uniform(0.15, 0.5) * self.speed)
 
     def _scroll_y(self):
         try:
@@ -287,7 +330,8 @@ class Human:
 
     def read(self, seconds=None):
         """Look over a page: wander, scroll down a bit, maybe back up, dwell."""
-        end = time.monotonic() + (seconds if seconds is not None else self.rng.uniform(2.5, 6.0)) * self.speed
+        base = seconds if seconds is not None else self.rng.uniform(2.5, 6.0) * self.reading
+        end = time.monotonic() + base * self.speed
         self.wander(1)
         for _ in range(self.rng.randint(1, 3)):
             self.scroll(self.rng.uniform(150, 600))
