@@ -186,3 +186,26 @@ def test_ui_waits_are_random_and_failures_pause_before_retry(monkeypatch):
     b._load = lambda *a: {"x": {}}              # ...so the address is loaded, after a pause
     assert b.search("DAL", "HOU", "2027-01-05", 1, "USD") == {"x": {}}
     assert calls == ["wander", (4, 12)]
+
+
+def test_idle_fidgets_and_stops_on_cancel(monkeypatch):
+    import random as _r
+    clock = [0.0]
+    monkeypatch.setattr(swa.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(swa.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    did = []
+
+    class H:
+        rng = _r.Random(4)
+        def drift(self): did.append("drift")
+        def scroll(self, dy): did.append("scroll")
+
+    b = swa.BrowserSearcher(human=True)
+    b.human, b.page = H(), object()
+    b.idle(60)
+    assert clock[0] == pytest.approx(60) and "drift" in did
+    assert 2 <= len(did) <= 40                    # occasional, not constant
+    did.clear()
+    start = clock[0]
+    b.idle(60, stop=lambda: True)
+    assert clock[0] == start and not did

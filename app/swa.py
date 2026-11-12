@@ -1324,6 +1324,29 @@ class BrowserSearcher:
 
     _form_works = None     # None = untried, False = the form failed this session (use addresses)
 
+    def idle(self, seconds, stop=lambda: False):
+        """Wait `seconds` like a person between searches: mostly still, now and then nudging the
+        mouse or scrolling a little. (Switching tabs on long breaks was tried: under Playwright the
+        page keeps reporting itself visible, so a tab switch would show the site nothing.)"""
+        end = time.monotonic() + seconds
+        rng = self.human.rng if self.human else random
+        human = self.humanize and self.human is not None and self.page is not None
+        while not stop():
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(left, rng.uniform(1.5, 7)))
+            if not human or stop() or end - time.monotonic() < 1:
+                continue
+            r = rng.random()
+            try:
+                if r < 0.35:
+                    self.human.drift()
+                elif r < 0.45:
+                    self.human.scroll(rng.choice((1, 1, -1)) * rng.uniform(80, 250))
+            except Exception:
+                pass
+
     def _beat(self, lo, hi):
         """A short, never-identical wait between UI steps (seconds)."""
         rng = self.human.rng if self.human else random

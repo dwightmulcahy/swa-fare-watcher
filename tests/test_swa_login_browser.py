@@ -439,3 +439,4 @@ def test_points_calendar_opened_from_the_form(site, monkeypatch, tmp_path):
         url = b.page.url
     assert days == {"2026-11-09": 38000.0, "2026-11-10": 19500.0, "2026-11-11": None}
     assert "calendar.html" in url and "fareType=POINTS" in url and b._form_works is True
+

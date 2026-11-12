@@ -328,6 +328,11 @@ class Human:
                          overshoot=False)
             self.pause(0.2, 1.2)
 
+    def drift(self):
+        """A small, slow nudge of a resting hand on the mouse."""
+        dx, dy = self.rng.gauss(0, 25), self.rng.gauss(0, 15)
+        self.move_to(self.pos[0] + dx, self.pos[1] + dy, overshoot=False)
+
     def read(self, seconds=None):
         """Look over a page: wander, scroll down a bit, maybe back up, dwell."""
         base = seconds if seconds is not None else self.rng.uniform(2.5, 6.0) * self.reading
