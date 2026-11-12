@@ -160,3 +160,29 @@ def test_stop_within_one_flight_counts_and_is_named():
     d = {"segments": [{"destinationAirportCode": "JAX", "numberOfStops": 1,
                        "stopsDetails": [{"destinationAirportCode": "BNA"}, {"destinationAirportCode": "JAX"}]}]}
     assert swa._stops(d) == 1 and swa._via(d) == "BNA"
+
+
+def test_ui_waits_are_random_and_failures_pause_before_retry(monkeypatch):
+    import random as _r
+    waits, calls = [], []
+
+    class Page:
+        def wait_for_timeout(self, ms):
+            waits.append(ms)
+
+    class H:
+        rng = _r.Random(1)
+        def wander(self, n): calls.append("wander")
+        def pause(self, lo, hi): calls.append((lo, hi))
+
+    b = swa.BrowserSearcher(human=True)
+    b.page, b.human = Page(), H()
+    for _ in range(20):
+        b._beat(0.1, 0.35)
+    assert len(set(waits)) > 10 and all(100 <= w <= 350 for w in waits)
+    monkeypatch.setattr(swa.settings, "form_share", 1.0)
+    b._warmed = True
+    b._form_search = lambda *a: None            # the form didn't work...
+    b._load = lambda *a: {"x": {}}              # ...so the address is loaded, after a pause
+    assert b.search("DAL", "HOU", "2027-01-05", 1, "USD") == {"x": {}}
+    assert calls == ["wander", (4, 12)]

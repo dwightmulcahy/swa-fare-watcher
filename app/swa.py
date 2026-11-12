@@ -1309,10 +1309,13 @@ class BrowserSearcher:
             if got is not None:
                 self._shown = (origin, dest, date, adults, fare_type) if got else None
                 return got
+            self._regroup(2, 6)
         self._shown = None
         flights = None
         if self._form_works is not False and random.random() < settings.form_share:
             flights = self._form_search(origin, dest, date, adults, fare_type, tag)   # like a person
+            if flights is None:
+                self._regroup(4, 12)
         if flights is None:
             flights = self._load(origin, dest, date, adults, fare_type, tag)          # like a bookmark
         if flights:
@@ -1320,6 +1323,22 @@ class BrowserSearcher:
         return flights
 
     _form_works = None     # None = untried, False = the form failed this session (use addresses)
+
+    def _beat(self, lo, hi):
+        """A short, never-identical wait between UI steps (seconds)."""
+        rng = self.human.rng if self.human else random
+        self.page.wait_for_timeout(int(rng.uniform(lo, hi) * 1000))
+
+    def _regroup(self, lo, hi):
+        """After something didn't work, take a moment (look around) before trying another way,
+        instead of firing the retry straight away."""
+        if not self.humanize:
+            return
+        try:
+            self.human.wander(1)
+            self.human.pause(lo, hi)
+        except Exception:
+            pass
 
     def _click(self, el):
         if self.humanize:
@@ -1338,7 +1357,7 @@ class BrowserSearcher:
             btn = self.page.locator(COOKIE_ACCEPT)
             if btn.count() and btn.first.is_visible():
                 self._click(btn.first)
-                self.page.wait_for_timeout(600)
+                self._beat(0.4, 1.1)
         except Exception:
             pass
 
@@ -1386,7 +1405,7 @@ class BrowserSearcher:
                 raise RuntimeError(f"no suggestion for {code}")
         else:
             el.press("Enter")
-        self.page.wait_for_timeout(300)
+        self._beat(0.2, 0.6)
         if code not in (el.input_value(timeout=5000) or "").upper():
             raise RuntimeError(f"{code} didn't stick in {selector}")
 
@@ -1429,7 +1448,7 @@ class BrowserSearcher:
             step = page.locator('button[aria-label="inc"]' if adults > have else 'button[aria-label="dec"]').first
             for _ in range(abs(adults - have)):
                 self._click(step)
-                page.wait_for_timeout(150)
+                self._beat(0.1, 0.35)
             pax.press("Escape")
             if int(num(pax.input_value(timeout=5000)) or 0) != adults:
                 raise RuntimeError("the passenger count didn't stick")
