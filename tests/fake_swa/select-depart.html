@@ -3,6 +3,12 @@
 <!-- Southwest's date strip (trimmed markup): every bookable day, scrolled sideways -->
 <div aria-label="Flight date calendar"><div role="tablist" id="strip"
      style="display:flex; overflow-x:auto; width:600px; white-space:nowrap"></div></div>
+<!-- "Shop in" switch (trimmed real markup) -->
+<div aria-label="Shop in" role="group"><input aria-controls="currency-list" aria-expanded="false"
+  aria-label="Select currency type" id="currency" role="combobox" type="text" value="Dollars" readonly>
+  <ul id="currency-list" role="listbox" hidden><li role="option" id="currency-item-0"><span>Dollars</span></li>
+  <li role="option" id="currency-item-1"><span>Points</span></li>
+  <li role="option" id="currency-item-2"><span>$ + Points</span></li></ul></div>
 <script>
 // Asks for fares like the real page; on a day with no flights, Southwest sends you to the
 // Low Fare Calendar with a "Wanna look for another day?" banner.
@@ -35,5 +41,13 @@ function load() {
     .then((r) => r.json())
     .then((d) => { if (!d.data) location.replace("calendar.html?noflights=1&" + q.toString()); });
 }
+const cur = document.getElementById("currency"), curList = document.getElementById("currency-list");
+cur.value = q.get("fareType") === "POINTS" ? "Points" : "Dollars";
+cur.onclick = () => { curList.hidden = false; cur.setAttribute("aria-expanded", "true"); };
+curList.querySelectorAll("[role=option]").forEach((o) => o.onclick = () => {
+  const name = o.textContent.trim();
+  cur.value = name; curList.hidden = true; cur.setAttribute("aria-expanded", "false");
+  q.set("fareType", name === "Points" ? "POINTS" : "USD");
+  history.pushState({}, "", "?" + q.toString()); load(); });
 load();
 </script>

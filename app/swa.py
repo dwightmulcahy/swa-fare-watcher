@@ -72,6 +72,10 @@ FORM = {
     "submit": "#flightBookingSubmit",
 }
 COOKIE_ACCEPT = "#onetrust-accept-btn-handler"      # OneTrust cookie banner
+# The results page's "Shop in" switch: <input id="currency" role="combobox" value="Dollars">
+# with <ul id="currency-list" role="listbox"> options Dollars / Points / $ + Points.
+CURRENCY_FIELD = 'input#currency[role=combobox]'
+CURRENCY_NAMES = {"USD": "Dollars", "POINTS": "Points"}
 
 SEARCH_URL = "https://www.southwest.com/air/booking/select-depart.html"
 # The Low Fare Calendar's "Shop in: Dollars | Points | $ + Points" switch: buttons labelled
@@ -1332,6 +1336,12 @@ class BrowserSearcher:
         if not self._warmed:
             self.warm_up()
         sh = self._shown
+        if sh and sh[:4] == (origin, dest, date, adults) and sh[4] != fare_type and self._switch_works is not False:
+            got = self._switch(fare_type, tag)        # same flights, other currency: "Shop in" switch
+            if got is not None:
+                self._shown = (origin, dest, date, adults, fare_type) if got else None
+                return got
+            self._regroup(2, 6)
         if (sh and sh[:2] == (origin, dest) and sh[3] == adults and sh[4] == fare_type and sh[2] != date
                 and self._strip_works is not False):
             got = self._strip(date, tag)
@@ -1570,6 +1580,71 @@ class BrowserSearcher:
         flights = parse_flights(payload)
         if flights is None and self._no_flights_page(6_000):
             return self._no_flights(tag)
+        if self.humanize:
+            try:
+                self.human.read()
+            except Exception:
+                pass
+        return self._parse(payload, tag) if flights is None else flights
+
+    _switch_works = None   # None = untried, False = no usable "Shop in" switch this session
+
+    def _switch(self, fare_type, tag):
+        """Show the same day's flights in the other currency with the results page's "Shop in"
+        switch (Dollars / Points), like a person. Returns the flights, or None if there's no
+        switch or it didn't bring that currency's fares (the caller then searches again)."""
+        want = CURRENCY_NAMES[fare_type]
+        field = self.page.locator(CURRENCY_FIELD).first
+        try:
+            present = field.count() and field.is_visible()
+        except Exception:
+            present = False
+        if not present:
+            if self._switch_works is None:
+                self._switch_works = False
+                applog.info(f"{tag}: no Shop in switch on the results page; searching each currency "
+                            "separately", source="search", user_id=self._uid())
+            return None
+        try:
+            with self.page.expect_response(
+                lambda r: SHOPPING_API in r.url and r.request.method == "POST", timeout=20_000
+            ) as info:
+                if self.humanize:
+                    self.human.pause(1.0, 3.0)
+                self._click(field)
+                listbox = field.get_attribute("aria-controls", timeout=5000) or "currency-list"
+                opt = self.page.locator(f'[id="{listbox}"] [role=option]',
+                                        has_text=re.compile(rf"^\s*{re.escape(want)}\s*$")).first
+                opt.wait_for(state="visible", timeout=5000)
+                self._click(opt)
+            resp = info.value
+            payload = resp.json()
+            asked = (resp.request.post_data or "") + " " + self.page.url
+        except Exception as e:
+            if self._no_flights_page(3_000):
+                return self._no_flights(tag)
+            self.check_blocked("flight search")
+            self._switch_works = False
+            applog.warn(f"{tag}: switching Shop in to {want} didn't bring fares ({e.__class__.__name__}); "
+                        "searching each currency separately", source="search", user_id=self._uid(),
+                        attachment=self.capture(tag + "-switch"))
+            return None
+        try:
+            shown = field.input_value(timeout=3000)
+        except Exception:
+            shown = ""
+        if fare_type not in asked and shown != want:
+            self._switch_works = False
+            applog.warn(f"{tag}: the Shop in switch's fare request wasn't for {want}; searching each "
+                        "currency separately", source="search", user_id=self._uid())
+            return None
+        flights = parse_flights(payload)
+        if flights is None and self._no_flights_page(6_000):
+            return self._no_flights(tag)
+        if self._switch_works is None:
+            applog.info(f"{tag}: switched Shop in to {want} on the results page", source="search",
+                        user_id=self._uid())
+        self._switch_works = True
         if self.humanize:
             try:
                 self.human.read()
