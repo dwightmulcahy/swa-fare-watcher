@@ -60,6 +60,12 @@ class Settings:
         self.calendar_detail_dates = int(_env("SWA_CALENDAR_DETAIL_DATES", "6"))
         lo, hi = (float(x) for x in _env("SWA_SEARCH_DELAY", "8,20").split(","))
         self.search_delay = (lo, hi)
+        # A run is split into visits of this many page loads (random in range; 0,0 = one visit)...
+        lo, hi = (int(x) for x in _env("SWA_VISIT_SEARCHES", "6,14").split(","))
+        self.visit_searches = (max(1, lo), max(hi, lo)) if hi > 0 else (0, 0)
+        # ...with a break of this many minutes between visits (browser closed)
+        lo, hi = (float(x) for x in _env("SWA_VISIT_BREAK", "20,90").split(","))
+        self.visit_break = (lo, max(hi, lo))
         self.max_dates_per_watch = int(_env("MAX_DATES_PER_WATCH", "31"))
         # Defaults applied to new users (admin can change per user; blank = unlimited)
         self.default_max_watches = int(_env("DEFAULT_MAX_WATCHES", "5"))
