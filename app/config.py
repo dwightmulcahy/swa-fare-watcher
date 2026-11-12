@@ -22,6 +22,10 @@ class Settings:
         self.daily_at = _env("SWA_DAILY_AT", "07:20")
         # Each day's run starts at a random time within ± this many minutes of daily_at
         self.daily_jitter_min = max(0, int(_env("SWA_DAILY_JITTER_MINUTES", "45")))
+        # Each user keeps their own usual time within ± this many minutes of daily_at (spread apart)
+        self.user_spread_min = max(0, int(_env("SWA_USER_SPREAD_MINUTES", "120")))
+        # Chance a user's search is skipped on a given day (never two days running; 0 = never)
+        self.skip_day_chance = max(0.0, min(0.5, float(_env("SWA_SKIP_DAY_CHANCE", "0.12"))))
         self.scheduler = _bool("SWA_SCHEDULER", True)
         self.base_url = _env("BASE_URL", "http://localhost:8080").rstrip("/")
         self.cookie_secure = _bool("COOKIE_SECURE", False)

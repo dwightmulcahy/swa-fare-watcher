@@ -303,3 +303,36 @@ def test_priceless_detects_flights_without_fares():
     assert swa.priceless({"a": {"fare": None}, "b": {"fare": None}})
     assert not swa.priceless({"a": {"fare": None}, "b": {"fare": (100.0, 5.6)}})
     assert not swa.priceless({}) and not swa.priceless(None)
+
+
+def test_users_keep_their_own_time_and_start_apart():
+    from app.worker import plan_users, user_offset
+    assert user_offset(1, 120) == user_offset(1, 120) and user_offset(1, 120) != user_offset(2, 120)
+    assert all(-120 <= user_offset(u, 120) <= 120 for u in range(100)) and user_offset(5, 0) == 0
+    day, now = dt.date(2027, 1, 5), dt.datetime(2027, 1, 5, 4, 0)
+    plan = plan_users(list(range(1, 9)), day, now, "07:20", 120, 30, rng=random.Random(3))
+    times = [t for t, _ in plan]
+    assert times == sorted(times) and all(b - a >= dt.timedelta(minutes=20) for a, b in zip(times, times[1:]))
+    for u in (1, 2, 3):   # each user near their usual time, on different days
+        usual = dt.datetime(2027, 1, 5, 7, 20) + dt.timedelta(minutes=user_offset(u, 120))
+        t = dict((uid, t) for t, uid in plan_users([u], day, now, "07:20", 120, 30, rng=random.Random(9)))[u]
+        assert abs(t - usual) <= dt.timedelta(minutes=30, seconds=1)
+    late = dt.datetime(2027, 1, 5, 12, 0)
+    assert all(t > late for t, _ in plan_users([1, 2], day, late, "07:20", 120, 30))
+
+
+def test_skip_day_never_twice_running_or_with_a_booking():
+    import json
+    from app.worker import skip_today
+
+    class Always:
+        def random(self): return 0.0
+    uid = make_user()
+    d1, d2, d3 = dt.date(2027, 1, 5), dt.date(2027, 1, 6), dt.date(2027, 1, 7)
+    assert skip_today(uid, d1, 0.1, rng=Always()) is True
+    assert skip_today(uid, d2, 0.1, rng=Always()) is False        # skipped yesterday
+    assert skip_today(uid, d3, 0.1, rng=Always()) is True
+    assert skip_today(uid, d3, 0.0, rng=Always()) is False
+    other = make_user(username="b2", email="b2@x")
+    make_watch(other, booked=json.dumps([{"leg": "out", "date": "2027-02-01", "cash": 200}]))
+    assert skip_today(other, d1, 0.5, rng=Always()) is False      # a booked flight to watch
