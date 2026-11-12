@@ -943,6 +943,34 @@ IGNORE_DEFAULT_ARGS = [
 ]
 
 
+# With SWA_GPU: draw through ANGLE on Vulkan (Mesa's Intel/AMD drivers talk to the render node
+# directly, no X server GPU needed, so it works under Xvfb). WebGL then reports the real chip,
+# e.g. "ANGLE (Intel, Vulkan 1.3 (Intel(R) UHD Graphics 600 (GLK 3)), Intel open-source Mesa driver)".
+GPU_ARGS = [
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--use-angle=vulkan",
+    "--enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+]
+_gpu_warned = False
+
+
+def gpu_args():
+    """Extra Chrome flags for SWA_GPU, or [] (with a one-time warning) if the device isn't usable."""
+    global _gpu_warned
+    if not settings.gpu:
+        return []
+    dev = settings.gpu_device
+    if os.access(dev, os.R_OK | os.W_OK):
+        return list(GPU_ARGS)
+    if not _gpu_warned:
+        _gpu_warned = True
+        why = "doesn't exist (pass it in: devices: [/dev/dri:/dev/dri])" if not os.path.exists(dev) else \
+              f"isn't readable and writable by uid {os.getuid()} (on the host: chmod 666 {dev})"
+        applog.warn(f"SWA_GPU is on but {dev} {why}; using Chrome's software renderer", source="browser")
+    return []
+
+
 def window_size_for(key):
     if key is None:
         return WINDOW_SIZES[0]
@@ -1056,7 +1084,8 @@ class BrowserSearcher:
             user_dir.mkdir(parents=True, exist_ok=True)
         kw = dict(
             user_data_dir=str(user_dir), headless=settings.headless, env=env,
-            args=[*LAUNCH_ARGS, f"--window-size={width},{height}", f"--window-position={left},{top}"],
+            args=[*LAUNCH_ARGS, *gpu_args(), f"--window-size={width},{height}",
+                  f"--window-position={left},{top}"],
             ignore_default_args=IGNORE_DEFAULT_ARGS,
             no_viewport=True,  # page size comes from the real window, so inner/outer/screen sizes agree
             # No Playwright `locale`: its override trims languages to ["en-US"] / "en-US". With just
@@ -2009,7 +2038,9 @@ def selftest(verbose=True):
                   f"{sorted(set(ev['wheels']))}, mouse moves {ev['moves']}, clicks {ev['trustedClicks']}, "
                   f"cdp leak {ev['cdp']}")
             if info["gl"] and "SwiftShader" in info["gl"]:
-                print("note: WebGL is software-rendered (SwiftShader); sites can tell there's no GPU")
+                print("note: WebGL is software-rendered (SwiftShader); sites can tell there's no GPU"
+                      + (" - SWA_GPU is on but the GPU wasn't used (see the browser log)" if settings.gpu
+                         else "; see SWA_GPU in the README"))
         if problems:
             raise SystemExit("selftest FAILED: " + "; ".join(problems))
     print("selftest ok")

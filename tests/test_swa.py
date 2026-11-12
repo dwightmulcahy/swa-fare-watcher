@@ -223,3 +223,17 @@ def test_airport_query_is_sometimes_the_city_name():
     assert {b._airport_query("SJO") for _ in range(30)} == {"SJO"}        # "San José": typed as the code
     b.humanize = False
     assert b._airport_query("HOU") == "HOU"
+
+
+def test_gpu_flags_only_when_device_usable(monkeypatch, tmp_path):
+    monkeypatch.setattr(swa.settings, "gpu", False)
+    assert swa.gpu_args() == []
+    monkeypatch.setattr(swa.settings, "gpu", True)
+    monkeypatch.setattr(swa, "_gpu_warned", False)
+    monkeypatch.setattr(swa.settings, "gpu_device", str(tmp_path / "missing"))
+    assert swa.gpu_args() == []
+    dev = tmp_path / "renderD128"
+    dev.write_text("")
+    monkeypatch.setattr(swa.settings, "gpu_device", str(dev))
+    args = swa.gpu_args()
+    assert "--use-angle=vulkan" in args and "--ignore-gpu-blocklist" in args
