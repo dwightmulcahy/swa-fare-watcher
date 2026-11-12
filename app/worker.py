@@ -117,6 +117,78 @@ def search_order(dates, rng=random):
     return out
 
 
+class Visits:
+    """The browser for one run, split into visits like a person's: after a handful of searches
+    (SWA_VISIT_SEARCHES) the browser closes, the worker takes a break (SWA_VISIT_BREAK minutes),
+    then a new visit starts at the home page with the same profile. Everything else is passed
+    through to the current searcher."""
+
+    def __init__(self, worker, user_id, factory, state, remaining=lambda: 0, rng=random):
+        self._worker, self._uid, self._factory, self._rng = worker, user_id, factory, rng
+        self._remaining = remaining
+        self._inner = None
+        self._state = state
+        self._shape_errors = 0
+        self.visits = 0
+        self._new_quota()
+
+    def _new_quota(self):
+        lo, hi = settings.visit_searches
+        self._quota = self._rng.randint(lo, hi) if hi > 0 else None
+        self._count = 0
+
+    def __enter__(self):
+        self._inner = self._factory(self._state)
+        self._inner.__enter__()
+        self.visits += 1
+        return self
+
+    def __exit__(self, *exc):
+        inner, self._inner = self._inner, None
+        if inner is not None:
+            inner.__exit__(*exc)
+            self._state = getattr(inner, "state", self._state)
+            self._shape_errors += getattr(inner, "shape_errors", 0)
+
+    @property
+    def state(self):
+        return getattr(self._inner, "state", self._state) if self._inner is not None else self._state
+
+    def __getattr__(self, name):
+        if name.startswith("_") or self.__dict__.get("_inner") is None:
+            raise AttributeError(name)
+        attr = getattr(self._inner, name)       # AttributeError if this searcher hasn't got it
+        if name in ("search", "calendar"):      # page loads: counted towards the visit
+            def counted(*a, **kw):
+                self._tick()
+                return getattr(self._inner, name)(*a, **kw)
+            return counted
+        return attr
+
+    @property
+    def shape_errors(self):
+        return self._shape_errors + getattr(self._inner, "shape_errors", 0)
+
+    def _tick(self):
+        """Before a page load: start a new visit first if this one has had its share. A visit
+        with only a few searches left just finishes them, as anyone would."""
+        if (self._quota is not None and self._count >= self._quota and self._remaining() > 3
+                and not self._worker._stop(self._uid)):
+            self.__exit__(None, None, None)
+            lo, hi = settings.visit_break
+            pause = self._rng.uniform(lo, hi) * 60
+            back = dt.datetime.now() + dt.timedelta(seconds=pause)
+            self._worker.phase(self._uid, f"Taking a break between visits; back around {back:%H:%M}",
+                               until=time.time() + pause)
+            self._worker._pause(self._uid, pause)
+            self._new_quota()
+            self.__enter__()
+            if not self._worker._stop(self._uid):
+                self._worker.phase(self._uid, "Back on southwest.com for another visit")
+        self._count += 1
+
+
+
 ALERT_LIMIT = 5      # fares per watch in one email
 BEST_KEY = "__best__"   # alerted row holding the cheapest cash and points emailed so far per watch
 
@@ -538,7 +610,9 @@ class Worker:
         searcher = None
         try:
             self.phase(user_id, "Starting the browser")
-            with self.searcher_factory(state, profile_key=user_id) as searcher:
+            visits = Visits(self, user_id, lambda st: self.searcher_factory(st, profile_key=user_id), state,
+                            remaining=lambda: total - done)
+            with visits as searcher:
                 try:
                     if creds and hasattr(searcher, "ensure_signed_in"):
                         self.phase(user_id, "Opening southwest.com and checking you're signed in")

@@ -187,6 +187,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time. **`TZ` must match where the server's internet connection is** (checked at start) |
 | `SWA_SKIP_TZ_CHECK` | `false` | Skip the start-up time zone check (e.g. behind a VPN you trust) |
 | `SWA_DAILY_JITTER_MINUTES` | `45` | Each day starts at a random time within ± this of `SWA_DAILY_AT`; users run in a shuffled order |
+| `SWA_VISIT_SEARCHES` | `6,14` | A run is split into visits of this many page loads (random each visit); the browser closes between them. `0,0` = one visit per run |
+| `SWA_VISIT_BREAK` | `20,90` | Minutes between visits; the next one starts at the home page with the same browser profile. Long watches take hours this way |
 | `SWA_USER_SPREAD_MINUTES` | `120` | Each user gets their own usual time within ± this of `SWA_DAILY_AT` (fixed per user), plus the daily jitter; users start at least 20 min apart |
 | `SWA_SKIP_DAY_CHANCE` | `0.12` | Chance a user takes a day off from searching (never two days running, never with a booked flight to watch); `0` = every day |
 | `SWA_SCHEDULER` | `true` | `false` disables the daily run (manual runs still work) |

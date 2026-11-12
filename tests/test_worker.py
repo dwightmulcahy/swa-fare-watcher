@@ -336,3 +336,37 @@ def test_skip_day_never_twice_running_or_with_a_booking():
     other = make_user(username="b2", email="b2@x")
     make_watch(other, booked=json.dumps([{"leg": "out", "date": "2027-02-01", "cash": 200}]))
     assert skip_today(other, d1, 0.5, rng=Always()) is False      # a booked flight to watch
+
+
+def test_run_is_split_into_visits_with_breaks(worker, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "visit_searches", (3, 3))
+    monkeypatch.setattr(settings, "visit_break", (20, 20))
+    opened = []
+    factory = worker.searcher_factory
+
+    def counting(state, profile_key=None):
+        opened.append(state)
+        return factory(state, profile_key=profile_key)
+    worker.searcher_factory = counting
+    slept = []
+    worker.sleep = slept.append
+    uid = make_user()
+    make_watch(uid, dates=",".join(future(i) for i in range(10, 16)))   # 6 dates x 2 currencies
+    out = worker.run_user(uid)
+    assert out["attempts"] == 12
+    assert len(opened) == 3                       # 3 + 3 searches, then the last 6 in visit 3 (only
+                                                  # a few left after its 3rd: they're just finished)
+    assert slept.count(1200) == 2                 # a 20-minute break between visits
+
+
+def test_visits_off_keeps_one_browser(worker, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "visit_searches", (0, 0))
+    opened = []
+    factory = worker.searcher_factory
+    worker.searcher_factory = lambda st, profile_key=None: opened.append(1) or factory(st, profile_key=profile_key)
+    uid = make_user()
+    make_watch(uid, dates=",".join(future(i) for i in range(10, 15)))
+    worker.run_user(uid)
+    assert len(opened) == 1
