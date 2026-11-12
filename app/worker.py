@@ -224,14 +224,23 @@ class Worker:
     def _stop(self, user_id):
         return user_id in self.cancelled
 
-    def _pause(self, user_id, seconds):
-        """Pause between searches; a real pause ends early on Cancel."""
+    def _pause(self, user_id, seconds, searcher=None):
+        """Pause between searches; a real pause ends early on Cancel. With a real clock the browser
+        isn't left frozen: the person fidgets now and then."""
         if self._stop(user_id):
             return
-        if self.sleep is time.sleep:
-            self._wake.wait(seconds)
-        else:
+        if self.sleep is not time.sleep:
             self.sleep(seconds)
+            return
+        idle = getattr(searcher, "idle", None)
+        if idle:
+            try:
+                idle(seconds, stop=lambda: self._stop(user_id) or self._wake.is_set())
+                return
+            except Exception as e:
+                applog.warn(f"Idle activity failed ({e.__class__.__name__}); waiting quietly",
+                            user_id=user_id, source="browser")
+        self._wake.wait(seconds)
 
     # ----- live progress (shown in the UI while a run is going) -----
     def phase(self, user_id, text, watch_id=None, done=None, total=None, log=True, level="info", source="run",
@@ -575,7 +584,7 @@ class Worker:
                                     pause = search_pause(*settings.search_delay)
                                     self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                                                watch_id=w["id"], log=False, until=time.time() + pause)
-                                    self._pause(user_id, pause)
+                                    self._pause(user_id, pause, searcher)
                                     if no_flights:
                                         break
                                 n_flights = n_match = 0
@@ -768,7 +777,7 @@ class Worker:
                 pause = search_pause(*settings.search_delay)
                 self.phase(user_id, f"Pausing {pause:.0f} s before the next search",
                            watch_id=w["id"], log=False, until=time.time() + pause)
-                self._pause(user_id, pause)
+                self._pause(user_id, pause, searcher)
             # a route is unreadable only if neither currency's calendar could be read; with one,
             # its days are still ranked by the currency that came back
             broken = {rt_ for rt_ in swa.routes(w, leg) if {(rt_, "USD"), (rt_, "POINTS")} <= failed}
