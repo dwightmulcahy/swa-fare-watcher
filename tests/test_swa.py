@@ -209,3 +209,17 @@ def test_idle_fidgets_and_stops_on_cancel(monkeypatch):
     start = clock[0]
     b.idle(60, stop=lambda: True)
     assert clock[0] == start and not did
+
+
+def test_airport_query_is_sometimes_the_city_name():
+    import random as _r
+
+    class H:
+        rng = _r.Random(2)
+    b = swa.BrowserSearcher(human=True)
+    b.human = H()
+    got = {b._airport_query("HOU") for _ in range(60)}
+    assert "HOU" in got and "houston" in got and any(g.startswith("hous") and g != "houston" for g in got)
+    assert {b._airport_query("SJO") for _ in range(30)} == {"SJO"}        # "San José": typed as the code
+    b.humanize = False
+    assert b._airport_query("HOU") == "HOU"

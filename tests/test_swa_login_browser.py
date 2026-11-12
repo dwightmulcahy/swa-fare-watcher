@@ -396,6 +396,9 @@ def test_search_from_the_book_a_flight_form(site, monkeypatch, tmp_path, human):
         b._warmed = True
         if human:
             b.human.speed = 0.15
+            # the destination typed as the start of its city's name, then picked from the list
+            # (and the origin typed as a name with no match first, then corrected to the code)
+            b._airport_query = lambda code: {"JAX": "jackso", "SJO": "zzzz"}[code]
         _shopping_route(b, {("POINTS", "2027-01-02"): "12,000"})
         b.page.goto(settings.home_url)                                  # starts on the home page
         got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")         # FLIGHT → Book a Flight → form

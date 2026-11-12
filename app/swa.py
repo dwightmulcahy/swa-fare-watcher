@@ -1407,30 +1407,54 @@ class BrowserSearcher:
             self.human.read(self.human.rng.uniform(2, 5))
 
     def _pick_airport(self, selector, code):
-        """Type an airport code into a Book-a-Flight combobox and pick its suggestion."""
+        """Type an airport (code or city name) into a Book-a-Flight combobox and pick its suggestion."""
         el = self.page.locator(selector).first
         if (el.input_value(timeout=5000) or "").strip().upper() == code:
             return
-        self._type(el, code)
-        listbox = el.get_attribute("aria-controls", timeout=5000)
-        options = self.page.locator(f'[id="{listbox}"] [role=option]') if listbox else None
-        try:
-            options.first.wait_for(state="visible", timeout=6000)
-        except Exception:
-            options = None
-        if options is not None:
-            hit = re.compile(rf"(^|[^A-Z]){code}([^A-Z]|$)")
-            for opt in options.all()[:12]:
-                if hit.search(opt.inner_text(timeout=1000).upper()):
-                    self._click(opt)
-                    break
-            else:
+        query = self._airport_query(code)
+        self._type(el, query)
+        if query != code and not self._suggestion_for(el, code, wait=6000, pick=False):
+            self._beat(0.5, 1.4)        # the city didn't list that airport: type the code instead
+            self._type(el, code)
+        if self._suggestion_for(el, code) is None:
+            if el.get_attribute("aria-controls", timeout=5000) and self.page.locator(
+                    f'[id="{el.get_attribute("aria-controls")}"] [role=option]:visible').count():
                 raise RuntimeError(f"no suggestion for {code}")
-        else:
             el.press("Enter")
         self._beat(0.2, 0.6)
         if code not in (el.input_value(timeout=5000) or "").upper():
             raise RuntimeError(f"{code} didn't stick in {selector}")
+
+    def _airport_query(self, code):
+        """What a person types to find an airport: often the code, sometimes the start of the
+        city's name ("hous", "dallas") and then the right suggestion is picked."""
+        rng = self.human.rng if self.human else random
+        if not self.humanize or rng.random() >= 0.4:
+            return code
+        from . import airports
+        a = airports.table().get(code)
+        city = re.sub(r"\s*\(.*?\)", "", a[0]).strip().lower() if a else ""
+        if len(city) < 4 or not city.isascii():
+            return code
+        return city if rng.random() < 0.5 else city[:rng.randint(4, len(city))]
+
+    def _suggestion_for(self, el, code, wait=6000, pick=True):
+        """The visible suggestion naming `code` in the combobox's list (clicked if pick)."""
+        listbox = el.get_attribute("aria-controls", timeout=5000)
+        if not listbox:
+            return None
+        options = self.page.locator(f'[id="{listbox}"] [role=option]')
+        try:
+            options.first.wait_for(state="visible", timeout=wait)
+        except Exception:
+            return None
+        hit = re.compile(rf"(^|[^A-Z]){code}([^A-Z]|$)")
+        for opt in options.all()[:12]:
+            if hit.search(opt.inner_text(timeout=1000).upper()):
+                if pick:
+                    self._click(opt)
+                return opt
+        return None
 
     def _set_checkbox(self, selector, on):
         box = self.page.locator(selector).first
