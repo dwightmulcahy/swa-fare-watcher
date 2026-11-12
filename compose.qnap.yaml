@@ -11,6 +11,10 @@ services:
       - "${HOST_PORT:-8080}:8080"
     volumes:
       - ${QNAP_DATA_DIR:-/share/Container/swa-fare-watcher/data}:/data
+    # Optional GPU rendering (SWA_GPU=true in .env): pass the Intel GPU in. On the QNAP the device
+    # is root-only, so once per boot (or from autorun.sh): chmod 666 /dev/dri/renderD128
+    # devices:
+    #   - /dev/dri:/dev/dri
     init: true
     read_only: true
     tmpfs:

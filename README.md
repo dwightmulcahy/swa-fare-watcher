@@ -202,6 +202,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_HEADLESS` | `false` | `true` runs the browser headless (no Xvfb; more likely blocked) |
 | `SWA_BROWSER_CHANNEL` | `auto` | `auto` = Google Chrome if installed, else Chromium; or `chrome`, `chromium`, `msedge` |
 | `SWA_HUMANIZE` | `true` | Home-page warm-up and mouse/scroll/dwell behaviour around searches |
+| `SWA_GPU` | `false` | Render with the host's Intel/AMD GPU (Mesa Vulkan through ANGLE) instead of Chrome's software renderer, which sites can recognise. Pass the device in (`devices: [/dev/dri:/dev/dri]`) and make it usable by the container's user (QNAP: `chmod 666 /dev/dri/renderD128`, again after each reboot). `python -m app selftest` prints the WebGL renderer it got |
+| `SWA_GPU_DEVICE` | `/dev/dri/renderD128` | The GPU render node used with `SWA_GPU` |
 | `SWA_TIMEZONE` | container `TZ` | Browser time zone; match where the server's IP is |
 | `SWA_AUTO_LOGIN` | `true` | Allow users to turn on automatic sign-in |
 | `SWA_CODE_WAIT_SECONDS` | `600` | How long a sign-in waits for a verification code |

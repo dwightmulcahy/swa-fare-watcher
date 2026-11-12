@@ -41,6 +41,10 @@ class Settings:
         self.browser_channel = _env("SWA_BROWSER_CHANNEL", "auto")
         self.browser_timezone = _env("SWA_TIMEZONE")  # default: the container's TZ
         self.humanize = _bool("SWA_HUMANIZE", True)
+        # Render with the host's GPU (Intel/AMD via Mesa Vulkan) instead of Chrome's software
+        # renderer, which sites can recognise. Needs the render node passed into the container.
+        self.gpu = _bool("SWA_GPU", False)
+        self.gpu_device = _env("SWA_GPU_DEVICE", "/dev/dri/renderD128")
         # Automatic Southwest sign-in with saved credentials (users opt in under Settings)
         self.auto_login = _bool("SWA_AUTO_LOGIN", True)
         self.code_wait_seconds = int(_env("SWA_CODE_WAIT_SECONDS", "600"))

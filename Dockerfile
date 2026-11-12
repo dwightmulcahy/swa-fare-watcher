@@ -25,7 +25,7 @@ COPY requirements.txt ./
 # the vulnerability scan.
 RUN apt-get update \
  && apt-get upgrade -y \
- && apt-get install -y --no-install-recommends xvfb tzdata \
+ && apt-get install -y --no-install-recommends xvfb tzdata mesa-vulkan-drivers libvulkan1 \
  && pip install -r requirements.txt \
  && retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i: $*" >&2; sleep $((i * 10)); done; return 1; } \
  && retry playwright install --with-deps chromium \
