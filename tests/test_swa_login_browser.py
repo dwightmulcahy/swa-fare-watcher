@@ -443,3 +443,39 @@ def test_points_calendar_opened_from_the_form(site, monkeypatch, tmp_path):
     assert days == {"2026-11-09": 38000.0, "2026-11-10": 19500.0, "2026-11-11": None}
     assert "calendar.html" in url and "fareType=POINTS" in url and b._form_works is True
 
+
+
+@pytest.mark.parametrize("human", [False, True])
+def test_other_currency_by_the_shop_in_switch(site, monkeypatch, tmp_path, human):
+    import json
+
+    from app import swa
+    from app.config import settings
+    from tests.conftest import detail, payload
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    monkeypatch.setattr(settings, "form_share", 0.0)
+    loads, asked = [], []
+    with swa.BrowserSearcher(profile_key=f"t-switch-{human}", human=human) as b:
+        b._warmed = True
+        if human:
+            b.human.speed = 0.15
+
+        def shopping(route):
+            body = json.loads(route.request.post_data)
+            asked.append(body["fareType"])
+            price = "12,000" if body["fareType"] == "POINTS" else "150.00"
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload(detail(price, "5.60"))))
+        b.page.route("**/air-booking/page/air/booking/shopping", shopping)
+        b.page.on("load", lambda pg: loads.append(pg.url))
+        cash = b.search("SJO", "JAX", "2027-01-02", 1, "USD")
+        pts = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")      # Shop in: Dollars -> Points
+        back = b.search("SJO", "JAX", "2027-01-02", 1, "USD")        # and back
+        shown = b.page.input_value("#currency")
+    price = lambda r: next(iter(r.values()))["fare"][0]
+    assert (price(cash), price(pts), price(back)) == (150.0, 12000, 150.0)
+    assert asked == ["USD", "POINTS", "USD"] and len(loads) == 1 and shown == "Dollars"
+    assert b._switch_works is True
