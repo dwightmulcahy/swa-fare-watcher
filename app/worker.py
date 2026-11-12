@@ -1,5 +1,6 @@
 """Background worker: runs one user's watches at a time in a single browser, plus a daily scheduler."""
 import datetime as dt
+import hashlib
 import html
 import json
 import math
@@ -45,6 +46,46 @@ def plan_day(user_ids, lo, hi, rng=random):
     span = max((hi - lo).total_seconds(), 0)
     plan = [((lo + dt.timedelta(seconds=rng.uniform(0, span))).replace(microsecond=0), uid) for uid in user_ids]
     return sorted(plan, key=lambda x: x[0])
+
+
+def user_offset(user_id, spread_min):
+    """Each user's own usual time of day: a fixed offset (minutes) from SWA_DAILY_AT, seeded from
+    the user id, so accounts on one IP keep different habits (one checks at 6:40, another 8:55)."""
+    if not spread_min:
+        return 0.0
+    h = int(hashlib.sha256(f"schedule:{user_id}".encode()).hexdigest(), 16)
+    return (h % 10_000) / 10_000 * 2 * spread_min - spread_min
+
+
+def plan_users(user_ids, day, now, hhmm, spread_min, jitter_min, min_gap_min=20, rng=random):
+    """Today's start time per user: their usual time ± a fresh daily jitter, never in the past,
+    and at least min_gap_min apart so two accounts never search back to back from one IP."""
+    h, m = map(int, hhmm.split(":"))
+    base = dt.datetime.combine(day, dt.time(h, m))
+    plan = []
+    for uid in user_ids:
+        t = base + dt.timedelta(minutes=user_offset(uid, spread_min) + rng.uniform(-jitter_min, jitter_min))
+        plan.append((max(t, now + dt.timedelta(seconds=60)).replace(microsecond=0), uid))
+    plan.sort(key=lambda x: x[0])
+    for i in range(1, len(plan)):
+        gap = plan[i - 1][0] + dt.timedelta(minutes=min_gap_min)
+        if plan[i][0] < gap:
+            plan[i] = (gap + dt.timedelta(seconds=rng.randint(0, 300)), plan[i][1])
+    return plan
+
+
+def skip_today(user_id, day, chance, rng=random):
+    """Now and then a user doesn't check at all that day (never two days running), like a person.
+    Users with a booked flight to watch for rebooking are never skipped."""
+    if chance <= 0 or db.get_state(f"skipped:{user_id}") == (day - dt.timedelta(days=1)).isoformat():
+        return False
+    if db.one("SELECT 1 FROM watches WHERE user_id=? AND active=1 AND booked IS NOT NULL AND booked<>'' "
+              "LIMIT 1", (user_id,)):
+        return False
+    if rng.random() < chance:
+        db.set_state(f"skipped:{user_id}", day.isoformat())
+        return True
+    return False
 
 
 def next_run_time(hhmm, jitter_min, now=None, last_day=None, rng=random):
@@ -441,14 +482,19 @@ class Worker:
     def _schedule(self):
         last_day = None
         while True:
-            day, lo, hi = day_window(settings.daily_at, settings.daily_jitter_min, last_day=last_day)
+            spread = settings.user_spread_min
+            day, lo, hi = day_window(settings.daily_at, settings.daily_jitter_min + spread, last_day=last_day)
             self.next_window = (lo, hi)
             applog.info(f"Next daily run window {lo:%a %Y-%m-%d %H:%M}-{hi:%H:%M}", source="scheduler")
             self._sleep_until(lo)
-            plan = plan_day(self.eligible_users(), dt.datetime.now(), hi)
+            users = self.eligible_users()
+            skipped = [u for u in users if skip_today(u, day, settings.skip_day_chance)]
+            plan = plan_users([u for u in users if u not in skipped], day, dt.datetime.now(), settings.daily_at,
+                              spread, settings.daily_jitter_min)
             self.planned = {uid: t for t, uid in plan}
             applog.info(f"Today's plan, {len(plan)} user(s): "
-                        + (", ".join(f"user {uid} at {t:%H:%M:%S}" for t, uid in plan) or "nobody to run"),
+                        + (", ".join(f"user {uid} at {t:%H:%M:%S}" for t, uid in plan) or "nobody to run")
+                        + (f"; taking the day off: {', '.join(f'user {u}' for u in skipped)}" if skipped else ""),
                         source="scheduler")
             for t, uid in plan:
                 self._sleep_until(t)

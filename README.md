@@ -45,7 +45,7 @@ A small multi-user web app that searches Southwest fares once a day for each use
 
 ## How it works
 
-One container runs the web app, a single background worker and a daily scheduler. At a random time around `SWA_DAILY_AT` (a new offset within ±`SWA_DAILY_JITTER_MINUTES` each day) every eligible user is queued in a shuffled order; the worker processes one user at a time in one browser, with a random 8–20 s pause between page loads. A flight matches when it passes the stops, duration and time filters **and** either cash ≤ max cash, or points ≤ max points with ¢/pt ≥ the minimum. ¢/pt = (cash fare − points taxes) ÷ points × 100. Each user gets one email per run listing only flights that are new or cheaper than last alerted. If all of a user's searches fail, they get an email asking them to upload a fresh session.
+One container runs the web app, a single background worker and a daily scheduler. Each user has their own usual time around `SWA_DAILY_AT` (fixed within ±`SWA_USER_SPREAD_MINUTES`) plus a new ±`SWA_DAILY_JITTER_MINUTES` each day, users start at least 20 minutes apart, and now and then a user takes a day off (`SWA_SKIP_DAY_CHANCE`); the worker processes one user at a time in one browser, with a random 8–20 s pause between page loads. A flight matches when it passes the stops, duration and time filters **and** either cash ≤ max cash, or points ≤ max points with ¢/pt ≥ the minimum. ¢/pt = (cash fare − points taxes) ÷ points × 100. Each user gets one email per run listing only flights that are new or cheaper than last alerted. If all of a user's searches fail, they get an email asking them to upload a fresh session.
 
 ### Looking like a person, not a bot
 
@@ -187,6 +187,8 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time. **`TZ` must match where the server's internet connection is** (checked at start) |
 | `SWA_SKIP_TZ_CHECK` | `false` | Skip the start-up time zone check (e.g. behind a VPN you trust) |
 | `SWA_DAILY_JITTER_MINUTES` | `45` | Each day starts at a random time within ± this of `SWA_DAILY_AT`; users run in a shuffled order |
+| `SWA_USER_SPREAD_MINUTES` | `120` | Each user gets their own usual time within ± this of `SWA_DAILY_AT` (fixed per user), plus the daily jitter; users start at least 20 min apart |
+| `SWA_SKIP_DAY_CHANCE` | `0.12` | Chance a user takes a day off from searching (never two days running, never with a booked flight to watch); `0` = every day |
 | `SWA_SCHEDULER` | `true` | `false` disables the daily run (manual runs still work) |
 | `DEFAULT_MAX_WATCHES`, `DEFAULT_MAX_SEARCHES_PER_DAY` | `5`, `40` | Pre-filled limits for new users |
 | `MAX_DATES_PER_WATCH` | `31` | Hard cap on dates per watch |
