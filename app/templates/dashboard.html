@@ -6,7 +6,7 @@
 <div class="head">
   <div>
     <h1>Your watches</h1>
-    <p class="muted">Searched daily {% if jitter %}at a random time around {{ daily_at }} (±{{ jitter }} min){% else %}at {{ daily_at }}{% endif %}{% if next_run[0] %}; your next run starts {{ next_run[0].strftime('%a %H:%M') }}{% elif next_run[1] %}; next run {{ next_run[1][0].strftime('%a') }} between {{ next_run[1][0].strftime('%H:%M') }} and {{ next_run[1][1].strftime('%H:%M') }}{% endif %}. New or lower matching fares are emailed to
+    <p class="muted">{% if slots %}Checked at your usual times ({{ slots }}){% if next_run[0] %}; next check-in {{ next_run[0].strftime('%a %H:%M') }}{% endif %}{% else %}Searched daily {% if jitter %}at a random time around {{ daily_at }} (±{{ jitter }} min){% else %}at {{ daily_at }}{% endif %}{% if next_run[0] %}; your next run starts {{ next_run[0].strftime('%a %H:%M') }}{% elif next_run[1] and next_run[1][1] %}; next run {{ next_run[1][0].strftime('%a') }} between {{ next_run[1][0].strftime('%H:%M') }} and {{ next_run[1][1].strftime('%H:%M') }}{% endif %}{% endif %}. New or lower matching fares are emailed to
       {% if user.email %}<strong>{{ user.email }}</strong>{% else %}<a href="/settings">add an email address</a>{% endif %}.</p>
   </div>
   <a class="button primary" href="/watches/new">New watch</a>

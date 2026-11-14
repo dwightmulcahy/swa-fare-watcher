@@ -151,3 +151,21 @@ def test_pay_with_shows_amounts():
     r = {"cash": 292.0, "points": 19000, "points_taxes": 5.6, "cpp": 1.5}
     assert swa.recommend_detail(r, w) == "Points: 19,000 pts + $5.60"
     assert swa.recommend_detail({**r, "cpp": 1.0}, w) == "Cash: $292"
+
+
+def test_round_trips_pair_directions_searched_at_different_check_ins(worker, sent, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "rotate", True)
+    uid = make_user()
+    make_watch(uid, trip_type="roundtrip", dates=future(10), nights_min=3, nights_max=3, max_price=500,
+               max_points=40000)
+    with db.tx() as con:   # the morning check-in read the outbound date only
+        con.execute("INSERT INTO fares(watch_id, ts, leg, date, flight_key, flights, depart, arrive, stops, "
+                    "duration, cash, points, points_taxes, matched, origin, dest) "
+                    "SELECT id, ?, 'out', ?, 'k', '1234', '08:15', '12:40', 0, 205, 189.98, 12000, 5.6, 1, 'AUS', 'BWI' "
+                    "FROM watches", (db.now(), future(10)))
+        con.execute("INSERT INTO searched SELECT id, 'out', ?, ?, 189.98, 12000, ? FROM watches",
+                    (future(10), db.now(), db.now()))
+    res = worker.run_user(uid, one_visit=True)          # the evening one reads the return
+    assert {(c[0], c[1]) for c in FakeSearcher.calls} == {("BWI", "AUS")}
+    assert res["hits"] >= 1 and "nights" in sent[0][2]

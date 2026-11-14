@@ -306,6 +306,26 @@ def sync_seat_jobs(watch_id, now=None):
         return made
 
 
+def latest_legs(wid, day=None, since=None):
+    """Most recent flights per leg and date, as {"out": {date: [rows]}, "ret": {...}}
+    (optionally as they stood at the end of `day`, and only searches since `since`)."""
+    cond, args = "", [wid]
+    if day:
+        cond += " AND substr(ts,1,10) <= ?"
+        args.append(day)
+    if since:
+        cond += " AND ts >= ?"
+        args.append(since)
+    rows = query(
+        "SELECT f.* FROM fares f JOIN (SELECT leg, date, MAX(ts) ts FROM fares WHERE watch_id=?" + cond
+        + " GROUP BY leg, date) l ON f.leg=l.leg AND f.date=l.date AND f.ts=l.ts WHERE f.watch_id=?",
+        (*args, wid))
+    legs = {"out": {}, "ret": {}}
+    for r in rows:
+        legs.setdefault(r["leg"], {}).setdefault(r["date"], []).append(dict(r))
+    return legs
+
+
 def get_state(key, default=None):
     row = one("SELECT value FROM app_state WHERE key=?", (key,))
     return row["value"] if row else default

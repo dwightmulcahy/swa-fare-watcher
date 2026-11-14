@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import airports, applog, buildinfo, db, seats, swa
+from . import worker as worker_mod
 from .config import settings
 from .mailer import fmt_dur
 from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
@@ -563,17 +564,7 @@ def create_app(worker=None, start_worker=True):
 
 
     def latest_legs(wid, day=None):
-        """Most recent flights per leg and date, as {"out": {date: [rows]}, "ret": {...}}
-        (optionally as they stood at the end of `day`)."""
-        cond, args = ("AND substr(ts,1,10) <= ?", (wid, day, wid)) if day else ("", (wid, wid))
-        rows = db.query(
-            "SELECT f.* FROM fares f JOIN (SELECT leg, date, MAX(ts) ts FROM fares WHERE watch_id=? "
-            + cond + " GROUP BY leg, date) l ON f.leg=l.leg AND f.date=l.date AND f.ts=l.ts WHERE f.watch_id=?",
-            args)
-        legs = {"out": {}, "ret": {}}
-        for r in rows:
-            legs.setdefault(r["leg"], {}).setdefault(r["date"], []).append(dict(r))
-        return legs
+        return db.latest_legs(wid, day)
 
     def fare_route(w, f):
         if f["origin"] and f["dest"]:
@@ -622,6 +613,8 @@ def create_app(worker=None, start_worker=True):
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
                       live=app.state.worker.snapshot(u["id"]),
                       daily_at=settings.daily_at, jitter=settings.daily_jitter_min,
+                      slots=", ".join(f"{t:%H:%M}" for t in worker_mod.habit_slots(u["id"], dt.date.today(), jitter_min=0))
+                      if settings.habit_slots else "",
                       next_run=app.state.worker.next_run_for(u["id"]))
 
     FORMS = {"fare": "watch_form.html", "rebook": "watch_form_rebook.html", "seats": "watch_form_seats.html"}

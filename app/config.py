@@ -31,6 +31,9 @@ class Settings:
         # Page loads per account per day, a random number in this range (0,0 = no budget)
         lo, hi = (int(x) for x in _env("SWA_DAILY_PAGE_BUDGET", "20,35").split(","))
         self.page_budget = (lo, max(hi, lo)) if hi > 0 else (0, 0)
+        # Each user checks at 2-3 habitual times of day (morning / lunch / evening, later on
+        # weekends); each scheduled run is one visit and the rest continues at the next time
+        self.habit_slots = _bool("SWA_HABIT_SLOTS", True)
         self.scheduler = _bool("SWA_SCHEDULER", True)
         self.base_url = _env("BASE_URL", "http://localhost:8080").rstrip("/")
         self.cookie_secure = _bool("COOKIE_SECURE", False)
