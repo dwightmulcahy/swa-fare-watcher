@@ -117,6 +117,84 @@ def search_order(dates, rng=random):
     return out
 
 
+# ----- which dates to search today (scheduled runs)
+def search_every(days_out):
+    """How many days between full searches of a date this far away: fares months out barely move."""
+    if days_out <= 14:
+        return 1
+    if days_out <= 45:
+        return 2
+    if days_out <= 120:
+        return 3
+    return 5
+
+
+def due_legs(w, legs, today=None):
+    """The (leg, date)s of a watch that are due a search today, nearest first. A watch with only a
+    handful of dates, and a rebook watch, searches everything every time."""
+    today = today or dt.date.today()
+    if len(legs) <= 8 or (w["kind"] or "fare") != "fare":
+        return list(legs)
+    last = {(r["leg"], r["date"]): r["ts"] for r in
+            db.query("SELECT leg, date, ts FROM searched WHERE watch_id=?", (w["id"],))}
+    out = []
+    for leg, d in legs:
+        days_out = (dt.date.fromisoformat(d) - today).days
+        ts = last.get((leg, d))
+        if ts is None or (today - dt.date.fromisoformat(ts[:10])).days >= search_every(days_out):
+            out.append((leg, d))
+    return out
+
+
+def page_budget(user_id, day=None):
+    """Today's page-load budget for this user: random in SWA_DAILY_PAGE_BUDGET, fixed for the day."""
+    lo, hi = settings.page_budget
+    if hi <= 0:
+        return None
+    day = day or db.today()
+    return random.Random(f"budget:{user_id}:{day}").randint(lo, hi)
+
+
+def fit_budget(plan, room):
+    """Keep the most useful dates that fit in `room` page loads (2 per airport pair per date):
+    nearest departures first. The kept dates stay in their mixed-up order."""
+    if room is None:
+        return plan
+    ranked = sorted(((d, w["id"], leg, len(swa.routes(w))) for w, legs in plan for leg, d in legs))
+    keep, used = set(), 0
+    for d, wid, leg, n in ranked:
+        if used + 2 * n > room:
+            continue
+        keep.add((wid, leg, d))
+        used += 2 * n
+    return [(w, [x for x in legs if (w["id"], *x) in keep]) for w, legs in plan]
+
+
+def record_searched(con, watch_id, leg, date, rows):
+    """Remember a date was searched today, and whether its cheapest prices moved."""
+    cash = min((r["cash"] for r in rows if r.get("cash") is not None), default=None)
+    points = min((r["points"] for r in rows if r.get("points") is not None), default=None)
+    now = db.now()
+    old = con.execute("SELECT cash, points, changed_at FROM searched WHERE watch_id=? AND leg=? AND date=?",
+                      (watch_id, leg, date)).fetchone()
+    changed = old is None or (old["cash"], old["points"]) != (cash, points)
+    con.execute("INSERT OR REPLACE INTO searched VALUES (?,?,?,?,?,?,?)",
+                (watch_id, leg, date, now, cash, points, now if changed else old["changed_at"]))
+
+
+def calendar_unchanged(con, watch_id, leg, date, low, before, recent_days=3):
+    """True if this date's calendar low is the same as at the previous calendar read and the date
+    was fully searched in the last few days: nothing new to find there."""
+    prev = con.execute("SELECT MIN(cash) c, MIN(points) p FROM calendar_fares WHERE watch_id=? AND leg=? "
+                       "AND date=? AND ts=(SELECT MAX(ts) FROM calendar_fares WHERE watch_id=? AND leg=? "
+                       "AND date=? AND ts<?)", (watch_id, leg, date, watch_id, leg, date, before)).fetchone()
+    if not prev or (prev["c"], prev["p"]) == (None, None) or (prev["c"], prev["p"]) != (low.get("cash"), low.get("points")):
+        return False
+    seen = con.execute("SELECT ts FROM searched WHERE watch_id=? AND leg=? AND date=?",
+                       (watch_id, leg, date)).fetchone()
+    return bool(seen) and (dt.datetime.now() - dt.datetime.fromisoformat(seen["ts"])).days < recent_days
+
+
 class Visits:
     """The browser for one run, split into visits like a person's: after a handful of searches
     (SWA_VISIT_SEARCHES) the browser closes, the worker takes a break (SWA_VISIT_BREAK minutes),
@@ -704,7 +782,21 @@ class Worker:
         signin = None
 
         watches = random.sample(watches, len(watches))  # different watch order each day
-        plan = [(w, search_order(swa.search_legs(w))) for w in watches]  # [(leg, date)], legs mixed
+        plan = [(w, swa.search_legs(w)) for w in watches]
+        scheduled = watch_ids is None and not signin_only   # Search now always searches everything
+        if scheduled and settings.rotate:
+            plan = [(w, due_legs(w, legs)) for w, legs in plan]
+        budget = page_budget(user_id) if scheduled else None
+        if budget is not None:
+            room = max(0, budget - db.searches_today(user_id))
+            plan = fit_budget(plan, room)
+            cap = min(cap, budget) if cap is not None else budget
+        plan = [(w, search_order(legs)) for w, legs in plan if legs or (w["kind"] or "fare") == "rebook"]
+        plan = [(w, legs) for w, legs in plan if legs]  # [(leg, date)], legs mixed
+        if not plan and not signin_only:
+            applog.info("Nothing due today: every date was searched recently or today's page budget is used",
+                        user_id=user_id, source="run")
+            return {"skipped": "nothing due today"}
         total = sum(2 * len(swa.routes(w)) * len(d) for w, d in plan)
         done = 0
         self.phase(user_id, "Sign-in check only" if signin_only else
@@ -769,6 +861,7 @@ class Worker:
                         cands = []   # this watch's matching flights or round trips; pick_alerts decides
                         for leg, date in dates:
                             ts = db.now()   # one timestamp per date, shared by its airport pairs
+                            date_start = attempts
                             for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
                                 if self._stop(user_id):
                                     break
@@ -847,6 +940,9 @@ class Worker:
                                 applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
                                             + ("" if rt else f", {n_match} matching"),
                                             user_id=user_id, watch_id=w["id"], source="run")
+                            if attempts > date_start:
+                                with db.tx() as con:
+                                    record_searched(con, w["id"], leg, date, legs[leg].get(date, []))
                             if limited or self._stop(user_id):
                                 break
                         if rt and fare:
@@ -961,6 +1057,7 @@ class Worker:
         Returns (dates, {(leg, date): airport pairs}, calendar loads used, hit the daily cap)."""
         cal, cal_routes, used = {}, {"out": {}, "ret": {}}, 0
         one_currency = set()
+        cal_start = db.now()
         for leg in ("out", "ret"):
             leg_dates = [d for lg, d in dates if lg == leg]
             if not leg_dates:
@@ -1049,6 +1146,14 @@ class Worker:
         picked = swa.calendar_pick(w_pick, cal, dates, settings.calendar_detail_dates)
         to_search = swa.calendar_routes(w_pick, cal_routes, picked)
         picked = [x for x in picked if to_search.get(x)]
+        if picked and any(cal.get(lg) for lg in ("out", "ret")):
+            with db.tx() as con:   # same calendar low as last read and searched lately: skip
+                same = [(lg, d) for lg, d in picked if cal.get(lg) and d in cal[lg]
+                        and calendar_unchanged(con, w["id"], lg, d, cal[lg][d], cal_start)]
+            if same:
+                applog.info(f"{route}: {len(same)} date(s) skipped: calendar price unchanged since the "
+                            "last search", user_id=user_id, watch_id=w["id"], source="run")
+                picked = [x for x in picked if x not in same]
         return search_order(picked), to_search, used, False
 
     @staticmethod
