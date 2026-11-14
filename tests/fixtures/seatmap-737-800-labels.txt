@@ -1,0 +1,112 @@
+Seat 1D  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Aisle) unavailable
+Seat 1E  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Middle)
+Seat 1F  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Window) unavailable
+Seat 2A  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Window) unavailable
+Seat 2B  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Middle) unavailable
+Seat 2C  $0. (Chargeable, Front cabin, Bulkhead seat, Extra leg room, Aisle) unavailable
+Seat 2D  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 2E  $0. (Chargeable, Front cabin, Extra leg room, Middle)
+Seat 2F  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 3A  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 3B  $0. (Chargeable, Front cabin, Extra leg room, Middle)
+Seat 3C  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 3D  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 3E  $0. (Chargeable, Front cabin, Extra leg room, Middle) unavailable
+Seat 3F  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 4A  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 4B  $0. (Chargeable, Front cabin, Extra leg room, Middle)
+Seat 4C  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 4D  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 4E  $0. (Chargeable, Front cabin, Extra leg room, Middle) unavailable
+Seat 4F  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 5A  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 5B  $0. (Chargeable, Front cabin, Extra leg room, Middle) unavailable
+Seat 5C  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 5D  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 5E  $0. (Chargeable, Front cabin, Extra leg room, Middle)
+Seat 5F  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 6A  $0. (Chargeable, Front cabin, Extra leg room, Window) unavailable
+Seat 6B  $0. (Chargeable, Front cabin, Extra leg room, Middle) unavailable
+Seat 6C  $0. (Chargeable, Front cabin, Extra leg room, Aisle) unavailable
+Seat 6D  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 6E  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 6F  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 7A  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 7B  $0. (Chargeable, Front cabin, Preferred, Middle)
+Seat 7C  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 7D  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 7E  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 7F  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 8A  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 8B  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 8C  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 8D  $0. (Chargeable, Front cabin, Preferred, Aisle)
+Seat 8E  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 8F  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 9A  $0. (Chargeable, Front cabin, Preferred, Window)
+Seat 9B  $0. (Chargeable, Front cabin, Preferred, Middle)
+Seat 9C  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 9D  $0. (Chargeable, Front cabin, Preferred, Aisle)
+Seat 9E  $0. (Chargeable, Front cabin, Preferred, Middle)
+Seat 9F  $0. (Chargeable, Front cabin, Preferred, Window) unavailable
+Seat 10A  $0. (Chargeable, Front cabin, Preferred, Window without window view, Window) unavailable
+Seat 10B  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 10C  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 10D  $0. (Chargeable, Front cabin, Preferred, Aisle) unavailable
+Seat 10E  $0. (Chargeable, Front cabin, Preferred, Middle) unavailable
+Seat 10F  $0. (Chargeable, Front cabin, Preferred, Window)
+Seat 11A  $0. (Chargeable, Front cabin, Preferred, Window without window view, Over wing, Window)
+Seat 11B  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle) unavailable
+Seat 11C  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 11D  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 11E  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle)
+Seat 11F Selected for passenger number 2 PASSENGER NAME. $0. (Chargeable, Front cabin, Preferred, Window without window view, Over wing, Window) unavailable
+Seat 12A  $0. (Chargeable, Front cabin, Preferred, Over wing, Window) unavailable
+Seat 12B  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle) unavailable
+Seat 12C  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 12D  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 12E  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle) unavailable
+Seat 12F  $0. (Chargeable, Front cabin, Preferred, Over wing, Window) unavailable
+Seat 13A  $0. (Chargeable, Front cabin, Preferred, Over wing, Window)
+Seat 13B  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle) unavailable
+Seat 13C  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 13D  $0. (Chargeable, Front cabin, Preferred, Over wing, Aisle) unavailable
+Seat 13E  $0. (Chargeable, Front cabin, Preferred, Over wing, Middle) unavailable
+Seat 13F  $0. (Chargeable, Front cabin, Preferred, Over wing, Window) unavailable
+Seat 14A  $0. (Chargeable, Exit row, Extra leg room, Over wing, Window) unavailable
+Seat 14B  $0. (Chargeable, Exit row, Extra leg room, Over wing, Middle) unavailable
+Seat 14C  $0. (Chargeable, Exit row, Extra leg room, Over wing, Aisle) unavailable
+Seat 14D  $0. (Chargeable, Exit row, Extra leg room, Over wing, Aisle) unavailable
+Seat 14E  $0. (Chargeable, Exit row, Extra leg room, Over wing, Middle) unavailable
+Seat 14F  $0. (Chargeable, Exit row, Extra leg room, Over wing, Window) unavailable
+Seat 15A  $0. (Chargeable, Exit row, Extra leg room, Over wing, Window) unavailable
+Seat 15B  $0. (Chargeable, Exit row, Extra leg room, Over wing, Middle) unavailable
+Seat 15C  $0. (Chargeable, Exit row, Extra leg room, Over wing, Aisle) unavailable
+Seat 15D  $0. (Chargeable, Exit row, Extra leg room, Over wing, Aisle) unavailable
+Seat 15E  $0. (Chargeable, Exit row, Extra leg room, Over wing, Middle) unavailable
+Seat 15F  $0. (Chargeable, Exit row, Extra leg room, Over wing, Window) unavailable
+Seat 16A  $0. (Chargeable, Extra leg room, Over wing, Window) unavailable
+Seat 16B  $0. (Chargeable, Extra leg room, Over wing, Middle) unavailable
+Seat 16C  $0. (Chargeable, Extra leg room, Over wing, Aisle) unavailable
+Seat 16D  $0. (Chargeable, Extra leg room, Over wing, Aisle) unavailable
+Seat 16E  $0. (Chargeable, Extra leg room, Over wing, Middle) unavailable
+Seat 16F  $0. (Chargeable, Extra leg room, Over wing, Window) unavailable
+Seat 17E  $0. (Chargeable, Front cabin, Standard, Over wing, Middle)
+Seat 18B  $0. (Chargeable, Front cabin, Standard, Over wing, Middle)
+Seat 20F  $0. (Chargeable, Front cabin, Standard, Over wing, Window)
+Seat 23E  $0. (Chargeable, Standard, Middle)
+Seat 24A  $0. (Chargeable, Standard, Window)
+Seat 24B  $0. (Chargeable, Standard, Middle)
+Seat 26A  $0. (Chargeable, Standard, Window)
+Seat 26D  $0. (Chargeable, Standard, Aisle)
+Seat 27A  (Standard, Window)
+Seat 27B  (Standard, Middle)
+Seat 27D  (Standard, Aisle)
+Seat 27E  (Standard, Middle)
+Seat 27F  (Standard, Window)
+Seat 28C  (Standard, Aisle)
+Seat 28F  (Standard, Window)
+Seat 29B  (Standard, Middle)
+Seat 29C  (Standard, Aisle)
+Seat 29D  (Standard, Aisle)
+Seat 29E  (Standard, Middle)

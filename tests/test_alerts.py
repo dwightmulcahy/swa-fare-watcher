@@ -139,7 +139,8 @@ def test_watch_form_saves_booked_flight(client):
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     wid = int(loc.rstrip("/").split("/")[-1])
     b = json.loads(db.one("SELECT booked FROM watches WHERE id=?", (wid,))["booked"])
-    assert b == [{"leg": "out", "date": future(10), "cash": 289, "points": None, "flights": "502/52"}]
+    assert b == [{"leg": "out", "date": future(10), "cash": 289, "points": None, "time": None, "from": "AUS",
+                  "flights": "502/52"}]
     assert 'value="502/52"' in client.get(loc + "/edit").text
     bad = {**watch_form(t), "booked_out_date": future(10)}
     assert "what you paid" in client.post("/watches", data=bad).text
