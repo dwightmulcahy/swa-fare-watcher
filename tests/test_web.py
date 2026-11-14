@@ -263,3 +263,16 @@ def test_watch_page_has_price_history_chart_data(client):
     assert [p["cash"] for p in data["All dates"]] == [300.0, 280.0]
     assert data[d][-1] == {"day": "2026-11-02", "cash": 280.0, "points": 20000, "any_cash": 280.0}
     assert 'id="hist-chart"' in html
+
+
+def test_css_and_js_urls_change_with_their_content(client):
+    import hashlib
+    import re
+
+    from app.web import HERE
+    html = client.get("/login").text
+    css = re.search(r'href="(/static/app\.css\?v=([0-9a-f]+))"', html)
+    js = re.search(r'src="(/static/app\.js\?v=([0-9a-f]+))"', html)
+    assert css and js
+    assert css.group(2) == hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:10]
+    assert client.get(css.group(1)).status_code == 200 and client.get(js.group(1)).status_code == 200

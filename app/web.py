@@ -1,5 +1,7 @@
 """FastAPI web app: login, user watches, Southwest session upload, admin panel."""
 import datetime as dt
+import functools
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -44,6 +46,20 @@ def _stops_label(f):
 
 
 templates.env.globals["stops_label"] = _stops_label
+
+
+@functools.lru_cache(maxsize=None)
+def _asset(name):
+    """/static/<name>?v=<content hash>: a new app.css or app.js is fetched after an upgrade
+    instead of the browser reusing its cached copy with new pages."""
+    try:
+        v = hashlib.sha256((HERE / "static" / name).read_bytes()).hexdigest()[:10]
+    except OSError:
+        v = "0"
+    return f"/static/{name}?v={v}"
+
+
+templates.env.globals["asset"] = _asset
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["seats"] = seats
 templates.env.globals["seat_prefs"] = seats.prefs_of
