@@ -393,3 +393,83 @@ def test_gpu_warning_email_once_a_day(sent, monkeypatch):
     assert Worker.check_gpu(B("ANGLE (Intel, Vulkan 1.3 (Intel(R) UHD Graphics 600))"), day="2027-01-03") is True
     assert len(sent) == 2
     assert swa.gpu_problem().startswith("SWA_GPU is on but")
+
+
+def test_far_dates_are_searched_less_often():
+    from app.worker import due_legs, record_searched, search_every
+    assert [search_every(d) for d in (3, 14, 30, 90, 200)] == [1, 1, 2, 3, 5]
+    uid = make_user()
+    today = dt.date.today()
+    dates = [(today + dt.timedelta(days=n)).isoformat() for n in (5, 6, 7, 8, 30, 31, 100, 101, 200)]
+    wid = make_watch(uid, dates=",".join(dates))
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    legs = [("out", d) for d in dates]
+    assert due_legs(w, legs, today) == legs                       # never searched: all due
+    with db.tx() as con:
+        for leg in legs:
+            record_searched(con, wid, *leg, [{"cash": 100.0, "points": 5000}])
+    assert due_legs(w, legs, today) == []                         # all searched today
+    tomorrow = today + dt.timedelta(days=1)
+    assert [d for _, d in due_legs(w, legs, tomorrow)] == dates[:4]   # only the near ones daily
+    in3 = today + dt.timedelta(days=3)
+    assert len(due_legs(w, legs, in3)) == 8                       # 30/31 (every 2) and 100/101 (every 3)
+    assert due_legs(w, legs[:8], tomorrow) == legs[:8]            # a small watch: everything, every day
+
+
+def test_budget_keeps_nearest_dates():
+    from app.worker import fit_budget, page_budget
+    w1 = {"id": 1, "origin": "DAL", "destination": "HOU", "trip_type": "oneway"}
+    w2 = {"id": 2, "origin": "DAL,DFW", "destination": "HOU", "trip_type": "oneway"}
+    plan = [(w1, [("out", "2027-03-01"), ("out", "2027-01-05")]), (w2, [("out", "2027-01-10")])]
+    kept = fit_budget(plan, 6)          # w1 costs 2 per date, w2 4 (two airports)
+    assert kept == [(w1, [("out", "2027-01-05")]), (w2, [("out", "2027-01-10")])]
+    assert fit_budget(plan, None) == plan
+    b = page_budget(7, "2027-01-05")
+    assert b == page_budget(7, "2027-01-05") and 20 <= b <= 35
+
+
+def test_record_searched_tracks_price_changes():
+    from app.worker import record_searched
+    uid = make_user()
+    wid = make_watch(uid)
+    with db.tx() as con:
+        record_searched(con, wid, "out", "2027-01-05", [{"cash": 100.0, "points": None}])
+    first = db.one("SELECT * FROM searched")
+    assert first["changed_at"] == first["ts"] and first["cash"] == 100.0
+    with db.tx() as con:
+        con.execute("UPDATE searched SET ts='2027-01-01T07:00:00', changed_at='2027-01-01T07:00:00'")
+        record_searched(con, wid, "out", "2027-01-05", [{"cash": 100.0, "points": None}])
+    again = db.one("SELECT * FROM searched")
+    assert again["changed_at"] == "2027-01-01T07:00:00" and again["ts"] != "2027-01-01T07:00:00"
+    with db.tx() as con:
+        record_searched(con, wid, "out", "2027-01-05", [{"cash": 89.0, "points": None}])
+    assert db.one("SELECT * FROM searched")["changed_at"] != "2027-01-01T07:00:00"
+
+
+def test_calendar_unchanged_skips_recently_searched_dates():
+    from app.worker import calendar_unchanged, record_searched
+    uid = make_user()
+    wid = make_watch(uid)
+    with db.tx() as con:
+        con.execute("INSERT INTO calendar_fares(watch_id, ts, leg, origin, dest, date, cash, points) "
+                    "VALUES (?,?,?,?,?,?,?,?)", (wid, "2026-01-01T07:00:00", "out", "DAL", "HOU", "2027-01-05", 99.0, 6000))
+        assert not calendar_unchanged(con, wid, "out", "2027-01-05", {"cash": 99.0, "points": 6000}, "2099-01-01")
+        record_searched(con, wid, "out", "2027-01-05", [])
+        assert calendar_unchanged(con, wid, "out", "2027-01-05", {"cash": 99.0, "points": 6000}, "2099-01-01")
+        assert not calendar_unchanged(con, wid, "out", "2027-01-05", {"cash": 89.0, "points": 6000}, "2099-01-01")
+
+
+def test_scheduled_run_rotates_but_search_now_does_everything(worker):
+    from app.config import settings
+    settings.page_budget = (0, 0)
+    try:
+        uid = make_user()
+        today = dt.date.today()
+        dates = [(today + dt.timedelta(days=n)).isoformat() for n in (3, 4, 5, 6, 60, 61, 62, 63, 64)]
+        wid = make_watch(uid, dates=",".join(dates))
+        assert worker.run_user(uid)["attempts"] == 18
+        FakeSearcher.calls.clear()
+        assert worker.run_user(uid) == {"skipped": "nothing due today"} and not FakeSearcher.calls
+        assert worker.run_user(uid, watch_ids={wid})["attempts"] == 18            # Search now: all
+    finally:
+        settings.page_budget = (20, 35)

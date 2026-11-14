@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS seat_jobs(
   note TEXT,
   updated TEXT
 );
+CREATE TABLE IF NOT EXISTS searched(       -- when each watch date was last fully searched
+  watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+  leg TEXT NOT NULL,
+  date TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  cash REAL,                                 -- cheapest seen then (any flight)
+  points REAL,
+  changed_at TEXT,                           -- last time those cheapest prices moved
+  PRIMARY KEY (watch_id, leg, date)
+);
 CREATE TABLE IF NOT EXISTS app_state(
   key TEXT PRIMARY KEY,
   value TEXT
