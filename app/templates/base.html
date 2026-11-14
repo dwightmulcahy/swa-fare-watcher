@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Fare Watcher{% endblock %} · Fare Watcher</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="{{ asset('app.css') }}">
+  <script src="{{ asset('app.js') }}" defer></script>
 </head>
 <body{% block body_attrs %}{% endblock %}>
   <header class="top">
