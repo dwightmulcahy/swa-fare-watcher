@@ -212,6 +212,7 @@ MIGRATIONS = {
         "date_from": "TEXT",                     # "between dates": fixed first and last departure day
         "date_to": "TEXT",
         "booked": "TEXT",                        # JSON [{leg, date, flights, cash, points, time, from}]
+        "kind": "TEXT NOT NULL DEFAULT 'fare'",  # fare (find deals) | rebook (booked fare drops) | seats
         "booking_conf": "TEXT",                  # confirmation number of the booked trip
         "booking_first": "TEXT",                 # passenger name as on the booking (for lookup)
         "booking_last": "TEXT",
@@ -241,8 +242,31 @@ def init():
             for name, decl in cols.items():
                 if name not in have:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        _split_booked(con)
     finally:
         con.close()
+
+
+def _split_booked(con):
+    """Once: fare watches that carried a booked fare become a fare watch plus a separate rebook
+    watch for the same route (watch kinds replaced the 'Already booked?' section)."""
+    import json
+    if con.execute("SELECT 1 FROM app_state WHERE key='kinds_split'").fetchone():
+        return
+    rows = con.execute("SELECT * FROM watches WHERE kind='fare' AND booked IS NOT NULL AND booked<>''").fetchall()
+    for w in rows:
+        paid = [b for b in json.loads(w["booked"] or "[]") if b.get("cash") is not None or b.get("points") is not None]
+        if paid:
+            o, d = w["origin"].split(",")[0], w["destination"].split(",")[0]
+            con.execute(
+                "INSERT INTO watches(user_id, created_at, name, origin, destination, adults, trip_type, active,"
+                " kind, booked, dates, mix_payment, same_airports) VALUES (?,?,?,?,?,?,?,?,'rebook',?,?,1,1)",
+                (w["user_id"], w["created_at"], f"{w['name']} (booked)"[:60], o, d, w["adults"],
+                 "roundtrip" if any(b["leg"] == "ret" for b in paid) else "oneway", w["active"],
+                 json.dumps(paid), ",".join(b["date"] for b in paid if b["leg"] == "out")))
+        con.execute("UPDATE watches SET booked=NULL WHERE id=?", (w["id"],))
+    con.execute("INSERT OR REPLACE INTO app_state VALUES ('kinds_split', '1')")
+    con.commit()
 
 
 def sync_seat_jobs(watch_id, now=None):

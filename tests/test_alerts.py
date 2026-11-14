@@ -124,23 +124,38 @@ def test_rebook_alert_sent_once_and_skips_digest(worker, sent):
     worker.run_user(uid)
     assert len(sent) == 1 and "booked flight" in sent[0][1]
     assert "Rebook and save $30" in sent[0][2] and "Change flight" in sent[0][2]
-    assert any(c[2] == d for c in FakeSearcher.calls)
+    assert any(str(c[2]) == d for c in FakeSearcher.calls)
     q = [json.loads(r["hit"]) for r in db.query("SELECT hit FROM digest_hits")]
     assert q and all(h["date"] != d for h in q)        # the booked date isn't one of the watch's deals
     worker.run_user(uid)
     assert len(sent) == 1                              # same price: no second rebook email
 
 
-def test_watch_form_saves_booked_flight(client):
+def test_rebook_watch_form(client):
     import json
-    from tests.test_web import admin_client, watch_form
+    from tests.test_web import admin_client
     t = admin_client(client)
-    data = {**watch_form(t), "booked_out_date": future(10), "booked_out_flights": "502/52", "booked_out_cash": "289"}
+    page = client.get("/watches/new?kind=rebook").text
+    assert 'name="kind" value="rebook"' in page and "max_price" not in page     # no fare-search fields
+    data = {"csrf": t, "kind": "rebook", "origin": "aus", "destination": "BWI", "trip_type": "oneway",
+            "out_date": future(10), "out_flights": "502/52", "out_cash": "289", "adults": "1", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
-    wid = int(loc.rstrip("/").split("/")[-1])
-    b = json.loads(db.one("SELECT booked FROM watches WHERE id=?", (wid,))["booked"])
-    assert b == [{"leg": "out", "date": future(10), "cash": 289, "points": None, "time": None, "from": "AUS",
-                  "flights": "502/52"}]
+    w = db.one("SELECT * FROM watches WHERE id=?", (int(loc.rstrip("/").split("/")[-1]),))
+    assert w["kind"] == "rebook" and w["origin"] == "AUS" and w["name"] == "AUS→BWI booked"
+    assert json.loads(w["booked"]) == [{"leg": "out", "date": future(10), "from": "AUS", "flights": "502/52",
+                                        "cash": 289, "points": None, "time": None}]
     assert 'value="502/52"' in client.get(loc + "/edit").text
-    bad = {**watch_form(t), "booked_out_date": future(10)}
+    bad = {**data, "out_cash": ""}
     assert "what you paid" in client.post("/watches", data=bad).text
+
+
+
+def test_rebook_watch_searches_only_the_booked_flight(worker, sent):
+    import json
+    uid = make_user()
+    d = future(12)
+    make_watch(uid, kind="rebook", dates=d, max_price=None, max_points=None,
+               booked=json.dumps([{"leg": "out", "date": d, "flights": "99", "cash": 450, "points": None}]))
+    out = worker.run_user(uid)
+    assert {str(c[2]) for c in FakeSearcher.calls} == {d} and out["attempts"] == 2
+    assert len(sent) == 1 and "booked flight" in sent[0][1]      # only the rebook email, no deal alerts

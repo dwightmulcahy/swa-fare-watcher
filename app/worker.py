@@ -383,7 +383,7 @@ class Worker:
 
     def eligible_users(self):
         rows = db.query("SELECT DISTINCT u.* FROM users u JOIN watches w ON w.user_id=u.id "
-                        "WHERE w.active=1 AND u.active=1")
+                        "WHERE w.active=1 AND u.active=1 AND w.kind IN ('fare','rebook')")
         now = db.now()
         return [u["id"] for u in rows if db.user_can_run(u) and not (u["blocked_until"] and u["blocked_until"] > now)]
 
@@ -666,7 +666,8 @@ class Worker:
             return {"skipped": "user inactive"}
         creds = decrypt_json(user["swa_creds"]) if (settings.auto_login and user["auto_login"]) else None
         watches = [] if signin_only else db.query(
-            "SELECT * FROM watches WHERE user_id=? AND active=1 ORDER BY id", (user_id,))
+            "SELECT * FROM watches WHERE user_id=? AND active=1 AND kind IN ('fare','rebook') ORDER BY id",
+            (user_id,))
         if watch_ids is not None:
             watches = [w for w in watches if w["id"] in watch_ids]
         if not watches and not (signin_only and creds):
@@ -719,7 +720,8 @@ class Worker:
                         note = None
                         n_routes = len(swa.routes(w))
                         to_search = {}   # (leg, date) -> airport pairs; default: all of them
-                        if settings.calendar and hasattr(searcher, "calendar") and dates:
+                        fare = (w["kind"] or "fare") == "fare"
+                        if fare and settings.calendar and hasattr(searcher, "calendar") and dates:
                             before = 2 * n_routes * len(dates)
                             dates, to_search, used, hit_cap = self._calendar_phase(
                                 user_id, w, route, dates, searcher, cap)
@@ -734,10 +736,10 @@ class Worker:
                                 note = "No date on the calendar under your target"
                         # dates of flights already booked are always searched (rebook check)
                         booked = [b for b in swa.booked(w) if b["date"] >= db.today() and (rt or b["leg"] == "out")]
-                        extra = {(b["leg"], b["date"]) for b in booked} - planned
+                        want = list(dict.fromkeys((b["leg"], b["date"]) for b in booked))
+                        extra = set(want) - planned
                         if not limited:
-                            dates = list(dates) + [k for k in dict.fromkeys((b["leg"], b["date"]) for b in booked)
-                                                   if k not in set(dates)]
+                            dates = list(dates) + [k for k in want if k not in set(dates)]
                         legs = {"out": {}, "ret": {}}  # this run's flights per leg and date
                         multi = n_routes > 1
                         cands = []   # this watch's matching flights or round trips; pick_alerts decides
@@ -803,7 +805,7 @@ class Worker:
                                             (w["id"], ts, date, leg, frm, to, r["key"], r["flights"], r["depart"],
                                              r["arrive"], r["stops"], r.get("via") or "", r["duration"], r["cash"],
                                              r["points"], r["points_taxes"], r["cpp"], int(matched)))
-                                        if not matched or rt or (leg, date) in extra:
+                                        if not matched or rt or (leg, date) in extra or not fare:
                                             continue
                                         w_m += 1
                                         n_match += 1
@@ -823,7 +825,7 @@ class Worker:
                                             user_id=user_id, watch_id=w["id"], source="run")
                             if limited or self._stop(user_id):
                                 break
-                        if rt:
+                        if rt and fare:
                             trips = swa.roundtrips(w, {lg: {d: v for d, v in by.items() if (lg, d) not in extra}
                                                        for lg, by in legs.items()})
                             for t in trips:

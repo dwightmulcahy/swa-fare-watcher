@@ -25,12 +25,12 @@ def test_form_shows_airport_names(client):
 
 def test_form_fields_offer_airport_suggestions(client):
     admin_client(client)
-    page = client.get("/watches/new").text
+    page = client.get("/watches/new?kind=fare").text
     assert page.count("data-airport-suggest") == 2 and 'maxlength="60"' in page
 
 
 def test_form_marks_fields_for_readable_lines(client):
     admin_client(client)
-    page = client.get("/watches/new").text
+    page = client.get("/watches/new?kind=fare").text
     assert 'class="card form-grid watch-form"' in page
     assert 'name="max_duration_h" data-readable="hours"' in page and 'name="max_points" data-readable="points"' in page

@@ -1,0 +1,20 @@
+  <fieldset class="plain">
+    <input type="hidden" name="active" value="0">
+    <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if w.active }}> {{ active_label }}</label>
+  </fieldset>
+
+  <div class="form-foot">
+    <p class="muted small">Your limits: {{ limits.watches }}{% if limits.max_watches is not none %} / {{ limits.max_watches }}{% endif %} active watches,
+      {{ limits.per_day }}{% if limits.max_searches is not none %} / {{ limits.max_searches }}{% endif %} searches per day.</p>
+    <div class="buttons">
+      <a class="button" href="{{ '/' if new else '/watches/' ~ w.id }}">Cancel</a>
+      <button type="submit" class="primary">{{ 'Create watch' if new else 'Save changes' }}</button>
+    </div>
+  </div>
+</form>
+{% if not new %}
+<form method="post" action="/watches/{{ w.id }}/delete" class="danger-zone" data-confirm="Delete this watch and its price history?">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit" class="danger">Delete watch</button>
+</form>
+{% endif %}

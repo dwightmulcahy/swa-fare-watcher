@@ -35,8 +35,17 @@
   {% for w in watches %}{% set b = best[w.id] %}
   <tr class="{{ '' if w.active else 'paused' }}">
     <td><a href="/watches/{{ w.id }}" class="strong">{{ w.name }}</a><br><span class="route">{{ w.origin|airports }} {{ '⇄' if w.trip_type == 'roundtrip' else '→' }} {{ w.destination|airports }}</span>
+      {% set kind = w.kind or 'fare' %}<span class="pill kind-{{ kind }}">{{ {"fare": "Fare", "rebook": "Rebook", "seats": "Seats"}[kind] }}</span>
       {% if w.trip_type == 'roundtrip' %}<span class="pill trip">Round trip</span>{% endif %}
       {% if not w.active %}<span class="pill">Paused</span>{% endif %}</td>
+    {% if kind != 'fare' %}{% set bk = booked_of(w) %}
+    <td class="small">{% for leg, b in bk.items() %}{{ "Back" if leg == "ret" else "Out" }} {{ b.date }}{% if b.time %} {{ b.time }}{% endif %}{% if b.flights %} · #{{ b.flights }}{% endif %}<br>{% endfor %}
+      {% if kind == 'rebook' %}<span class="muted">{{ est[w.id] }} searches/run</span>{% else %}<span class="muted">Conf. {{ w.booking_conf }}</span>{% endif %}</td>
+    <td class="small">{% if kind == 'rebook' %}{% for leg, b in bk.items() %}Paid {% if b.cash %}${{ b.cash }}{% endif %}{% if b.cash and b.points %} / {% endif %}{% if b.points %}{{ b.points|pts }} pts{% endif %}<br>{% endfor %}
+      {% else %}{% set sp = seat_prefs(w) %}{{ seats.STATUSES[w.seat_status or 'none'][0] }}<br><span class="muted">{{ seats.POSITIONS[sp.position] }}{% if sp.extra_legroom %} · Extra Legroom{% endif %}</span>{% endif %}</td>
+    <td class="num">{% if kind == 'seats' %}{% set j = seat_next.get(w.id) %}{% if j %}<span class="small">{{ j.label }}</span><br><span class="muted small">{{ j.when }}</span>{% else %}<span class="muted">—</span>{% endif %}
+      {% elif b and b.n %}<span class="price">{{ b.cash|money }}</span><br><span class="muted small">lowest now</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% else %}
     <td class="small">{% if w.dates %}{{ w.dates.split(',')|length }} date(s)<br><span class="muted">{{ w.dates.split(',')[0] }}{% if w.dates.split(',')|length > 1 %} … {{ w.dates.split(',')[-1] }}{% endif %}</span>
       {% elif w.date_from %}Between<br><span class="muted">{{ w.date_from }} … {{ w.date_to }}</span>
       {% else %}Next {{ w.days_from }}–{{ w.days_to }} days{% endif %}
@@ -51,6 +60,7 @@
         {% if b.cash or b.points %}<span class="price">{{ b.cash|money }}</span><br><span class="muted small">{{ b.points|pts }} pts</span>
         {% else %}<span class="muted small">No match<br>lowest {{ b.any_cash|money }}</span>{% endif %}
       {% else %}<span class="muted">—</span>{% endif %}</td>
+    {% endif %}
     <td class="small" data-watch-status="{{ w.id }}">{% if live.state == 'running' and live.watch_id == w.id %}<span class="pill">Running now</span><br><span class="muted">{{ live.phase }}</span>
       {% elif live.state and (not w.last_run_at) %}<span class="pill">{{ live.state|capitalize }}</span>
       {% else %}{{ w.last_run_at|when }}<br><span class="muted">{{ w.last_status or 'Not run yet' }}</span>{% endif %}</td>

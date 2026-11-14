@@ -362,3 +362,16 @@ label:has(> .suggest) { position: relative; }
 .watch-form .field > .label { font-weight: 600; font-size: .92rem; }
 .watch-form .booked-row input.code { max-width: 5.5rem; }
 ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+/* new-watch chooser */
+.kind-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+a.card.kind { display: flex; flex-direction: column; gap: .4rem; text-decoration: none; color: var(--ink);
+  border-top: 4px solid var(--blue); transition: transform .12s ease, box-shadow .12s ease; }
+a.card.kind:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(17, 27, 64, .12); }
+a.card.kind h2 { margin: 0; font-size: 1.15rem; }
+a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
+.kind-go { color: var(--accent); font-weight: 700; }
+.pill.kind-fare { background: var(--accent-soft); color: var(--blue); }
+.pill.kind-rebook { background: #fff4d6; color: #7a5200; }
+.pill.kind-seats { background: #e6f4ea; color: #1a7f37; }
+@media (prefers-color-scheme: dark) { .pill.kind-rebook { background: #3a3218; color: #ffd76a; }
+  .pill.kind-seats { background: #17331f; color: #7ee2a0; } .pill.kind-fare { color: var(--accent); } }

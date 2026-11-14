@@ -1,0 +1,14 @@
+  <fieldset>
+    <legend>Flight</legend>
+    <div class="row">
+      <label>From <input name="origin" value="{{ w.origin }}" maxlength="3" data-airport-suggest placeholder="LIR" required class="code" autocapitalize="characters" spellcheck="false">
+        <span class="airport-names readable" data-airport-names="origin" aria-live="polite">{% for code, place in w.origin|airport_names %}<span>{{ place or 'Airport not found' }} - {{ code }}</span>{% endfor %}</span></label>
+      <label>To <input name="destination" value="{{ w.destination }}" maxlength="3" data-airport-suggest placeholder="HOU" required class="code" autocapitalize="characters" spellcheck="false">
+        <span class="airport-names readable" data-airport-names="destination" aria-live="polite">{% for code, place in w.destination|airport_names %}<span>{{ place or 'Airport not found' }} - {{ code }}</span>{% endfor %}</span></label>
+    </div>
+    <div class="seg trip-type">
+      <label><input type="radio" name="trip_type" value="oneway" {{ '' if rt else 'checked' }}> One-way</label>
+      <label><input type="radio" name="trip_type" value="roundtrip" {{ 'checked' if rt }}> Round trip</label>
+    </div>
+    <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="{{ placeholder }}"></label>
+  </fieldset>
