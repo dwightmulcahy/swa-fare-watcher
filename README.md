@@ -192,6 +192,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 | `SWA_DAILY_PAGE_BUDGET` | `20,35` | Page loads per account per day (a random number in the range, fixed for the day); the nearest dates are kept when a run wouldn't fit. Also capped by the user's daily search limit. `0,0` = no budget |
 | `SWA_VISIT_SEARCHES` | `6,14` | A run is split into visits of this many page loads (random each visit); the browser closes between them. `0,0` = one visit per run |
 | `SWA_VISIT_BREAK` | `20,90` | Minutes between visits; the next one starts at the home page with the same browser profile. Long watches take hours this way |
+| `SWA_HABIT_SLOTS` | `true` | Each user checks at 2–3 habitual times of day, fixed per user (weekdays: morning 6:30–8:45, lunch 12:00–13:30, evening 19:00–21:45; weekends later), moved ±20 min each day. Each check-in is one visit; what's left continues at the next one. Users start at least 20 min apart. With `false`, `SWA_DAILY_AT`, `SWA_DAILY_JITTER_MINUTES` and `SWA_USER_SPREAD_MINUTES` schedule one run a day instead |
 | `SWA_USER_SPREAD_MINUTES` | `120` | Each user gets their own usual time within ± this of `SWA_DAILY_AT` (fixed per user), plus the daily jitter; users start at least 20 min apart |
 | `SWA_SKIP_DAY_CHANCE` | `0.12` | Chance a user takes a day off from searching (never two days running, never with a booked flight to watch); `0` = every day |
 | `SWA_SCHEDULER` | `true` | `false` disables the daily run (manual runs still work) |

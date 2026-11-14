@@ -74,6 +74,42 @@ def plan_users(user_ids, day, now, hhmm, spread_min, jitter_min, min_gap_min=20,
     return plan
 
 
+# habitual times of day: (name, earliest, latest) in minutes after midnight
+SLOTS_WEEKDAY = [("morning", 6 * 60 + 30, 8 * 60 + 45), ("lunch", 12 * 60, 13 * 60 + 30),
+                 ("evening", 19 * 60, 21 * 60 + 45)]
+SLOTS_WEEKEND = [("morning", 8 * 60 + 45, 10 * 60 + 45), ("afternoon", 14 * 60, 16 * 60 + 30),
+                 ("evening", 19 * 60 + 30, 22 * 60)]
+
+
+def habit_slots(user_id, day, jitter_min=20, rng=random):
+    """This user's check-in times on `day`: 2-3 habitual slots chosen once per user (seeded from
+    the id), each at the user's usual minute within it, moved up to ±jitter_min each day."""
+    r = random.Random(int(hashlib.sha256(f"slots:{user_id}".encode()).hexdigest(), 16))
+    weekend = day.weekday() >= 5
+    table = SLOTS_WEEKEND if weekend else SLOTS_WEEKDAY
+    n = 3 if r.random() < 0.4 else 2
+    names = sorted(r.sample(range(3), n))
+    if 2 not in names and r.random() < 0.7:   # most people look in the evening
+        names = sorted(set(names[:-1]) | {2})
+    out = []
+    for i in names:
+        _, lo, hi = table[i]
+        usual = r.uniform(lo, hi)
+        m = min(max(usual + rng.uniform(-jitter_min, jitter_min), lo - jitter_min), hi + jitter_min)
+        out.append(dt.datetime.combine(day, dt.time(0)) + dt.timedelta(minutes=m, seconds=rng.randint(0, 59)))
+    return out
+
+
+def plan_slots(user_ids, day, now, min_gap_min=20, rng=random):
+    """Every (time, user) check-in for `day` still ahead of `now`, at least min_gap_min apart."""
+    plan = sorted((t, uid) for uid in user_ids for t in habit_slots(uid, day, rng=rng) if t > now)
+    for i in range(1, len(plan)):
+        gap = plan[i - 1][0] + dt.timedelta(minutes=min_gap_min)
+        if plan[i][0] < gap:
+            plan[i] = (gap + dt.timedelta(seconds=rng.randint(0, 300)), plan[i][1])
+    return plan
+
+
 def skip_today(user_id, day, chance, rng=random):
     """Now and then a user doesn't check at all that day (never two days running), like a person.
     Users with a booked flight to watch for rebooking are never skipped."""
@@ -130,18 +166,20 @@ def search_every(days_out):
 
 
 def due_legs(w, legs, today=None):
-    """The (leg, date)s of a watch that are due a search today, nearest first. A watch with only a
-    handful of dates, and a rebook watch, searches everything every time."""
+    """The (leg, date)s of a watch due a search today (none twice in a day). A watch with only a
+    handful of dates searches each daily; a rebook watch searches everything every time."""
     today = today or dt.date.today()
-    if len(legs) <= 8 or (w["kind"] or "fare") != "fare":
+    if (w["kind"] or "fare") != "fare":
         return list(legs)
+    small = len(legs) <= 8     # a handful of dates: each one daily
     last = {(r["leg"], r["date"]): r["ts"] for r in
             db.query("SELECT leg, date, ts FROM searched WHERE watch_id=?", (w["id"],))}
     out = []
     for leg, d in legs:
         days_out = (dt.date.fromisoformat(d) - today).days
         ts = last.get((leg, d))
-        if ts is None or (today - dt.date.fromisoformat(ts[:10])).days >= search_every(days_out):
+        every = 1 if small else search_every(days_out)
+        if ts is None or (today - dt.date.fromisoformat(ts[:10])).days >= every:
             out.append((leg, d))
     return out
 
@@ -195,14 +233,19 @@ def calendar_unchanged(con, watch_id, leg, date, low, before, recent_days=3):
     return bool(seen) and (dt.datetime.now() - dt.datetime.fromisoformat(seen["ts"])).days < recent_days
 
 
+class VisitOver(Exception):
+    """A one-visit run used its visit; the run winds down and keeps what it found."""
+
+
 class Visits:
     """The browser for one run, split into visits like a person's: after a handful of searches
     (SWA_VISIT_SEARCHES) the browser closes, the worker takes a break (SWA_VISIT_BREAK minutes),
     then a new visit starts at the home page with the same profile. Everything else is passed
     through to the current searcher."""
 
-    def __init__(self, worker, user_id, factory, state, remaining=lambda: 0, rng=random):
+    def __init__(self, worker, user_id, factory, state, remaining=lambda: 0, rng=random, single=False):
         self._worker, self._uid, self._factory, self._rng = worker, user_id, factory, rng
+        self._single = single
         self._remaining = remaining
         self._inner = None
         self._state = state
@@ -252,6 +295,10 @@ class Visits:
         with only a few searches left just finishes them, as anyone would."""
         if (self._quota is not None and self._count >= self._quota and self._remaining() > 3
                 and not self._worker._stop(self._uid)):
+            if self._single:   # a habitual check-in is one visit: stop here, the rest is still due
+                self._worker.paused.add(self._uid)
+                self._worker.phase(self._uid, "This visit's done; the rest continues at the next check-in")
+                raise VisitOver()
             self.__exit__(None, None, None)
             lo, hi = settings.visit_break
             pause = self._rng.uniform(lo, hi) * 60
@@ -379,11 +426,17 @@ class Worker:
         self._wake = threading.Event()   # cuts a pause short when the running user cancels
         self._threads = []
         self.seat_busy = set()     # users whose seat selection is running right now
+        self.one_visit = set()     # queued for a habitual check-in: one visit, the rest continues later
+        self.paused = set()        # running users whose one visit is used up
         self.started_at = dt.datetime.now()
 
     # ----- queueing -----
-    def enqueue(self, user_id, watch_ids=None):
+    def enqueue(self, user_id, watch_ids=None, one_visit=False):
         with self.lock:
+            if one_visit and watch_ids is None:
+                self.one_visit.add(user_id)
+            elif user_id not in self.pending:
+                self.one_visit.discard(user_id)
             if user_id in self.pending:
                 cur = self.pending[user_id]
                 self.pending[user_id] = None if (cur is None or watch_ids is None) else cur | set(watch_ids)
@@ -414,7 +467,7 @@ class Worker:
         return state
 
     def _stop(self, user_id):
-        return user_id in self.cancelled
+        return user_id in self.cancelled or user_id in self.paused
 
     def _pause(self, user_id, seconds, searcher=None):
         """Pause between searches; a real pause ends early on Cancel. With a real clock the browser
@@ -507,6 +560,8 @@ class Worker:
                 ids = self.pending.pop(uid, None)
                 only = uid in self.signin_only
                 self.signin_only.discard(uid)
+                single = uid in self.one_visit and ids is None
+                self.one_visit.discard(uid)
                 if uid in self.cancelled:   # cancelled while queued
                     self.cancelled.discard(uid)
                     continue
@@ -515,7 +570,7 @@ class Worker:
             while uid in self.seat_busy:      # its seat selection is using the browser profile
                 time.sleep(5)
             try:
-                self.run_user(uid, ids, signin_only=only)
+                self.run_user(uid, ids, signin_only=only, one_visit=single)
             except Exception as e:
                 if not getattr(e, "logged", False):
                     applog.error(f"Run stopped by an error: {e.__class__.__name__}: {e}", user_id=uid,
@@ -524,6 +579,7 @@ class Worker:
                 with self.lock:
                     self.running_user = None
                     self.cancelled.discard(uid)
+                    self.paused.discard(uid)
                 self.progress.pop(uid, None)
 
     # ----- seat selection (48 h before departure)
@@ -732,6 +788,8 @@ class Worker:
             time.sleep(min(wait, 300))  # re-check: survives clock changes and sleep/suspend
 
     def _schedule(self):
+        if settings.habit_slots:
+            return self._schedule_slots()
         last_day = None
         while True:
             spread = settings.user_spread_min
@@ -754,6 +812,35 @@ class Worker:
                 self.planned.pop(uid, None)
             last_day = day
 
+    def _schedule_slots(self):
+        """Each day: every user's habitual check-in times; at each one, queue a one-visit run."""
+        last_day = None
+        while True:
+            now = dt.datetime.now()
+            day = now.date() if last_day != now.date() else now.date() + dt.timedelta(days=1)
+            if day > now.date():
+                self.next_window = (dt.datetime.combine(day, dt.time(0, 5)), None)
+                self._sleep_until(dt.datetime.combine(day, dt.time(0, 5)))
+            users = self.eligible_users()
+            skipped = [u for u in users if skip_today(u, day, settings.skip_day_chance)]
+            plan = plan_slots([u for u in users if u not in skipped], day, dt.datetime.now())
+            self.planned = {}
+            for t, uid in plan:
+                self.planned.setdefault(uid, t)
+            applog.info(f"Today's check-ins, {len(plan)}: "
+                        + (", ".join(f"user {uid} at {t:%H:%M}" for t, uid in plan) or "none")
+                        + (f"; taking the day off: {', '.join(f'user {u}' for u in skipped)}" if skipped else ""),
+                        source="scheduler")
+            for i, (t, uid) in enumerate(plan):
+                self._sleep_until(t)
+                self.enqueue(uid, one_visit=True)
+                later = [x for x, u in plan[i + 1:] if u == uid]
+                if later:
+                    self.planned[uid] = later[0]
+                else:
+                    self.planned.pop(uid, None)
+            last_day = day
+
     def next_run_for(self, user_id):
         """This user's planned start today, or the next window (start, end)."""
         if user_id in self.planned:
@@ -761,7 +848,7 @@ class Worker:
         return None, self.next_window
 
     # ----- the actual run -----
-    def run_user(self, user_id, watch_ids=None, signin_only=False):
+    def run_user(self, user_id, watch_ids=None, signin_only=False, one_visit=False):
         user = db.one("SELECT * FROM users WHERE id=?", (user_id,))
         if not user or not db.user_can_run(user):
             return {"skipped": "user inactive"}
@@ -806,7 +893,7 @@ class Worker:
         try:
             self.phase(user_id, "Starting the browser")
             visits = Visits(self, user_id, lambda st: self.searcher_factory(st, profile_key=user_id), state,
-                            remaining=lambda: total - done)
+                            remaining=lambda: total - done, single=one_visit)
             with visits as searcher:
                 self.check_gpu(searcher)
                 try:
@@ -862,6 +949,7 @@ class Worker:
                         for leg, date in dates:
                             ts = db.now()   # one timestamp per date, shared by its airport pairs
                             date_start = attempts
+                            partial = False   # only one currency read before the visit ended
                             for frm, to in to_search.get((leg, date), swa.routes(w, leg)):
                                 if self._stop(user_id):
                                     break
@@ -882,7 +970,12 @@ class Worker:
                                     self.phase(user_id, f"{route}: searching {frm}→{to} {date} "
                                                f"({'cash' if ft == 'USD' else 'points'})",
                                                watch_id=w["id"], done=done, total=total)
-                                    res[ft] = searcher.search(frm, to, date, w["adults"], ft)
+                                    try:
+                                        res[ft] = searcher.search(frm, to, date, w["adults"], ft)
+                                    except VisitOver:   # this check-in's visit is used up
+                                        done -= 1
+                                        partial = partial or bool(res)
+                                        break
                                     with db.tx() as con:
                                         db.add_searches(con, user_id, 1)
                                     attempts += 1
@@ -940,14 +1033,23 @@ class Worker:
                                 applog.info(f"{route}: {frm}→{to} {date}: {n_flights} flight(s)" + cheapest
                                             + ("" if rt else f", {n_match} matching"),
                                             user_id=user_id, watch_id=w["id"], source="run")
-                            if attempts > date_start:
+                            if attempts > date_start and not partial:
                                 with db.tx() as con:
                                     record_searched(con, w["id"], leg, date, legs[leg].get(date, []))
                             if limited or self._stop(user_id):
                                 break
                         if rt and fare:
+                            # pair with directions searched at earlier check-ins too (rotation keeps
+                            # those at most a few days old); this run's prices win
+                            since = (dt.datetime.now() - dt.timedelta(days=5)).isoformat(timespec="seconds")
+                            pool = db.latest_legs(w["id"], since=since) if one_visit or settings.rotate else \
+                                {"out": {}, "ret": {}}
+                            valid = set(swa.search_legs(w))
+                            pool = {lg: {d: v for d, v in by.items() if (lg, d) in valid} for lg, by in pool.items()}
+                            for lg, by in legs.items():
+                                pool.setdefault(lg, {}).update(by)
                             trips = swa.roundtrips(w, {lg: {d: v for d, v in by.items() if (lg, d) not in extra}
-                                                       for lg, by in legs.items()})
+                                                       for lg, by in pool.items()})
                             for t in trips:
                                 if not t["matched"]:
                                     continue
@@ -971,7 +1073,9 @@ class Worker:
                             applog.info(f"{route}: nothing cheaper than the fares already emailed",
                                         user_id=user_id, watch_id=w["id"], source="run")
                         hits.extend(new)
-                        if self._stop(user_id):
+                        if user_id in self.paused:
+                            note = f"{w_s} search(es) this visit, {w_m} matching; the rest at the next check-in"
+                        elif self._stop(user_id):
                             note = f"Cancelled after {w_s} search(es), {w_m} matching"
                         if note is None:
                             note = ("All searches failed" if w_s and w_f == w_s
@@ -1015,8 +1119,8 @@ class Worker:
                             (status, db.now(), user_id))
 
         self.check_format(attempts, getattr(searcher, "shape_errors", 0), priceless)
-        cancelled = self._stop(user_id)
-        applog.info(f"Run {'cancelled' if cancelled else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
+        cancelled = user_id in self.cancelled
+        applog.info(f"Run {'cancelled' if cancelled else 'paused until the next check-in' if user_id in self.paused else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
         rebooks = [h for h in hits if h.get("rebook")]
@@ -1082,7 +1186,10 @@ class Worker:
                     return [], {}, used, True
                 self.phase(user_id, f"{route}: reading the {month} {'cash' if ft == 'USD' else 'points'} "
                            f"calendar {frm}→{to}", watch_id=w["id"])
-                days = searcher.calendar(frm, to, first, w["adults"], ft)
+                try:
+                    days = searcher.calendar(frm, to, first, w["adults"], ft)
+                except VisitOver:
+                    return [], {}, used, False
                 with db.tx() as con:
                     db.add_searches(con, user_id, 1)
                 used += 1

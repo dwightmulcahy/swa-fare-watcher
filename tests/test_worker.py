@@ -414,10 +414,13 @@ def test_far_dates_are_searched_less_often():
     in3 = today + dt.timedelta(days=3)
     assert len(due_legs(w, legs, in3)) == 8                       # 30/31 (every 2) and 100/101 (every 3)
     assert due_legs(w, legs[:8], tomorrow) == legs[:8]            # a small watch: everything, every day
+    assert due_legs(w, legs[:8], today) == []                     # but not twice in one day
 
 
-def test_budget_keeps_nearest_dates():
+def test_budget_keeps_nearest_dates(monkeypatch):
+    from app.config import settings
     from app.worker import fit_budget, page_budget
+    monkeypatch.setattr(settings, "page_budget", (20, 35))
     w1 = {"id": 1, "origin": "DAL", "destination": "HOU", "trip_type": "oneway"}
     w2 = {"id": 2, "origin": "DAL,DFW", "destination": "HOU", "trip_type": "oneway"}
     plan = [(w1, [("out", "2027-03-01"), ("out", "2027-01-05")]), (w2, [("out", "2027-01-10")])]
@@ -459,10 +462,10 @@ def test_calendar_unchanged_skips_recently_searched_dates():
         assert not calendar_unchanged(con, wid, "out", "2027-01-05", {"cash": 89.0, "points": 6000}, "2099-01-01")
 
 
-def test_scheduled_run_rotates_but_search_now_does_everything(worker):
+def test_scheduled_run_rotates_but_search_now_does_everything(worker, monkeypatch):
     from app.config import settings
-    settings.page_budget = (0, 0)
-    try:
+    monkeypatch.setattr(settings, "rotate", True)
+    if True:
         uid = make_user()
         today = dt.date.today()
         dates = [(today + dt.timedelta(days=n)).isoformat() for n in (3, 4, 5, 6, 60, 61, 62, 63, 64)]
@@ -471,5 +474,42 @@ def test_scheduled_run_rotates_but_search_now_does_everything(worker):
         FakeSearcher.calls.clear()
         assert worker.run_user(uid) == {"skipped": "nothing due today"} and not FakeSearcher.calls
         assert worker.run_user(uid, watch_ids={wid})["attempts"] == 18            # Search now: all
-    finally:
-        settings.page_budget = (20, 35)
+
+
+def test_habit_slots_are_a_personal_routine():
+    from app.worker import habit_slots, plan_slots
+    mon, sat = dt.date(2027, 1, 4), dt.date(2027, 1, 9)
+    a1 = habit_slots(1, mon, rng=random.Random(1))
+    a2 = habit_slots(1, dt.date(2027, 1, 5), rng=random.Random(2))
+    assert 2 <= len(a1) <= 3 and len(a1) == len(a2)
+    assert [t.hour for t in a1] == [t.hour for t in a2] or all(
+        abs((x - y.replace(day=x.day)).total_seconds()) <= 45 * 60 for x, y in zip(a1, a2))   # same habits
+    people = [habit_slots(u, mon, rng=random.Random(0)) for u in range(1, 60)]
+    assert len({tuple(t.hour for t in p) for p in people}) > 3                   # different people
+    assert sum(any(t.hour >= 18 for t in p) for p in people) > 40               # most look in the evening
+    wk = habit_slots(1, sat, rng=random.Random(1))
+    assert min(t.hour * 60 + t.minute for t in wk) >= 8 * 60 + 25               # no early mornings on Saturday
+    plan = plan_slots(range(1, 9), mon, dt.datetime(2027, 1, 4, 0, 0), rng=random.Random(3))
+    ts = [t for t, _ in plan]
+    assert all(b - a >= dt.timedelta(minutes=20) for a, b in zip(ts, ts[1:]))
+    assert plan_slots([1], mon, dt.datetime(2027, 1, 4, 23, 59)) == []
+
+
+def test_one_visit_run_stops_and_the_next_check_in_continues(worker, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "visit_searches", (4, 4))
+    monkeypatch.setattr(settings, "rotate", True)
+    uid = make_user()
+    today = dt.date.today()
+    dates = [(today + dt.timedelta(days=n)).isoformat() for n in range(3, 10)]  # 7 near dates: 14 searches
+    make_watch(uid, dates=",".join(dates))
+    first = worker.run_user(uid, one_visit=True)
+    assert first["attempts"] == 4 and not first["cancelled"]
+    note = db.one("SELECT note FROM runs ORDER BY id DESC LIMIT 1")["note"]
+    assert "the rest at the next check-in" in note
+    worker.paused.discard(uid)
+    FakeSearcher.calls.clear()
+    second = worker.run_user(uid, one_visit=True)
+    searched = {str(c[2]) for c in FakeSearcher.calls}
+    assert second["attempts"] == 4 and len(searched) == 2                      # two more dates, none repeated
+    assert len(db.query("SELECT * FROM searched")) == 4
