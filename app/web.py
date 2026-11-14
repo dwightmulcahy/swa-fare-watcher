@@ -3,8 +3,11 @@ import datetime as dt
 import hmac
 import json
 import mimetypes
+import os
 import re
+import signal
 import sys
+import threading
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -16,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import airports, applog, buildinfo, db, seats, swa
+from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa
 from . import worker as worker_mod
 from .config import settings
 from .mailer import fmt_dur
@@ -954,6 +957,82 @@ def create_app(worker=None, start_worker=True):
         from . import tzcheck
         return render(request, "admin_users.html", u, s, users=users, today=db.today(),
                       worker=app.state.worker, tz=tzcheck.last_result)
+
+    # ---------- admin: settings (.env) ----------
+    def _env_view():
+        values = envfile.read()
+        rows = []
+        for title, items in envspec.GROUPS:
+            group = []
+            for st in items:
+                in_file = st.name in values
+                val = values.get(st.name, st.default)
+                running = os.environ.get(st.name, "")
+                group.append({"s": st, "value": "" if st.kind == "secret" else val, "in_file": in_file,
+                              "is_set": bool(values.get(st.name)) if st.kind == "secret" else None,
+                              "differs": st.kind != "secret" and not st.compose and in_file
+                              and running != val and not (running == "" and val == st.default)})
+            rows.append((title, group))
+        return rows
+
+    def _env_value(st, f, errs):
+        """A posted setting, checked; None = leave the file as it is."""
+        name = st.name
+        if st.kind == "bool":
+            return "true" if f.get(name) else "false"
+        v = str(f.get(name, "")).strip()
+        if st.kind == "secret":
+            return "" if f.get(f"clear_{name}") else (v or None)
+        if v == "":
+            return ""
+        ok = {"int": r"-?\d+", "float": r"-?\d+(\.\d+)?", "time": r"([01]\d|2[0-3]):[0-5]\d",
+              "range": r"\d+(\.\d+)?\s*,\s*\d+(\.\d+)?", "url": r"https?://\S+"}.get(st.kind)
+        if ok and not re.fullmatch(ok, v):
+            errs.append(f"{name}: not a valid {st.kind} ({v})")
+        if st.kind == "choice" and v not in st.choices:
+            errs.append(f"{name}: must be one of {', '.join(st.choices)}")
+        if "\n" in v:
+            errs.append(f"{name}: one line only")
+        return re.sub(r"\s*,\s*", ",", v) if st.kind == "range" else v
+
+    @app.get("/admin/settings", response_class=HTMLResponse)
+    def admin_settings(request: Request):
+        u, s = require(request, admin=True)
+        return render(request, "admin_settings.html", u, s, groups=_env_view(), env_path=envfile.path(),
+                      env_exists=envfile.path().exists(), env_writable=envfile.writable())
+
+    @app.post("/admin/settings", response_class=HTMLResponse)
+    async def admin_settings_save(request: Request):
+        u, s = require(request, admin=True)
+        f = await form(request, s)
+        errs, values = [], envfile.read()
+        before = dict(values)
+        for st in envspec.ALL.values():
+            v = _env_value(st, f, errs)
+            if v is None:
+                continue
+            if st.name not in values and v == st.default:
+                continue                       # untouched default: stays a commented line
+            values[st.name] = v
+        if errs:
+            return render(request, "admin_settings.html", u, s, groups=_env_view(), env_path=envfile.path(),
+                          env_exists=envfile.path().exists(), env_writable=envfile.writable(),
+                          error="; ".join(errs))
+        if not envfile.writable():
+            raise Redirect(f"/admin/settings?err=Can't+write+{envfile.path()}")
+        changed = sorted(k for k in set(values) | set(before) if values.get(k) != before.get(k))
+        envfile.write(values)
+        applog.info(f"Settings saved by {u['username']}: {', '.join(changed) or 'no changes'}", source="admin")
+        msg = f"Saved {len(changed)} change(s). Restart the app to apply them." if changed else "No changes."
+        raise Redirect("/admin/settings?ok=" + quote_plus(msg))
+
+    @app.post("/admin/settings/restart")
+    async def admin_restart(request: Request):
+        u, s = require(request, admin=True)
+        await form(request, s)
+        applog.warn(f"Restart requested by {u['username']}", source="admin")
+        threading.Timer(1.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+        raise Redirect("/admin/settings?ok=" + quote_plus("Restarting: the page comes back in about a minute."))
 
     @app.get("/admin/users/new", response_class=HTMLResponse)
     def admin_new(request: Request):

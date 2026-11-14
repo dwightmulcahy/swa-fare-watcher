@@ -375,3 +375,12 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .pill.kind-seats { background: #e6f4ea; color: #1a7f37; }
 @media (prefers-color-scheme: dark) { .pill.kind-rebook { background: #3a3218; color: #ffd76a; }
   .pill.kind-seats { background: #17331f; color: #7ee2a0; } .pill.kind-fare { color: var(--accent); } }
+/* admin settings */
+.settings-form .setting { display: grid; grid-template-columns: minmax(14rem, 18rem) 1fr; gap: .2rem 1rem; align-items: center;
+  padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.settings-form .setting:last-child { border-bottom: 0; }
+.settings-form .setting > label { font-weight: 600; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.settings-form .setting .hint { grid-column: 2; margin: 0; }
+.settings-form .control input:not([type=checkbox]), .settings-form .control select { max-width: 32rem; width: 100%; }
+.settings-form details.advanced summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: .5rem 0; }
+@media (max-width: 640px) { .settings-form .setting { grid-template-columns: 1fr; } .settings-form .setting .hint { grid-column: 1; } }
