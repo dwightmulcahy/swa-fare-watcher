@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS searched(       -- when each watch date was last full
   cash REAL,                                 -- cheapest seen then (any flight)
   points REAL,
   changed_at TEXT,                           -- last time those cheapest prices moved
+  hot_until TEXT,                            -- a deal was just found: look again soon until then
   PRIMARY KEY (watch_id, leg, date)
 );
 CREATE TABLE IF NOT EXISTS app_state(
@@ -194,6 +195,9 @@ def one(sql, args=()):
 
 # Columns added after the first release; added to existing databases on start.
 MIGRATIONS = {
+    "searched": {
+        "hot_until": "TEXT",
+    },
     "users": {
         "swa_creds": "BLOB",                     # encrypted {"username", "password"}
         "auto_login": "INTEGER NOT NULL DEFAULT 0",

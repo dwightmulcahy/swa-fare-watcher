@@ -513,3 +513,40 @@ def test_one_visit_run_stops_and_the_next_check_in_continues(worker, monkeypatch
     searched = {str(c[2]) for c in FakeSearcher.calls}
     assert second["attempts"] == 4 and len(searched) == 2                      # two more dates, none repeated
     assert len(db.query("SELECT * FROM searched")) == 4
+
+
+def test_interest_quiet_dates_back_off_and_deals_get_a_second_look():
+    from app.worker import due_legs, mark_hot, record_searched, search_every
+    assert search_every(30) == 2 and search_every(30, quiet_days=7) == 4 and search_every(30, 14) == 6
+    assert search_every(8, quiet_days=30) == 1          # near dates stay daily
+    assert search_every(200, quiet_days=30) == 10       # capped
+    uid = make_user()
+    now = dt.datetime.now()
+    today = now.date()
+    dates = [(today + dt.timedelta(days=n)).isoformat() for n in (30, 31, 32, 33, 34, 35, 36, 37, 38)]
+    wid = make_watch(uid, dates=",".join(dates))
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    legs = [("out", d) for d in dates]
+    with db.tx() as con:
+        for leg in legs:
+            record_searched(con, wid, *leg, [{"cash": 100.0, "points": None}])
+        con.execute("UPDATE searched SET ts=?, changed_at=?", ((now - dt.timedelta(days=2)).isoformat(),
+                                                              (now - dt.timedelta(days=9)).isoformat()))
+        con.execute("UPDATE searched SET changed_at=? WHERE date=?", ((now - dt.timedelta(days=2)).isoformat(), dates[0]))
+    assert due_legs(w, legs, today, now) == [legs[0]]   # only the date whose price moved lately (every 2 days)
+    with db.tx() as con:
+        con.execute("UPDATE searched SET ts=? WHERE date=?", ((now - dt.timedelta(hours=5)).isoformat(), dates[3]))
+        mark_hot(con, [{"watch_id": wid, "date": dates[3]}], now)
+    assert legs[3] in due_legs(w, legs, today, now)     # a deal 5 h ago: look again now
+    with db.tx() as con:
+        con.execute("UPDATE searched SET ts=? WHERE date=?", ((now - dt.timedelta(hours=1)).isoformat(), dates[3]))
+    assert legs[3] not in due_legs(w, legs, today, now)  # but not within the hour
+
+
+def test_run_marks_deal_dates_hot(worker, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "rotate", True)
+    uid = make_user()
+    make_watch(uid)
+    assert worker.run_user(uid)["hits"]
+    assert db.query("SELECT * FROM searched WHERE hot_until IS NOT NULL")

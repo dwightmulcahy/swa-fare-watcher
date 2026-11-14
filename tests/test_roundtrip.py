@@ -164,7 +164,8 @@ def test_round_trips_pair_directions_searched_at_different_check_ins(worker, sen
                     "duration, cash, points, points_taxes, matched, origin, dest) "
                     "SELECT id, ?, 'out', ?, 'k', '1234', '08:15', '12:40', 0, 205, 189.98, 12000, 5.6, 1, 'AUS', 'BWI' "
                     "FROM watches", (db.now(), future(10)))
-        con.execute("INSERT INTO searched SELECT id, 'out', ?, ?, 189.98, 12000, ? FROM watches",
+        con.execute("INSERT INTO searched(watch_id, leg, date, ts, cash, points, changed_at) "
+                    "SELECT id, 'out', ?, ?, 189.98, 12000, ? FROM watches",
                     (future(10), db.now(), db.now()))
     res = worker.run_user(uid, one_visit=True)          # the evening one reads the return
     assert {(c[0], c[1]) for c in FakeSearcher.calls} == {("BWI", "AUS")}
