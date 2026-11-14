@@ -1,0 +1,9 @@
+<!doctype html><title>Air Reservation Details | Southwest Airlines</title>
+<body><h1>Your reservation details</h1>
+<p id="conf"></p>
+<a href="/air/seat/select-seats/index.html?clk=TRIPDETAILS_UPGDSEAT_HERO">Upgrade or modify seats</a>
+<h2>Seat Assignments</h2><p id="seat"></p>
+<script>
+document.getElementById("conf").textContent = "Confirmation # " + (localStorage.getItem("lookup") || "").split("|")[0];
+document.getElementById("seat").textContent = "PAT LEE Seat " + (localStorage.getItem("seat") || "11F") + ", Window";
+</script>

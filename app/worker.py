@@ -9,7 +9,7 @@ import random
 import threading
 import time
 
-from . import applog, db, mailer, swa
+from . import applog, db, mailer, seats, swa
 from .config import settings
 from .security import decrypt_json, encrypt_json
 
@@ -300,6 +300,7 @@ class Worker:
         self.cancelled = set()     # users who pressed Cancel: stop after the current search, keep results
         self._wake = threading.Event()   # cuts a pause short when the running user cancels
         self._threads = []
+        self.seat_busy = set()     # users whose seat selection is running right now
         self.started_at = dt.datetime.now()
 
     # ----- queueing -----
@@ -413,6 +414,9 @@ class Worker:
         h = threading.Thread(target=self._housekeeping_loop, name="swa-housekeeping", daemon=True)
         h.start()
         self._threads.append(h)
+        st = threading.Thread(target=self._seat_loop, name="swa-seats", daemon=True)
+        st.start()
+        self._threads.append(st)
         if scheduler:
             s = threading.Thread(target=self._schedule, name="swa-scheduler", daemon=True)
             s.start()
@@ -430,6 +434,8 @@ class Worker:
                     continue
                 self.running_user = uid
                 self._wake.clear()
+            while uid in self.seat_busy:      # its seat selection is using the browser profile
+                time.sleep(5)
             try:
                 self.run_user(uid, ids, signin_only=only)
             except Exception as e:
@@ -441,6 +447,79 @@ class Worker:
                     self.running_user = None
                     self.cancelled.discard(uid)
                 self.progress.pop(uid, None)
+
+    # ----- seat selection (48 h before departure)
+    SEAT_EARLY = 150          # be on the seat map this many seconds before selection opens
+    SEAT_WINDOW = 25 * 60     # and keep checking for this long after
+
+    def due_seat_jobs(self, now=None):
+        now = now or dt.datetime.now(dt.timezone.utc)
+        soon = (now + dt.timedelta(seconds=self.SEAT_EARLY)).isoformat(timespec="seconds")
+        return db.query("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
+                        "WHERE j.status='pending' AND j.opens_at<=? AND w.active=1 AND w.seat_auto=1", (soon,))
+
+    def _seat_loop(self):
+        while True:
+            try:
+                for job in self.due_seat_jobs():
+                    with db.tx() as con:   # claim it
+                        if con.execute("UPDATE seat_jobs SET status='running', updated=? WHERE id=? "
+                                       "AND status='pending'", (db.now(), job["id"])).rowcount != 1:
+                            continue
+                    threading.Thread(target=self.run_seat_job, args=(dict(job),), name="swa-seat-job",
+                                     daemon=True).start()
+            except Exception as e:
+                applog.error(f"Seat scheduler: {e.__class__.__name__}: {e}", source="seats")
+            time.sleep(20)
+
+    def run_seat_job(self, job, picker_factory=None):
+        """Open the booking just before seat selection opens and move each passenger to the best
+        free seat that beats theirs. Emails the result either way."""
+        from . import seat_picker
+        w = db.one("SELECT * FROM watches WHERE id=?", (job["watch_id"],))
+        user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],)) if w else None
+        if not w or not user:
+            return None
+        uid = user["id"]
+        leg = "return" if job["leg"] == "ret" else "outbound"
+        opens = dt.datetime.fromisoformat(job["opens_at"])
+        applog.info(f"{w['name']}: seat selection for the {leg} flight opens at "
+                    f"{opens.astimezone():%H:%M}; opening the booking", user_id=uid, source="seats")
+        status, changes, note = "failed", [], ""
+        same_profile = self.running_user != uid
+        self.seat_busy.add(uid)
+        try:
+            factory = picker_factory or (lambda: self.searcher_factory(
+                None, profile_key=uid if same_profile else f"{uid}-seats"))
+            with factory() as browser:
+                picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
+                                                seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
+                until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW
+                changes, note = picker.run(until, sleep=self.sleep)
+                status = "done" if changes else "unchanged"
+        except seat_picker.NotFree as e:
+            note = f"Stopped before paying anything: {e}. Your seat wasn't changed."
+        except swa.Blocked as e:
+            note = f"Southwest blocked the page ({e}). Pick your seat yourself."
+        except Exception as e:
+            note = f"Couldn't finish ({e.__class__.__name__}: {str(e)[:200]}). Pick your seat yourself."
+        finally:
+            self.seat_busy.discard(uid)
+        if status == "unchanged":
+            note = "Your current seat is already the best free match, so it wasn't changed."
+        elif status == "done":
+            note = f"Seat change {note}."
+        with db.tx() as con:
+            con.execute("UPDATE seat_jobs SET status=?, note=?, updated=? WHERE id=?",
+                        (status, note, db.now(), job["id"]))
+        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {note}", user_id=uid, source="seats")
+        if user["email"]:
+            subject = {"done": "Seat selected", "unchanged": "Seat checked, no change",
+                       "failed": "Seat selection needs you"}[status]
+            mailer.send(user["email"], f"SWA {subject}: {w['name']} ({leg})",
+                        mailer.render_seat_result(f"{w['name']}: {leg} flight", changes, note,
+                                                  status != "failed", seat_picker.MANAGE_URL))
+        return status, changes, note
 
     def housekeeping(self):
         """Background chores, checked every few minutes; each is safe to repeat."""

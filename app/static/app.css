@@ -361,3 +361,4 @@ label:has(> .suggest) { position: relative; }
 .watch-form .field { display: flex; flex-direction: column; gap: .3rem; }
 .watch-form .field > .label { font-weight: 600; font-size: .92rem; }
 .watch-form .booked-row input.code { max-width: 5.5rem; }
+ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }

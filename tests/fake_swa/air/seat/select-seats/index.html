@@ -1,0 +1,39 @@
+<!doctype html><title>Select Seats | Southwest Airlines</title>
+<body><h1>Select your seats</h1>
+<!-- Southwest's seat map, trimmed: flight tab, passenger radio, one button per seat whose
+     aria-label is the real one (labels.txt, from a Boeing 737-800). Free seats appear from the
+     2nd load of the page on (selection "opens"); before that every seat costs $39. -->
+<button role="tab" aria-selected="true" aria-label="Flight 1 of 1 LIR to HOU 3 hours 30 minutes">LIR to HOU</button>
+<div id="pax"></div><div id="map"></div>
+<div aria-label="Seat pricing summary" role="status" id="total">Seats total: $0</div>
+<button type="button" id="go">Continue to payment</button>
+<script>
+const loads = Number(sessionStorage.getItem("seatLoads") || 0) + 1;
+sessionStorage.setItem("seatLoads", loads);
+const price = loads >= 2 ? 0 : 39;
+let current = localStorage.getItem("seat") || "11F", chosen = current;
+const pax = document.createElement("button");
+pax.setAttribute("role", "radio"); pax.setAttribute("aria-checked", "true");
+document.getElementById("pax").append(pax);
+const setPax = () => pax.setAttribute("aria-label", `Pat L. Seat: ${chosen}, checked`);
+setPax();
+fetch("../labels.txt").then((r) => r.text()).then((text) => {
+  const map = document.getElementById("map");
+  text.trim().split("\n").forEach((label) => {
+    const code = label.match(/^Seat (\w+)/)[1];
+    let l = label.replace(/ Selected for passenger number \d+ [^.]*\./, "").replace(/\$[\d.,]+\./, `$${price}.`);
+    let free = !/unavailable$/.test(l);
+    if (code === current) { l = l.replace(/^Seat (\w+)/, "Seat $1 Selected for passenger number 1 PAT LEE."); }
+    const b = document.createElement("button");
+    b.setAttribute("aria-label", l); b.textContent = code;
+    if (!free) b.disabled = true;
+    b.onclick = () => { chosen = code; setPax();
+      document.getElementById("total").textContent = `Seats total: $${code === current ? 0 : price}`; };
+    map.append(b);
+  });
+});
+document.getElementById("go").onclick = () => {
+  const due = chosen === current ? 0 : price;
+  location.href = `../purchase.html?seat=${chosen}&due=${due.toFixed(2)}`;
+};
+</script>

@@ -1,0 +1,20 @@
+<!doctype html><title>Manage Flight Reservation | Southwest Airlines</title>
+<body><h1>Lookup reservation</h1>
+<!-- trimmed from Southwest's lookup form -->
+<form novalidate onsubmit="return false">
+  <label for="reservationForm.record_locator">Flight confirmation number</label>
+  <input id="reservationForm.record_locator" name="reservationForm.record_locator" maxlength="6" type="text">
+  <label for="reservationForm.first_name">First name</label>
+  <input id="reservationForm.first_name" name="reservationForm.first_name" maxlength="30" type="text">
+  <label for="reservationForm.last_name">Last name</label>
+  <input id="reservationForm.last_name" name="reservationForm.last_name" maxlength="30" type="text">
+  <button id="lookupReservation" type="submit">Lookup reservation</button>
+</form>
+<script>
+document.getElementById("lookupReservation").onclick = () => {
+  const v = (id) => document.getElementById(id).value;
+  localStorage.setItem("lookup", [v("reservationForm.record_locator"), v("reservationForm.first_name"),
+                                  v("reservationForm.last_name")].join("|"));
+  setTimeout(() => location.href = "trip.html", 300);
+};
+</script>

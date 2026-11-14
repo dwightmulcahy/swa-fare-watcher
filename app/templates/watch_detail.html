@@ -94,6 +94,18 @@
 <p class="muted small">Last checked {{ last|when }}. Dates link to Southwest's booking page.</p>
 {% endif %}
 
+{% if seat_jobs %}
+<section class="card seat-jobs">
+  <h2>Seat selection</h2>
+  <ul class="plain">{% for j in seat_jobs %}
+    <li><b>{{ j.leg_label }}</b>: opens {{ j.opens_local }}
+      <span class="pill {{ 'good' if j.status in ('done', 'unchanged') else 'bad' if j.status == 'failed' else '' }}">{{
+        {"pending": "scheduled", "running": "picking now", "done": "seat changed", "unchanged": "kept current seat", "failed": "needs you"}[j.status] }}</span>
+      {% if j.note %}<span class="muted small">{{ j.note }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if trend %}
 <section class="card chart-card">
   <div class="row between">

@@ -1,0 +1,16 @@
+<!doctype html><title>Purchase Seats | Southwest Airlines</title>
+<body><h1>Review seats and pay</h1>
+<p id="seat"></p>
+<div><div>Amount due</div><div>Includes taxes and fees</div>
+<div><div style="position:absolute;left:-9999px" id="hidden"></div><span aria-hidden="true"><sup>$</sup><span id="amt"></span></span></div></div>
+<button id="confirmSeatChange" type="submit">Confirm seat change</button>
+<script>
+const q = new URLSearchParams(location.search);
+document.getElementById("seat").textContent = "Seat " + q.get("seat");
+document.getElementById("hidden").textContent = q.get("due") + " Dollars";
+document.getElementById("amt").textContent = q.get("due");
+document.getElementById("confirmSeatChange").onclick = () => {
+  localStorage.setItem("seat", q.get("seat")); localStorage.setItem("paid", q.get("due"));
+  setTimeout(() => location.href = "/air/manage-reservation/trip.html?done=1", 400);
+};
+</script>
