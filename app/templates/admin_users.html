@@ -6,6 +6,7 @@
   <div class="buttons">
     <form method="post" action="/admin/run-all" class="inline" data-confirm="Run every user's active watches now? This uses their daily search allowance.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Run all now</button></form>
+    <a class="button" href="/admin/settings">Settings (.env)</a>
     <a class="button primary" href="/admin/users/new">New user</a>
   </div>
 </div>

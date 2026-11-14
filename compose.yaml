@@ -13,6 +13,8 @@ services:
       - "${HOST_PORT:-8080}:8080"
     volumes:
       - ${DATA_DIR:-./data}:/data      # app.db, secret.key, debug/
+      # the same .env, so the admin Settings page can edit it (the app's user 1000 needs write access)
+      - ${ENV_FILE:-./.env}:/config/.env
     init: true
     read_only: true
     tmpfs:

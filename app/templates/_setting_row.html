@@ -1,0 +1,19 @@
+{% set s = r.s %}
+<div class="setting">
+  <label for="set-{{ s.name }}"><code>{{ s.name }}</code>
+    {% if r.differs %}<span class="pill warn" title="Saved but not applied yet">restart to apply</span>{% endif %}</label>
+  <div class="control">
+  {% if s.kind == "bool" %}
+    <label class="check"><input type="checkbox" id="set-{{ s.name }}" name="{{ s.name }}" value="1" {{ "checked" if r.value|lower in ("1", "true", "yes", "on") }}> on</label>
+  {% elif s.kind == "choice" %}
+    <select id="set-{{ s.name }}" name="{{ s.name }}">{% for c in s.choices %}<option {{ "selected" if r.value == c }}>{{ c }}</option>{% endfor %}</select>
+  {% elif s.kind == "secret" %}
+    <input id="set-{{ s.name }}" name="{{ s.name }}" type="password" autocomplete="new-password" placeholder="{{ 'set; type to replace' if r.is_set else 'not set' }}">
+    {% if r.is_set %}<label class="check small"><input type="checkbox" name="clear_{{ s.name }}" value="1"> clear</label>{% endif %}
+  {% else %}
+    <input id="set-{{ s.name }}" name="{{ s.name }}" value="{{ r.value }}" placeholder="{{ s.default }}"
+      {% if s.kind == "int" %}inputmode="numeric"{% elif s.kind == "time" %}type="time"{% elif s.kind == "url" %}type="url"{% endif %} spellcheck="false">
+  {% endif %}
+  </div>
+  <p class="hint">{{ s.help }}{{ "" if s.help.endswith(".") else "." }}{% if s.default %} <span class="muted">Default: {{ s.default }}.</span>{% endif %}</p>
+</div>

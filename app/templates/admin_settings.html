@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/admin">Admin</a> / Settings</p>
+<div class="head">
+  <div><h1>Settings</h1>
+    <p class="muted">These are the app's <code>.env</code> settings, saved to <code>{{ env_path }}</code> with an explanation for each, so you can also edit the file by hand. The app reads them when it starts: <b>restart it after saving</b>. Settings under <i>Docker</i> are read by docker compose and apply after <code>docker compose up -d</code>.</p></div>
+  <div class="buttons">
+    <form method="post" action="/admin/settings/restart" class="inline" data-confirm="Restart the app now? Any search in progress stops; the page comes back in about a minute.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Restart app</button></form>
+  </div>
+</div>
+{% if error %}<p class="flash err">{{ error }}</p>{% endif %}
+{% if not env_exists %}<p class="flash err">{{ env_path }} isn't there. Mount your <code>.env</code> into the container (see the compose file: <code>${ENV_FILE}:/config/.env</code>), or saving creates a new file there.</p>
+{% elif not env_writable %}<p class="flash err">{{ env_path }} can't be written by the app (user 1000). On the NAS: <code>chmod 666</code> the .env file.</p>{% endif %}
+<form method="post" action="/admin/settings" class="form-grid watch-form settings-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% for title, items in groups %}
+  <fieldset>
+    <legend>{{ title }}</legend>
+    {% for r in items if not r.s.advanced %}{% include "_setting_row.html" %}{% endfor %}
+    {% set adv = items|selectattr("s.advanced")|list %}
+    {% if adv %}<details class="advanced"><summary>Advanced ({{ adv|length }})</summary>
+      {% for r in adv %}{% include "_setting_row.html" %}{% endfor %}</details>{% endif %}
+  </fieldset>
+  {% endfor %}
+  <div class="form-foot"><span class="muted small">Secrets are never shown: leave them blank to keep them.</span>
+    <div class="buttons"><a class="button" href="/admin">Cancel</a><button type="submit" class="primary">Save to .env</button></div></div>
+</form>
+{% endblock %}
