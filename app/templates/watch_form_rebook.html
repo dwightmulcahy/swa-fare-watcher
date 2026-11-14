@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New rebook watch' if new else 'Edit rebook watch' }}{% endblock %}
+{% block content %}
+{% set bk = booked_of(w) %}{% set rt = w.trip_type == 'roundtrip' %}
+<p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
+<h1>{{ 'New rebook watch' if new else 'Edit rebook watch' }}</h1>
+<p class="muted">For a flight you've already bought: each day it checks that flight's fare and emails you straight away when it's lower than what you paid. Change to the lower fare on southwest.com and Southwest gives you the difference (flight credit, or to your card on refundable fares; points go back to your account).</p>
+<form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid watch-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="kind" value="rebook">
+  {% set placeholder = "Spring trip (booked)" %}{% include "_booked_route.html" %}
+  {% for leg, label in [("out", "Outbound"), ("ret", "Return")] %}{% set b = bk.get(leg, {}) %}
+  <fieldset {% if leg == "ret" %}data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}{% endif %}>
+    <legend>{{ label }} flight you booked</legend>
+    <div class="row">
+      <label>Date <input name="{{ leg }}_date" type="date" value="{{ b.date or '' }}"></label>
+      <label>Flight # <span class="hint">optional</span><input name="{{ leg }}_flights" value="{{ b.flights or '' }}" placeholder="502/52" inputmode="numeric"></label>
+      <label>Paid per person <span class="hint">USD</span><input name="{{ leg }}_cash" type="number" min="1" value="{{ b.cash or '' }}"></label>
+      <label>or points <input name="{{ leg }}_points" data-readable="points" type="number" min="1" value="{{ b.points or '' }}"></label>
+    </div>
+    <p class="hint">Without a flight number, any cheaper flight that day counts.</p>
+  </fieldset>{% endfor %}
+  <fieldset>
+    <legend>Passengers</legend>
+    <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>
+  </fieldset>
+  {% set active_label = "Active (checked daily)" %}{% include "_watch_foot.html" %}
+{% endblock %}

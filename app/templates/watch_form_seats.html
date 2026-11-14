@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New seat watch' if new else 'Edit seat watch' }}{% endblock %}
+{% block content %}
+{% set bk = booked_of(w) %}{% set rt = w.trip_type == 'roundtrip' %}{% set sp = seat_prefs(w) %}
+<p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
+<h1>{{ 'New seat watch' if new else 'Edit seat watch' }}</h1>
+<p class="muted">When seat selection opens, 48 hours before each flight, it looks your booking up and moves every passenger to the best free seat that beats the one they have. It never pays: anything that costs money is left alone and you get an email instead.</p>
+<form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid watch-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="kind" value="seats">
+  <fieldset>
+    <legend>Booking</legend>
+    <div class="row">
+      <label>Confirmation # <input name="booking_conf" value="{{ w.booking_conf or '' }}" maxlength="6" placeholder="ABC123" class="code" autocomplete="off" required></label>
+      <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off" required></label>
+      <label>Last name <input name="booking_last" value="{{ w.booking_last or '' }}" autocomplete="off" required></label>
+    </div>
+  </fieldset>
+  {% set placeholder = "Spring trip seats" %}{% include "_booked_route.html" %}
+  {% for leg, label in [("out", "Outbound"), ("ret", "Return")] %}{% set b = bk.get(leg, {}) %}
+  <fieldset {% if leg == "ret" %}data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}{% endif %}>
+    <legend>{{ label }} flight</legend>
+    <div class="row">
+      <label>Date <input name="{{ leg }}_date" type="date" value="{{ b.date or '' }}"></label>
+      <label>Departs <span class="hint">local time at {{ "the From" if leg == "out" else "the To" }} airport</span><input name="{{ leg }}_time" type="time" value="{{ b.time or '' }}"></label>
+    </div>
+  </fieldset>{% endfor %}
+  <fieldset>
+    <legend>Seat preferences</legend>
+    <div class="row">
+      <label>Your status
+        <select name="seat_status">{% for k, (t, _) in seats.STATUSES.items() %}
+          <option value="{{ k }}" {{ "selected" if (w.seat_status or "none") == k }}>{{ t }}</option>{% endfor %}
+        </select></label>
+      <div class="field"><span class="label">Seat</span>
+        <div class="seg">{% for k, t in seats.POSITIONS.items() %}
+          <label><input type="radio" name="seat_position" value="{{ k }}" {{ "checked" if sp.position == k }}> {{ t }}</label>{% endfor %}
+        </div></div>
+    </div>
+    <div class="checks">{% for k, t in seats.WISHES.items() %}
+      <label class="check"><input type="checkbox" name="seat_{{ k }}" value="1" {{ "checked" if sp[k] }}> {{ t }}</label>{% endfor %}
+    </div>
+  </fieldset>
+  {% set active_label = "Active" %}{% include "_watch_foot.html" %}
+{% endblock %}

@@ -1,14 +1,16 @@
 {% extends "base.html" %}
-{% block title %}{{ 'New watch' if new else 'Edit watch' }}{% endblock %}
+{% block title %}{{ 'New fare watch' if new else 'Edit fare watch' }}{% endblock %}
 {% set between = not w.dates and w.date_from %}
 {% set window = not w.dates and not between and w.days_to is not none %}
 {% set rt = w.trip_type == 'roundtrip' %}
 {% set ret_by_dates = w.ret_dates and w.ret_dates|length > 0 %}
 {% block content %}
 <p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
-<h1>{{ 'New watch' if new else 'Edit watch' }}</h1>
+<h1>{{ 'New fare watch' if new else 'Edit fare watch' }}</h1>
+<p class="muted">Find the best fares on a route over a range of dates and get emailed when they drop.</p>
 <form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid watch-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="kind" value="fare">
 
   <fieldset>
     <legend>Route</legend>
@@ -121,65 +123,5 @@
     <p class="hint">¢/point = (cash fare − taxes on the points fare) ÷ points. Points is recommended when it's at or above your minimum.</p>
   </fieldset>
 
-  <fieldset>
-    <legend>Already booked? <span class="hint">optional: rebook alerts and seat selection</span></legend>
-    <p class="hint">For seat selection, the date and departure time are enough. Enter what you paid per person and you'll also be emailed straight away when that flight (or, without a flight number, any flight that day) gets cheaper, so you can change to the lower fare and get the difference back.</p>
-    {% set bk = booked_of(w) %}
-    {% for leg, label in [("out", "Outbound"), ("ret", "Return")] %}{% set b = bk.get(leg, {}) %}
-    <div class="row booked-row" {% if leg == "ret" %}data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}{% endif %}>
-      <label>{{ label }} date <input name="booked_{{ leg }}_date" type="date" value="{{ b.date or '' }}"></label>
-      <label>Departs <span class="hint">local time</span><input name="booked_{{ leg }}_time" type="time" value="{{ b.time or '' }}"></label>
-      <label>From <input name="booked_{{ leg }}_from" value="{{ b['from'] or '' }}" maxlength="3" placeholder="LIR" class="code"></label>
-      <label>Flight # <span class="hint">optional</span><input name="booked_{{ leg }}_flights" value="{{ b.flights or '' }}" placeholder="502/52" inputmode="numeric"></label>
-      <label>Paid cash <span class="hint">USD</span><input name="booked_{{ leg }}_cash" type="number" min="1" value="{{ b.cash or '' }}"></label>
-      <label>or points <input name="booked_{{ leg }}_points" data-readable="points" type="number" min="1" value="{{ b.points or '' }}"></label>
-    </div>{% endfor %}
-  </fieldset>
-
-  <fieldset>
-    {% set sp = seat_prefs(w) %}
-    <legend>Seats <span class="hint">pick my seat when seat selection opens, 48 h before departure</span></legend>
-    <label class="check"><input type="checkbox" name="seat_auto" value="1" {{ "checked" if w.seat_auto }}>
-      Choose the best free seat for me automatically</label>
-    <div class="row">
-      <label>Confirmation # <input name="booking_conf" value="{{ w.booking_conf or '' }}" maxlength="6" placeholder="ABC123" class="code" autocomplete="off"></label>
-      <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off"></label>
-      <label>Last name <input name="booking_last" value="{{ w.booking_last or '' }}" autocomplete="off"></label>
-    </div>
-    <div class="row">
-      <label>Your status
-        <select name="seat_status">{% for k, (t, _) in seats.STATUSES.items() %}
-          <option value="{{ k }}" {{ "selected" if (w.seat_status or "none") == k }}>{{ t }}</option>{% endfor %}
-        </select></label>
-      <div class="field"><span class="label">Seat</span>
-        <div class="seg">{% for k, t in seats.POSITIONS.items() %}
-          <label><input type="radio" name="seat_position" value="{{ k }}" {{ "checked" if sp.position == k }}> {{ t }}</label>{% endfor %}
-        </div></div>
-    </div>
-    <div class="checks">{% for k, t in seats.WISHES.items() %}
-      <label class="check"><input type="checkbox" name="seat_{{ k }}" value="1" {{ "checked" if sp[k] }}> {{ t }}</label>{% endfor %}
-    </div>
-    <p class="hint">At the moment selection opens it looks up the booking, and only moves you to a seat that is better than the one you have and costs <b>$0</b>; anything that asks for payment is left alone and you get an email instead. Every passenger on the booking gets a seat by these preferences.</p>
-  </fieldset>
-
-  <fieldset class="plain">
-    <input type="hidden" name="active" value="0">
-    <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if w.active }}> Active (searched daily)</label>
-  </fieldset>
-
-  <div class="form-foot">
-    <p class="muted small">Your limits: {{ limits.watches }}{% if limits.max_watches is not none %} / {{ limits.max_watches }}{% endif %} active watches,
-      {{ limits.per_day }}{% if limits.max_searches is not none %} / {{ limits.max_searches }}{% endif %} searches per day.</p>
-    <div class="buttons">
-      <a class="button" href="{{ '/' if new else '/watches/' ~ w.id }}">Cancel</a>
-      <button type="submit" class="primary">{{ 'Create watch' if new else 'Save changes' }}</button>
-    </div>
-  </div>
-</form>
-{% if not new %}
-<form method="post" action="/watches/{{ w.id }}/delete" class="danger-zone" data-confirm="Delete this watch and its price history?">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button type="submit" class="danger">Delete watch</button>
-</form>
-{% endif %}
+{% set active_label = "Active (searched daily)" %}{% include "_watch_foot.html" %}
 {% endblock %}

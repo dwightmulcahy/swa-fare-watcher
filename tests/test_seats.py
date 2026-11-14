@@ -52,36 +52,37 @@ def test_opens_48_hours_before_local_departure():
     assert seats.airport_tz("HOU") == "America/Chicago"
 
 
-def test_watch_form_saves_seat_preferences(client):
+def test_seat_watch_form_saves_preferences(client):
     from app import db
     from tests.conftest import future
-    from tests.test_web import admin_client, watch_form
+    from tests.test_web import admin_client
     t = admin_client(client)
-    data = {**watch_form(t), "seat_auto": "1", "booking_conf": "abc12-3", "booking_first": "Pat",
-            "booking_last": "Lee", "seat_status": "priority", "seat_position": "aisle", "seat_exit_row": "1",
-            "booked_out_date": future(10), "booked_out_time": "13:15", "booked_out_from": "lir"}
+    page = client.get("/watches/new?kind=seats").text
+    assert 'name="seat_status"' in page and "max_price" not in page and "out_cash" not in page
+    data = {"csrf": t, "kind": "seats", "booking_conf": "abc12-3", "booking_first": "Pat", "booking_last": "Lee",
+            "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10),
+            "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "seat_exit_row": "1",
+            "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     w = db.one("SELECT * FROM watches WHERE id=?", (int(loc.rstrip("/").split("/")[-1]),))
-    assert (w["seat_auto"], w["booking_conf"], w["seat_status"]) == (1, "ABC123", "priority")
+    assert (w["kind"], w["seat_auto"], w["booking_conf"], w["seat_status"]) == ("seats", 1, "ABC123", "priority")
     p = json.loads(w["seat_prefs"])
     assert p["position"] == "aisle" and p["exit_row"] and not p["extra_legroom"]
     b = json.loads(w["booked"])[0]
-    assert b["time"] == "13:15" and b["from"] == "LIR" and b["cash"] is None   # seats only: no price needed
+    assert b["time"] == "13:15" and b["from"] == "LIR"
     edit = client.get(loc + "/edit").text
     assert 'value="ABC123"' in edit and 'value="priority" selected' in edit
-    bad = {**data, "booked_out_time": ""}
-    assert "departure time" in client.post("/watches", data=bad).text
-    bad = {**data, "booking_conf": ""}
-    assert "confirmation number" in client.post("/watches", data=bad).text
+    assert "departure time" in client.post("/watches", data={**data, "out_time": ""}).text
+    assert "confirmation number" in client.post("/watches", data={**data, "booking_conf": ""}).text
 
 
 def _seat_watch(client, date, time_="13:15", origin="LIR"):
     from app import db
-    from tests.test_web import admin_client, watch_form
+    from tests.test_web import admin_client
     t = admin_client(client)
-    data = {**watch_form(t), "seat_auto": "1", "booking_conf": "ABC123", "booking_first": "Pat",
-            "booking_last": "Lee", "seat_status": "priority", "seat_position": "window",
-            "booked_out_date": date, "booked_out_time": time_, "booked_out_from": origin}
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+            "origin": origin, "destination": "HOU", "trip_type": "oneway", "out_date": date, "out_time": time_,
+            "seat_status": "priority", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     with db.tx() as con:
         con.execute("UPDATE users SET email='pat@example.com' WHERE username='admin'")
@@ -150,3 +151,44 @@ def test_seat_job_that_would_charge_reports_and_changes_nothing(client, worker, 
     finally:
         sp.SeatPicker = real
     assert status == "failed" and "before paying anything" in note and "needs you" in sent[-1][1]
+
+
+def test_new_watch_starts_with_a_choice_of_kind(client):
+    from tests.test_web import admin_client
+    admin_client(client)
+    page = client.get("/watches/new").text
+    for k in ("fare", "rebook", "seats"):
+        assert f'href="/watches/new?kind={k}"' in page
+
+
+def test_seat_watches_dont_search_or_count_against_limits(client, worker):
+    from tests.conftest import FakeSearcher, future
+    wid, db = _seat_watch(client, future(10))
+    uid = db.one("SELECT user_id FROM watches WHERE id=?", (wid,))["user_id"]
+    assert worker.run_user(uid) == {"skipped": "no active watches"}
+    assert FakeSearcher.calls == [] and uid not in [u for u in worker.eligible_users()]
+
+
+def test_old_booked_fares_become_rebook_watches():
+    from app import db
+    from tests.test_worker import make_user, make_watch
+    uid = make_user()
+    make_watch(uid, name="Trip", booked=json.dumps([{"leg": "out", "date": "2027-02-01", "cash": 200,
+                                                           "points": None, "flights": "9"}]))
+    with db.tx() as con:
+        con.execute("DELETE FROM app_state WHERE key='kinds_split'")
+    db.init()
+    rows = db.query("SELECT * FROM watches WHERE user_id=? ORDER BY id", (uid,))
+    assert [r["kind"] for r in rows] == ["fare", "rebook"] and rows[0]["booked"] is None
+    assert rows[1]["name"] == "Trip (booked)" and json.loads(rows[1]["booked"])[0]["cash"] == 200
+    db.init()                                   # only once
+    assert len(db.query("SELECT * FROM watches WHERE user_id=?", (uid,))) == 2
+
+
+def test_pages_render_for_each_kind(client):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    page = client.get(f"/watches/{wid}").text
+    assert "Conf. ABC123" in page and "Search now" not in page and "Seat selection" in page
+    dash = client.get("/").text
+    assert "kind-seats" in dash and "Scheduled" in dash

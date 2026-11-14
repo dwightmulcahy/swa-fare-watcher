@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}New watch{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/">Watches</a></p>
+<h1>What do you want to watch?</h1>
+<div class="kind-grid">
+  <a class="card kind" href="/watches/new?kind=fare">
+    <h2>Find a fare</h2>
+    <p>Search a route over a range of dates every day and get emailed when a good cash or points fare shows up.</p>
+    <span class="kind-go">Fare watch →</span></a>
+  <a class="card kind" href="/watches/new?kind=rebook">
+    <h2>Price drop on a booked flight</h2>
+    <p>Already bought it? Enter what you paid and get emailed as soon as it's cheaper, so you can change to the lower fare and get the difference back.</p>
+    <span class="kind-go">Rebook watch →</span></a>
+  <a class="card kind" href="/watches/new?kind=seats">
+    <h2>Pick my seat</h2>
+    <p>When seat selection opens, 48 hours before departure, move to the best free seat for your status and preferences.</p>
+    <span class="kind-go">Seat watch →</span></a>
+</div>
+{% endblock %}

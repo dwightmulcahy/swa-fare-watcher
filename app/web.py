@@ -340,10 +340,10 @@ def create_app(worker=None, start_worker=True):
         }
 
     def check_limits(u, w, exclude_id=None):
-        if not w["active"]:
+        if not w["active"] or w.get("kind") == "seats":   # seat watches don't search
             return None
-        others = [x for x in db.query("SELECT * FROM watches WHERE user_id=? AND active=1", (u["id"],))
-                  if x["id"] != exclude_id]
+        others = [x for x in db.query("SELECT * FROM watches WHERE user_id=? AND active=1 AND kind<>'seats'",
+                                      (u["id"],)) if x["id"] != exclude_id]
         if u["max_watches"] is not None and len(others) + 1 > u["max_watches"]:
             return f"You can have at most {u['max_watches']} active watch(es). Pause or delete one first."
         need = swa.searches_per_run(w)
@@ -483,55 +483,84 @@ def create_app(worker=None, start_worker=True):
                 errs.append("No return date falls on or after an outbound date. Check the return dates or stay length.")
         else:
             w["ret_depart_after"] = w["ret_depart_before"] = None
+        w["kind"] = "fare"
+        return w, errs
+
+    def parse_booked(f, kind):
+        """A rebook watch (fares paid on booked flights) or a seats watch (booking to pick seats
+        on): one route, the booked flight(s), and kind-specific fields."""
+        errs = []
+
+        def num(k, lo, hi):
+            v = str(f.get(k, "")).strip().replace(",", "")
+            if not v:
+                return None
+            try:
+                n = int(float(v))
+            except ValueError:
+                errs.append("Amounts must be numbers.")
+                return None
+            if not lo <= n <= hi:
+                errs.append(f"Amounts must be between {lo:,} and {hi:,}.")
+            return n
+
+        rt = f.get("trip_type") == "roundtrip"
+        w = {"kind": kind, "name": str(f.get("name", "")).strip()[:60],
+             "origin": ",".join(swa.airports(str(f.get("origin", ""))))[:3],
+             "destination": ",".join(swa.airports(str(f.get("destination", ""))))[:3],
+             "trip_type": "roundtrip" if rt else "oneway",
+             "adults": num("adults", 1, 8) or 1,
+             "active": 1 if f.get("active", "1") == "1" else 0}
+        for k, label in (("origin", "From"), ("destination", "To")):
+            if not IATA.match(w[k] or ""):
+                errs.append(f"{label} must be one 3-letter airport code.")
+        if not errs and w["origin"] == w["destination"]:
+            errs.append("From and To must differ.")
+        if not w["name"] and not errs:
+            w["name"] = f"{swa.route_label(w)} booked" if kind == "rebook" else f"{swa.route_label(w)} seats"
         booked = []
-        w["seat_auto"] = 1 if f.get("seat_auto") else 0
-        conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
-        w["booking_conf"] = conf or None
-        w["booking_first"] = str(f.get("booking_first", "")).strip()[:30] or None
-        w["booking_last"] = str(f.get("booking_last", "")).strip()[:30] or None
-        status = str(f.get("seat_status", "none"))
-        w["seat_status"] = status if status in seats.STATUSES else "none"
-        pos = str(f.get("seat_position", "window"))
-        w["seat_prefs"] = json.dumps({"position": pos if pos in seats.POSITIONS else "any",
-                                      **{k: bool(f.get(f"seat_{k}")) for k in seats.WISHES}})
-        if w["seat_auto"] and not (conf and len(conf) == 6 and w["booking_first"] and w["booking_last"]):
-            errs.append("To pick seats automatically, enter the 6-character confirmation number and the "
-                        "passenger's first and last name as on the booking.")
-        origins = [x for x in re.split(r"[\s,]+", w["origin"]) if x]
-        dests = [x for x in re.split(r"[\s,]+", w["destination"]) if x]
-        for leg in ("out", "ret") if w["trip_type"] == "roundtrip" else ("out",):
-            d = str(f.get(f"booked_{leg}_date", "")).strip()
-            if not d:
-                continue
+        for leg in ("out", "ret") if rt else ("out",):
+            label = "return" if leg == "ret" else "outbound"
+            d = str(f.get(f"{leg}_date", "")).strip()
             try:
                 dt.date.fromisoformat(d)
             except ValueError:
-                errs.append("Booked flight date must be YYYY-MM-DD.")
+                errs.append(f"Enter the {label} flight's date.")
                 continue
-            cash = opt_int(f"booked_{leg}_cash", 1, 100_000)
-            points = opt_int(f"booked_{leg}_points", 1, 10_000_000)
-            t = str(f.get(f"booked_{leg}_time", "")).strip()
-            frm = re.sub(r"[^A-Za-z]", "", str(f.get(f"booked_{leg}_from", ""))).upper()[:3]
-            frm = frm or ((origins if leg == "out" else dests) or [""])[0]
-            if t and not re.fullmatch(r"\d{2}:\d{2}", t):
-                errs.append("Departure time must be HH:MM.")
-                continue
-            if cash is None and points is None and not w["seat_auto"]:
-                errs.append("For a booked flight, enter what you paid (cash or points).")
-                continue
-            if w["seat_auto"] and not t:
-                errs.append("To pick seats automatically, enter each booked flight's departure time.")
-                continue
-            if w["seat_auto"] and not seats.airport_tz(frm):
-                errs.append(f"Unknown departure airport {frm or '(blank)'} for the booked flight.")
-                continue
-            booked.append({"leg": leg, "date": d, "cash": cash, "points": points, "time": t or None,
-                           "from": frm or None,
-                           "flights": re.sub(r"[^0-9/ ,]", "", str(f.get(f"booked_{leg}_flights", "")))[:40].strip()})
-        if w["seat_auto"] and not booked:
-            errs.append("To pick seats automatically, enter the booked flight's date and departure time.")
-        w["booked"] = json.dumps(booked) if booked else None
+            b = {"leg": leg, "date": d, "from": w["origin"] if leg == "out" else w["destination"],
+                 "flights": re.sub(r"[^0-9/ ,]", "", str(f.get(f"{leg}_flights", "")))[:40].strip(),
+                 "cash": None, "points": None, "time": None}
+            if kind == "rebook":
+                b["cash"], b["points"] = num(f"{leg}_cash", 1, 100_000), num(f"{leg}_points", 1, 10_000_000)
+                if b["cash"] is None and b["points"] is None:
+                    errs.append(f"Enter what you paid per person for the {label} flight (cash or points).")
+            else:
+                b["time"] = str(f.get(f"{leg}_time", "")).strip()
+                if not re.fullmatch(r"\d{2}:\d{2}", b["time"]):
+                    errs.append(f"Enter the {label} flight's departure time (local, HH:MM).")
+                elif not seats.airport_tz(b["from"]):
+                    errs.append(f"Unknown airport {b['from']}.")
+            booked.append(b)
+        w["booked"] = json.dumps(booked)
+        w["dates"] = ",".join(b["date"] for b in booked if b["leg"] == "out") or None
+        w["ret_dates"] = ",".join(b["date"] for b in booked if b["leg"] == "ret") or None
+        if kind == "seats":
+            conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
+            w.update(seat_auto=1, booking_conf=conf or None,
+                     booking_first=str(f.get("booking_first", "")).strip()[:30] or None,
+                     booking_last=str(f.get("booking_last", "")).strip()[:30] or None)
+            if not (len(conf) == 6 and w["booking_first"] and w["booking_last"]):
+                errs.append("Enter the 6-character confirmation number and the first and last name as booked.")
+            status = str(f.get("seat_status", "none"))
+            w["seat_status"] = status if status in seats.STATUSES else "none"
+            pos = str(f.get("seat_position", "window"))
+            w["seat_prefs"] = json.dumps({"position": pos if pos in seats.POSITIONS else "any",
+                                          **{k: bool(f.get(f"seat_{k}")) for k in seats.WISHES}})
         return w, errs
+
+    def parse_any(f, kind):
+        return parse_booked(f, kind) if kind in ("rebook", "seats") else parse_watch(f)
+
 
     def latest_legs(wid, day=None):
         """Most recent flights per leg and date, as {"out": {date: [rows]}, "ret": {...}}
@@ -561,8 +590,9 @@ def create_app(worker=None, start_worker=True):
                 "n": len(trips)}
 
     def watch_ctx(w):
+        has_dates = w.get("dates") or w.get("date_from") or w.get("days_to") is not None or w.get("booked")
         return {"w": w, "weekdays": WEEKDAY_LABELS,
-                "estimate": swa.searches_per_run(w) if (w.get("dates") or w.get("date_from") or w.get("days_to") is not None) else 0}
+                "estimate": swa.searches_per_run(w) if has_dates else 0}
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
@@ -578,34 +608,50 @@ def create_app(worker=None, start_worker=True):
                 " MIN(CASE WHEN matched=1 THEN points END) AS points,"
                 " MIN(cash) AS any_cash, COUNT(*) AS n FROM fares"
                 " WHERE watch_id=? AND ts=(SELECT MAX(ts) FROM fares WHERE watch_id=?)", (w["id"], w["id"]))
-        return render(request, "dashboard.html", u, s, watches=watches, best=best,
+        seat_next = {}
+        labels = {"pending": "Scheduled", "running": "Picking now", "done": "Seat changed",
+                  "unchanged": "Kept current seat", "failed": "Needs you"}
+        for w in watches:
+            if (w["kind"] or "fare") == "seats":
+                jobs = _seat_jobs(w["id"])
+                j = next((x for x in jobs if x["status"] in ("pending", "running")), jobs[-1] if jobs else None)
+                if j:
+                    seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {j['opens_local']}"}
+        return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
                       live=app.state.worker.snapshot(u["id"]),
                       daily_at=settings.daily_at, jitter=settings.daily_jitter_min,
                       next_run=app.state.worker.next_run_for(u["id"]))
 
+    FORMS = {"fare": "watch_form.html", "rebook": "watch_form_rebook.html", "seats": "watch_form_seats.html"}
+
+    def form_for(w):
+        return FORMS.get(w.get("kind") or "fare", "watch_form.html")
+
     @app.get("/watches/new", response_class=HTMLResponse)
-    def new_watch(request: Request):
+    def new_watch(request: Request, kind: str = ""):
         u, s = require(request)
-        w = {"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
+        if kind not in FORMS:
+            return render(request, "watch_kind.html", u, s)
+        w = {"kind": kind, "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
+             "seat_auto": 0, "seat_status": "none", "seat_prefs": None,"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
              "date_from": None, "date_to": None,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
              "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,
-             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0,
-             "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
-             "seat_auto": 0, "seat_status": "none", "seat_prefs": None}
-        return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True, limits=limits_for(u))
+             "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0}
+        return render(request, form_for(w), u, s, **watch_ctx(w), new=True, limits=limits_for(u))
 
     @app.post("/watches")
     async def create_watch(request: Request):
         u, s = require(request)
         f = await form(request, s)
-        w, errs = parse_watch(f)
+        kind = str(f.get("kind", "fare"))
+        w, errs = parse_any(f, kind if kind in FORMS else "fare")
         err = "; ".join(errs) if errs else check_limits(u, w)
         if err:
-            return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True,
+            return render(request, form_for(w), u, s, **watch_ctx(w), new=True,
                           limits=limits_for(u), err=err, status=400)
         cols = list(w)
         with db.tx() as con:
@@ -686,17 +732,17 @@ def create_app(worker=None, start_worker=True):
     def edit_watch(request: Request, wid: int):
         u, s = require(request)
         w = dict(watch_or_404(u, wid))
-        return render(request, "watch_form.html", u, s, **watch_ctx(w), new=False, limits=limits_for(u))
+        return render(request, form_for(w), u, s, **watch_ctx(w), new=False, limits=limits_for(u))
 
     @app.post("/watches/{wid}")
     async def update_watch(request: Request, wid: int):
         u, s = require(request)
-        watch_or_404(u, wid)
+        old = watch_or_404(u, wid)
         f = await form(request, s)
-        w, errs = parse_watch(f)
+        w, errs = parse_any(f, old["kind"] or "fare")
         err = "; ".join(errs) if errs else check_limits(u, w, exclude_id=wid)
         if err:
-            return render(request, "watch_form.html", u, s, **watch_ctx({**w, "id": wid}), new=False,
+            return render(request, form_for(w), u, s, **watch_ctx({**w, "id": wid}), new=False,
                           limits=limits_for(u), err=err, status=400)
         with db.tx() as con:
             con.execute(f"UPDATE watches SET {', '.join(f'{k}=?' for k in w)} WHERE id=? AND user_id=?",

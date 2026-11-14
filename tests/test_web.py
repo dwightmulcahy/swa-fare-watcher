@@ -223,7 +223,7 @@ def test_too_many_specific_dates_rejected(client):
     many = ", ".join(future(n) for n in range(5, 5 + 40))
     r = client.post("/watches", data=watch_form(token, dates=many), follow_redirects=False)
     assert r.status_code == 400 and "At most 31 departure dates (40 picked)" in r.text
-    page = client.get("/watches/new").text
+    page = client.get("/watches/new?kind=fare").text
     assert page.count('data-max="31"') == 2      # both date pickers know the limit
 
 

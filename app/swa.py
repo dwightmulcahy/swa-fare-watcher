@@ -633,6 +633,13 @@ def trip_pairs(w, today=None):
 
 def search_legs(w, today=None):
     """Every (leg, date) a run searches; each costs 2 searches (cash + points)."""
+    kind = _get(w, "kind", "fare") or "fare"
+    if kind == "seats":
+        return []
+    if kind == "rebook":     # just the booked flights' dates still ahead
+        today = today or dt.date.today()
+        return [(b["leg"], b["date"]) for b in booked(w)
+                if b["date"] >= today.isoformat() and (b["leg"] == "out" or is_roundtrip(w))]
     legs = [("out", d) for d in watch_dates(w, today)]
     if is_roundtrip(w):
         pair_dates = {r for _, r in trip_pairs(w, today)}
