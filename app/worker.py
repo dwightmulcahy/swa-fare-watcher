@@ -154,8 +154,21 @@ def search_order(dates, rng=random):
 
 
 # ----- which dates to search today (scheduled runs)
-def search_every(days_out):
-    """How many days between full searches of a date this far away: fares months out barely move."""
+HOT_HOURS = 36        # after a new low fare, look at that date again for this long...
+HOT_AGAIN_HOURS = 4   # ...as soon as this many hours after the last look (the next check-in)
+
+
+def search_every(days_out, quiet_days=0):
+    """How many days between full searches of a date this far away: fares months out barely move,
+    and a date whose cheapest price hasn't moved for a week or two is looked at less (interest fades).
+    Dates within 10 days are always daily."""
+    every = _base_every(days_out)
+    if days_out > 10:
+        every *= 3 if quiet_days >= 14 else 2 if quiet_days >= 7 else 1
+    return min(every, 10)
+
+
+def _base_every(days_out):
     if days_out <= 14:
         return 1
     if days_out <= 45:
@@ -165,23 +178,46 @@ def search_every(days_out):
     return 5
 
 
-def due_legs(w, legs, today=None):
+def due_legs(w, legs, today=None, now=None):
     """The (leg, date)s of a watch due a search today (none twice in a day). A watch with only a
     handful of dates searches each daily; a rebook watch searches everything every time."""
     today = today or dt.date.today()
     if (w["kind"] or "fare") != "fare":
         return list(legs)
     small = len(legs) <= 8     # a handful of dates: each one daily
-    last = {(r["leg"], r["date"]): r["ts"] for r in
-            db.query("SELECT leg, date, ts FROM searched WHERE watch_id=?", (w["id"],))}
+    now = now or dt.datetime.now()
+    last = {(r["leg"], r["date"]): r for r in
+            db.query("SELECT * FROM searched WHERE watch_id=?", (w["id"],))}
     out = []
     for leg, d in legs:
         days_out = (dt.date.fromisoformat(d) - today).days
-        ts = last.get((leg, d))
-        every = 1 if small else search_every(days_out)
-        if ts is None or (today - dt.date.fromisoformat(ts[:10])).days >= every:
+        row = last.get((leg, d))
+        if row is None:
+            out.append((leg, d))
+            continue
+        seen = dt.datetime.fromisoformat(row["ts"])
+        if row["hot_until"] and dt.datetime.fromisoformat(row["hot_until"]) > now \
+                and now - seen >= dt.timedelta(hours=HOT_AGAIN_HOURS):
+            out.append((leg, d))          # a fresh deal: back for another look at the next check-in
+            continue
+        quiet = (now - dt.datetime.fromisoformat(row["changed_at"])).days if row["changed_at"] else 0
+        every = 1 if small else search_every(days_out, quiet)
+        if (today - seen.date()).days >= every:
             out.append((leg, d))
     return out
+
+
+def mark_hot(con, hits, now=None):
+    """The dates of new deals stay 'hot' for HOT_HOURS: looked at again at the next check-in."""
+    until = ((now or dt.datetime.now()) + dt.timedelta(hours=HOT_HOURS)).isoformat(timespec="seconds")
+    for h in hits:
+        if h.get("rebook"):
+            continue
+        t = h.get("trip")
+        for leg, d in ((("out", t["out_date"]), ("ret", t["ret_date"])) if t else (("out", h.get("date")),)):
+            if d:
+                con.execute("UPDATE searched SET hot_until=? WHERE watch_id=? AND leg=? AND date=?",
+                            (until, h["watch_id"], leg, d))
 
 
 def page_budget(user_id, day=None):
@@ -198,9 +234,12 @@ def fit_budget(plan, room):
     nearest departures first. The kept dates stay in their mixed-up order."""
     if room is None:
         return plan
-    ranked = sorted(((d, w["id"], leg, len(swa.routes(w))) for w, legs in plan for leg, d in legs))
+    hot = {(r["watch_id"], r["leg"], r["date"]) for r in
+           db.query("SELECT watch_id, leg, date FROM searched WHERE hot_until > ?", (db.now(),))}
+    ranked = sorted((((w["id"], leg, d) not in hot), d, w["id"], leg, len(swa.routes(w)))
+                    for w, legs in plan for leg, d in legs)
     keep, used = set(), 0
-    for d, wid, leg, n in ranked:
+    for _, d, wid, leg, n in ranked:
         if used + 2 * n > room:
             continue
         keep.add((wid, leg, d))
@@ -216,7 +255,9 @@ def record_searched(con, watch_id, leg, date, rows):
     old = con.execute("SELECT cash, points, changed_at FROM searched WHERE watch_id=? AND leg=? AND date=?",
                       (watch_id, leg, date)).fetchone()
     changed = old is None or (old["cash"], old["points"]) != (cash, points)
-    con.execute("INSERT OR REPLACE INTO searched VALUES (?,?,?,?,?,?,?)",
+    con.execute("INSERT INTO searched(watch_id, leg, date, ts, cash, points, changed_at) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(watch_id, leg, date) DO UPDATE SET ts=excluded.ts, cash=excluded.cash, "
+                "points=excluded.points, changed_at=excluded.changed_at",
                 (watch_id, leg, date, now, cash, points, now if changed else old["changed_at"]))
 
 
@@ -1123,6 +1164,9 @@ class Worker:
         applog.info(f"Run {'cancelled' if cancelled else 'paused until the next check-in' if user_id in self.paused else 'finished'}: {attempts} search(es), {failures} failed, {len(hits)} new or lower fare(s)"
                     + (" (daily limit reached)" if limited else ""), user_id=user_id, source="run")
         sent = False
+        if hits:
+            with db.tx() as con:   # look at those dates again soon, like someone weighing a deal
+                mark_hot(con, hits)
         rebooks = [h for h in hits if h.get("rebook")]
         regular = [h for h in hits if not h.get("rebook")]
         if regular and (user["alert_mode"] or "instant") != "instant":
