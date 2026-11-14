@@ -163,3 +163,24 @@ def render_hits(hits):
     Prices are what Southwest showed at search time and can change.
     <a href="{e(settings.base_url)}" style="color:{BLUE}">Open SWA Fare Watcher</a></td></tr>
 </table></td></tr></table></body></html>"""
+
+
+def render_seat_result(title, changes, note, ok, manage_url):
+    """Email after a seat-selection attempt."""
+    e = html.escape
+    if changes:
+        rows = "".join(f"<li><b>{e(new)}</b>" + (f" (was {e(cur)})" if cur else "") + "</li>" for cur, new in changes)
+        body = f"<p style='{FONT};font-size:15px;color:{NAVY}'>New seat{'s' if len(changes) > 1 else ''}:</p><ul>{rows}</ul>"
+    else:
+        body = ""
+    colour = "#1a7f37" if ok else RED
+    return f"""<!doctype html><html><body style="margin:0;background:#F2F2F2">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:16px 8px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid {SILVER};border-radius:6px">
+  <tr><td style="background:{NAVY};padding:14px 16px;border-radius:6px 6px 0 0">
+    <span style="{FONT};font-size:18px;font-weight:bold;color:#fff">{e(title)}</span></td></tr>
+  <tr><td style="padding:14px 16px">{body}
+    <p style="{FONT};font-size:14px;color:{colour}">{e(note)}</p>
+    <a href="{e(manage_url)}" style="{FONT};background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
+       padding:8px 16px;border-radius:4px;text-decoration:none;display:inline-block">Open my reservation</a></td></tr>
+</table></td></tr></table></body></html>"""

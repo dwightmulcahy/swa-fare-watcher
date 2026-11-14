@@ -479,3 +479,45 @@ def test_other_currency_by_the_shop_in_switch(site, monkeypatch, tmp_path, human
     assert (price(cash), price(pts), price(back)) == (150.0, 12000, 150.0)
     assert asked == ["USD", "POINTS", "USD"] and len(loads) == 1 and shown == "Dollars"
     assert b._switch_works is True
+
+
+@pytest.mark.parametrize("human", [False, True])
+def test_seat_picker_waits_for_free_seats_then_confirms(site, monkeypatch, tmp_path, human):
+    from app import seat_picker, seats, swa
+    from app.config import settings
+
+    root = site.replace("/index.html", "")
+    monkeypatch.setattr(seat_picker, "MANAGE_URL", root + "/air/manage-reservation/index.html")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    with swa.BrowserSearcher(profile_key=f"t-seat-{human}", human=human) as b:
+        if human:
+            b.human.speed = 0.15
+        b.warm_up = lambda: None
+        b.page.goto(root + "/index.html")
+        b.page.evaluate("localStorage.clear(); sessionStorage.clear()")
+        prefs = {**seats.DEFAULT_PREFS, "position": "window"}
+        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", prefs, "priority")
+        changes, note = picker.run(time.time() + 60, poll=(0.2, 0.3), sleep=time.sleep)
+        assert b.page.evaluate("sessionStorage.getItem('seatLoads')") == "2"     # waited for free seats
+        assert b.page.evaluate("localStorage.getItem('paid')") == "0.00"
+        assert b.page.evaluate("localStorage.getItem('lookup')") == "ABC123|Pat|Lee"
+    assert note == "confirmed" and changes == [("11F", "9A (Preferred, Window)")]
+
+
+def test_seat_picker_never_confirms_a_charge(site, monkeypatch, tmp_path):
+    from app import seat_picker, seats, swa
+    from app.config import settings
+
+    root = site.replace("/index.html", "")
+    monkeypatch.setattr(seat_picker, "MANAGE_URL", root + "/air/manage-reservation/index.html")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(seats, "choose", lambda smap, *a, **k: next(  # pretend a $39 seat looked free
+        {**s, "price": 0} for s in smap if s["seat"] == "9A"))
+    with swa.BrowserSearcher(profile_key="t-seat-paid", human=False) as b:
+        b.warm_up = lambda: None
+        b.page.goto(root + "/index.html")
+        b.page.evaluate("localStorage.clear(); sessionStorage.clear()")
+        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", dict(seats.DEFAULT_PREFS), "priority")
+        with pytest.raises(seat_picker.NotFree):
+            picker.run(time.time() + 5, poll=(0.2, 0.3), sleep=time.sleep)
+        assert b.page.evaluate("localStorage.getItem('paid')") is None

@@ -111,6 +111,15 @@ CREATE TABLE IF NOT EXISTS digest_hits(
   created TEXT NOT NULL,
   hit TEXT NOT NULL                          -- JSON of the alert, as the instant email would show it
 );
+CREATE TABLE IF NOT EXISTS seat_jobs(
+  id INTEGER PRIMARY KEY,
+  watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+  leg TEXT NOT NULL,
+  opens_at TEXT NOT NULL,                    -- UTC ISO: when seat selection opens for that flight
+  status TEXT NOT NULL DEFAULT 'pending',    -- pending | running | done | unchanged | failed
+  note TEXT,
+  updated TEXT
+);
 CREATE TABLE IF NOT EXISTS app_state(
   key TEXT PRIMARY KEY,
   value TEXT
@@ -234,6 +243,33 @@ def init():
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
     finally:
         con.close()
+
+
+def sync_seat_jobs(watch_id, now=None):
+    """(Re)plan the seat-selection jobs for a watch from its booked flights; jobs already run are kept."""
+    import datetime as dt
+    import json
+
+    from . import seats
+    w = one("SELECT * FROM watches WHERE id=?", (watch_id,))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    with tx() as con:
+        con.execute("DELETE FROM seat_jobs WHERE watch_id=? AND status='pending'", (watch_id,))
+        if not w or not w["seat_auto"] or not w["active"]:
+            return []
+        done = {r["leg"] for r in con.execute("SELECT leg FROM seat_jobs WHERE watch_id=?", (watch_id,))}
+        made = []
+        for b in json.loads(w["booked"] or "[]"):
+            opens = seats.opens_at(b.get("date"), b.get("time"), b.get("from"))
+            if not opens or b["leg"] in done:
+                continue
+            departs = opens + dt.timedelta(hours=seats.OPEN_HOURS)
+            if departs <= now + dt.timedelta(hours=1):
+                continue                      # too late to matter
+            con.execute("INSERT INTO seat_jobs(watch_id, leg, opens_at, updated) VALUES (?,?,?,?)",
+                        (watch_id, b["leg"], opens.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            made.append((b["leg"], opens))
+        return made
 
 
 def get_state(key, default=None):

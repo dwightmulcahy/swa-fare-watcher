@@ -612,7 +612,16 @@ def create_app(worker=None, start_worker=True):
             wid = con.execute(
                 f"INSERT INTO watches(user_id, created_at, {', '.join(cols)}) VALUES (?,?,{','.join('?' * len(cols))})",
                 (u["id"], db.now(), *w.values())).lastrowid
+        db.sync_seat_jobs(wid)
         raise Redirect(f"/watches/{wid}?ok=Watch+created")
+
+    def _seat_jobs(wid):
+        out = []
+        for j in db.query("SELECT * FROM seat_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
+            opens = dt.datetime.fromisoformat(j["opens_at"]).astimezone()
+            out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}",
+                        "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
+        return out
 
     def _lows(trips):
         m = [x for x in trips if x["matched"]]
@@ -662,7 +671,7 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history,
+                      history=history, seat_jobs=_seat_jobs(wid),
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
@@ -692,6 +701,7 @@ def create_app(worker=None, start_worker=True):
         with db.tx() as con:
             con.execute(f"UPDATE watches SET {', '.join(f'{k}=?' for k in w)} WHERE id=? AND user_id=?",
                         (*w.values(), wid, u["id"]))
+        db.sync_seat_jobs(wid)
         raise Redirect(f"/watches/{wid}?ok=Watch+saved")
 
     @app.post("/watches/{wid}/toggle")
@@ -705,6 +715,7 @@ def create_app(worker=None, start_worker=True):
                 raise Redirect("/?err=" + quote_plus(err))
         with db.tx() as con:
             con.execute("UPDATE watches SET active=? WHERE id=?", (0 if w["active"] else 1, wid))
+        db.sync_seat_jobs(wid)
         raise Redirect("/?ok=" + ("Watch+paused" if w["active"] else "Watch+resumed"))
 
     @app.post("/watches/{wid}/delete")
