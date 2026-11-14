@@ -370,3 +370,26 @@ def test_visits_off_keeps_one_browser(worker, monkeypatch):
     make_watch(uid, dates=",".join(future(i) for i in range(10, 15)))
     worker.run_user(uid)
     assert len(opened) == 1
+
+
+def test_gpu_warning_email_once_a_day(sent, monkeypatch):
+    from app import swa
+    from app.config import settings
+    from app.worker import Worker
+    make_user(username="adm", email="adm@example.com", is_admin=1)
+
+    class B:
+        def __init__(self, gl): self.gl = gl
+        def renderer(self): return self.gl
+    monkeypatch.setattr(settings, "gpu", False)
+    sw = "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)"
+    assert Worker.check_gpu(B(sw), day="2027-01-01") is False
+    assert len(sent) == 1 and "GPU rendering is off" in sent[0][1] and "SWA_GPU isn&#x27;t set" in sent[0][2]
+    assert Worker.check_gpu(B(sw), day="2027-01-01") is None              # once a day
+    monkeypatch.setattr(settings, "gpu", True)
+    monkeypatch.setattr(settings, "gpu_device", "/nonexistent/renderD128")
+    Worker.check_gpu(B(sw), day="2027-01-02")
+    assert "exist in the container" in sent[1][2]
+    assert Worker.check_gpu(B("ANGLE (Intel, Vulkan 1.3 (Intel(R) UHD Graphics 600))"), day="2027-01-03") is True
+    assert len(sent) == 2
+    assert swa.gpu_problem().startswith("SWA_GPU is on but")

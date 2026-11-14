@@ -967,19 +967,30 @@ GPU_ARGS = [
 _gpu_warned = False
 
 
+def gpu_problem():
+    """Why the GPU won't be used, or None if SWA_GPU is on and the device is usable."""
+    if not settings.gpu:
+        return "SWA_GPU isn't set (add SWA_GPU=true to .env)"
+    dev = settings.gpu_device
+    if not os.path.exists(dev):
+        return f"SWA_GPU is on but {dev} doesn't exist in the container (compose: devices: [/dev/dri:/dev/dri])"
+    if not os.access(dev, os.R_OK | os.W_OK):
+        return (f"SWA_GPU is on but {dev} isn't readable and writable by uid {os.getuid()} "
+                f"(on the NAS: chmod 666 {dev}, again after each reboot or from autorun.sh)")
+    return None
+
+
 def gpu_args():
     """Extra Chrome flags for SWA_GPU, or [] (with a one-time warning) if the device isn't usable."""
     global _gpu_warned
     if not settings.gpu:
         return []
-    dev = settings.gpu_device
-    if os.access(dev, os.R_OK | os.W_OK):
+    problem = gpu_problem()
+    if problem is None:
         return list(GPU_ARGS)
     if not _gpu_warned:
         _gpu_warned = True
-        why = "doesn't exist (pass it in: devices: [/dev/dri:/dev/dri])" if not os.path.exists(dev) else \
-              f"isn't readable and writable by uid {os.getuid()} (on the host: chmod 666 {dev})"
-        applog.warn(f"SWA_GPU is on but {dev} {why}; using Chrome's software renderer", source="browser")
+        applog.warn(f"{problem}; using Chrome's software renderer", source="browser")
     return []
 
 
@@ -1393,6 +1404,16 @@ class BrowserSearcher:
                     self.human.scroll(rng.choice((1, 1, -1)) * rng.uniform(80, 250))
             except Exception:
                 pass
+
+    def renderer(self):
+        """The WebGL renderer pages see (e.g. "ANGLE (Intel, Vulkan ...)"), or None."""
+        try:
+            return self.page.evaluate("""() => {
+                const gl = document.createElement('canvas').getContext('webgl');
+                const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+                return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null; }""")
+        except Exception:
+            return None
 
     def _beat(self, lo, hi):
         """A short, never-identical wait between UI steps (seconds)."""

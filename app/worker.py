@@ -573,6 +573,29 @@ class Worker:
         return sent
 
     @staticmethod
+    def check_gpu(searcher, day=None):
+        """Once a day: if pages see software rendering (SwiftShader) instead of the GPU, warn the
+        admins by email with the reason (SWA_GPU off, device not passed in, or no permission)."""
+        if not hasattr(searcher, "renderer"):
+            return None
+        day = day or db.today()
+        if db.get_state("gpu_check_day") == day:
+            return None
+        gl = searcher.renderer()
+        db.set_state("gpu_check_day", day)
+        if gl and "swiftshader" not in gl.lower():
+            applog.info(f"Rendering with the GPU: {gl}", source="browser")
+            return True
+        why = swa.gpu_problem() or "SWA_GPU is on and the device is usable, but Chrome still fell back " \
+            "(check the GPU drivers in the image and the browser log)"
+        msg = (f"Chrome is drawing pages in software ({gl or 'no WebGL'}), which sites can recognise as a "
+               f"machine without a GPU. Reason: {why}.")
+        applog.warn(msg, source="browser")
+        for to in db.admin_emails():
+            mailer.send(to, "SWA fare watcher: GPU rendering is off", f"<p>{html.escape(msg)}</p>")
+        return False
+
+    @staticmethod
     def check_format(attempts, shape_errors, priceless, day=None):
         """If most of a run's searches came back in a shape the parser doesn't know, or with flights
         but no prices, Southwest has likely changed its data: warn the admins (once a day)."""
@@ -693,6 +716,7 @@ class Worker:
             visits = Visits(self, user_id, lambda st: self.searcher_factory(st, profile_key=user_id), state,
                             remaining=lambda: total - done)
             with visits as searcher:
+                self.check_gpu(searcher)
                 try:
                     if creds and hasattr(searcher, "ensure_signed_in"):
                         self.phase(user_id, "Opening southwest.com and checking you're signed in")
