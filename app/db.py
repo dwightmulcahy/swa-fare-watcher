@@ -202,7 +202,13 @@ MIGRATIONS = {
         "same_airports": "INTEGER NOT NULL DEFAULT 0",   # round trip must return between the same airports
         "date_from": "TEXT",                     # "between dates": fixed first and last departure day
         "date_to": "TEXT",
-        "booked": "TEXT",                        # JSON [{leg, date, flights, cash, points}]: watch for rebook drops
+        "booked": "TEXT",                        # JSON [{leg, date, flights, cash, points, time, from}]
+        "booking_conf": "TEXT",                  # confirmation number of the booked trip
+        "booking_first": "TEXT",                 # passenger name as on the booking (for lookup)
+        "booking_last": "TEXT",
+        "seat_auto": "INTEGER NOT NULL DEFAULT 0",   # pick seats when selection opens (48 h before)
+        "seat_status": "TEXT",                   # seats.STATUSES key
+        "seat_prefs": "TEXT",                    # JSON, see seats.DEFAULT_PREFS
     },
     "fares": {
         "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret

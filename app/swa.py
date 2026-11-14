@@ -543,8 +543,7 @@ def booked(w):
         items = json.loads(_get(w, "booked", "") or "[]")
     except ValueError:
         return []
-    return [b for b in items if isinstance(b, dict) and b.get("date") and b.get("leg") in ("out", "ret")
-            and (b.get("cash") is not None or b.get("points") is not None)]
+    return [b for b in items if isinstance(b, dict) and b.get("date") and b.get("leg") in ("out", "ret")]
 
 
 def _flight_nums(s):
@@ -554,6 +553,8 @@ def _flight_nums(s):
 def rebook_offer(b, rows):
     """Cheapest way to rebook a booked flight from today's fares: same flight number(s) if given,
     else any flight that day. Returns {"row", "save_cash", "save_points"} when it's cheaper."""
+    if b.get("cash") is None and b.get("points") is None:
+        return None            # booked only for seat selection: nothing paid to compare
     want = _flight_nums(b.get("flights"))
     rows = [r for r in rows if not want or _flight_nums(r.get("flights")) == want]
     best = None

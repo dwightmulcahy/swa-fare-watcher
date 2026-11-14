@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import airports, applog, buildinfo, db, swa
+from . import airports, applog, buildinfo, db, seats, swa
 from .config import settings
 from .mailer import fmt_dur
 from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
@@ -41,6 +41,8 @@ def _stops_label(f):
 
 templates.env.globals["stops_label"] = _stops_label
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
+templates.env.globals["seats"] = seats
+templates.env.globals["seat_prefs"] = seats.prefs_of
 templates.env.globals["max_dates"] = settings.max_dates_per_watch
 templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
@@ -482,6 +484,21 @@ def create_app(worker=None, start_worker=True):
         else:
             w["ret_depart_after"] = w["ret_depart_before"] = None
         booked = []
+        w["seat_auto"] = 1 if f.get("seat_auto") else 0
+        conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
+        w["booking_conf"] = conf or None
+        w["booking_first"] = str(f.get("booking_first", "")).strip()[:30] or None
+        w["booking_last"] = str(f.get("booking_last", "")).strip()[:30] or None
+        status = str(f.get("seat_status", "none"))
+        w["seat_status"] = status if status in seats.STATUSES else "none"
+        pos = str(f.get("seat_position", "window"))
+        w["seat_prefs"] = json.dumps({"position": pos if pos in seats.POSITIONS else "any",
+                                      **{k: bool(f.get(f"seat_{k}")) for k in seats.WISHES}})
+        if w["seat_auto"] and not (conf and len(conf) == 6 and w["booking_first"] and w["booking_last"]):
+            errs.append("To pick seats automatically, enter the 6-character confirmation number and the "
+                        "passenger's first and last name as on the booking.")
+        origins = [x for x in re.split(r"[\s,]+", w["origin"]) if x]
+        dests = [x for x in re.split(r"[\s,]+", w["destination"]) if x]
         for leg in ("out", "ret") if w["trip_type"] == "roundtrip" else ("out",):
             d = str(f.get(f"booked_{leg}_date", "")).strip()
             if not d:
@@ -493,11 +510,26 @@ def create_app(worker=None, start_worker=True):
                 continue
             cash = opt_int(f"booked_{leg}_cash", 1, 100_000)
             points = opt_int(f"booked_{leg}_points", 1, 10_000_000)
-            if cash is None and points is None:
+            t = str(f.get(f"booked_{leg}_time", "")).strip()
+            frm = re.sub(r"[^A-Za-z]", "", str(f.get(f"booked_{leg}_from", ""))).upper()[:3]
+            frm = frm or ((origins if leg == "out" else dests) or [""])[0]
+            if t and not re.fullmatch(r"\d{2}:\d{2}", t):
+                errs.append("Departure time must be HH:MM.")
+                continue
+            if cash is None and points is None and not w["seat_auto"]:
                 errs.append("For a booked flight, enter what you paid (cash or points).")
                 continue
-            booked.append({"leg": leg, "date": d, "cash": cash, "points": points,
+            if w["seat_auto"] and not t:
+                errs.append("To pick seats automatically, enter each booked flight's departure time.")
+                continue
+            if w["seat_auto"] and not seats.airport_tz(frm):
+                errs.append(f"Unknown departure airport {frm or '(blank)'} for the booked flight.")
+                continue
+            booked.append({"leg": leg, "date": d, "cash": cash, "points": points, "time": t or None,
+                           "from": frm or None,
                            "flights": re.sub(r"[^0-9/ ,]", "", str(f.get(f"booked_{leg}_flights", "")))[:40].strip()})
+        if w["seat_auto"] and not booked:
+            errs.append("To pick seats automatically, enter the booked flight's date and departure time.")
         w["booked"] = json.dumps(booked) if booked else None
         return w, errs
 
@@ -562,7 +594,8 @@ def create_app(worker=None, start_worker=True):
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
              "trip_type": "oneway", "ret_dates": "", "nights_min": 2, "nights_max": 5,
              "ret_depart_after": "", "ret_depart_before": "", "mix_payment": 1, "same_airports": 0,
-             "booked": None}
+             "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
+             "seat_auto": 0, "seat_status": "none", "seat_prefs": None}
         return render(request, "watch_form.html", u, s, **watch_ctx(w), new=True, limits=limits_for(u))
 
     @app.post("/watches")

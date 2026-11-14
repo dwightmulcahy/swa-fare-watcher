@@ -357,3 +357,7 @@ label:has(> .suggest) { position: relative; }
   .hist-chart circle.cash { fill: var(--accent); } }
 .chart-card label.small { display: flex; flex-direction: row; align-items: center; gap: .4rem; margin: 0; }
 .chart-card label.small select { width: auto; max-width: 16rem; }
+.watch-form .checks { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; }
+.watch-form .field { display: flex; flex-direction: column; gap: .3rem; }
+.watch-form .field > .label { font-weight: 600; font-size: .92rem; }
+.watch-form .booked-row input.code { max-width: 5.5rem; }
