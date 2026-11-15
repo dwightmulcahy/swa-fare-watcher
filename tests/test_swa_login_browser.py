@@ -260,6 +260,25 @@ def test_calendar_months_by_tab_and_currency_by_switch_on_one_page(site, monkeyp
     assert dec_pts["2026-12-06"] == 15000 and nov_pts["2026-11-09"] == 38000
 
 
+def test_points_calendar_without_the_form_opens_dollars_and_switches(site, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.swa import BrowserSearcher
+
+    monkeypatch.setattr(settings, "calendar_url", site.replace("index.html", "calendar.html"))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    loads = []
+    with BrowserSearcher(profile_key="t-cal-pts", human=False) as b:
+        b._warmed = True
+        b._form_works = False                      # the Book a Flight form isn't usable this session
+        b.page.on("framenavigated", lambda f: f == b.page.main_frame and loads.append(f.url))
+        pts = b.calendar("LIR", "HOU", "2026-11-09", 1, "POINTS")
+        fetches = b.page.evaluate("window.calendarFetches")
+    assert len(loads) == 1 and "fareType=USD" in loads[0]          # never the points address
+    assert fetches == ["USD 2026-11", "POINTS 2026-11"]
+    assert pts["2026-11-09"] == 38000
+
+
 def test_protection_signals_names_only(site, monkeypatch, tmp_path):
     from app.config import settings
     from app.swa import BrowserSearcher

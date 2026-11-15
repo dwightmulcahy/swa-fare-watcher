@@ -51,6 +51,7 @@ document.getElementById("flightBookingSubmit").onclick = () => {
   const q = new URLSearchParams({ originationAirportCode: document.getElementById("originationAirportCode").value,
     destinationAirportCode: document.getElementById("destinationAirportCode").value,
     departureDate: `${y}-${m}-${d}`, fareType: pts ? "POINTS" : "USD", adultPassengersCount: pax.value, tripType: "oneway" });
+  if (cal) q.set("via", "form");   // the real form opens the calendar in-app; only its bare address is rejected
   location.href = (cal ? "calendar.html?" : "select-depart.html?") + q.toString();
 };
 </script>

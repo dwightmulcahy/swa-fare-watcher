@@ -18,12 +18,16 @@
 const q = new URLSearchParams(location.search);
 window.calendarFetches = [];
 const state = { ft: q.get("fareType") || "USD", month: "2026-11" };
+// like Southwest: opening the calendar's address with fareType=POINTS is rejected; the Points
+// switch on an open (dollars) calendar works
+let fromAddress = q.get("via") !== "form";
 const load = () => { window.calendarFetches.push(state.ft + " " + state.month);
+  if (fromAddress && state.ft === "POINTS") return fetch("calendar-error-currency.json");
   return fetch("calendar-data-" + state.ft + (state.month === "2026-11" ? "" : "-" + state.month) + ".json" + location.search); };
 const buttons = document.querySelectorAll("[role=group] button");
 buttons.forEach((b) => b.addEventListener("click", () => {
   buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-  state.ft = b.dataset.ft; load();
+  state.ft = b.dataset.ft; fromAddress = false; load();
 }));
 const tabs = document.querySelectorAll("[role=tab]");
 tabs.forEach((t) => t.addEventListener("click", () => {
