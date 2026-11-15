@@ -87,7 +87,16 @@ def tmp_data(tmp_path, monkeypatch):
 @pytest.fixture
 def sent(monkeypatch):
     out = []
-    monkeypatch.setattr(mailer, "send", lambda to, subject, html: out.append((to, subject, html)) or True)
+    monkeypatch.setattr(mailer, "send",
+                        lambda to, subject, html, attachments=(): out.append((to, subject, html)) or True)
+    return out
+
+
+@pytest.fixture
+def sent_with_files(monkeypatch):
+    out = []
+    monkeypatch.setattr(mailer, "send", lambda to, subject, html, attachments=():
+                        out.append((to, subject, html, list(attachments))) or True)
     return out
 
 

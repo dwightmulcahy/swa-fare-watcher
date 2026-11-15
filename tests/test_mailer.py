@@ -88,3 +88,27 @@ def test_alert_email_is_southwest_styled_cards():
     assert "2 new deals" in out and "Spring &lt;trip&gt;" in out
     assert "2 stops (MCO, HOU)" in out and "$584" in out and "38,000 pts + $11.20" in out
     assert "Pay with: <b>Cash: $292</b>" in out and "https://x/r" in out
+
+
+def test_send_attaches_files(monkeypatch, tmp_path):
+    from email import message_from_string
+
+    from app import mailer
+    from app.config import settings
+    sent = {}
+
+    class SMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def login(self, *a): pass
+        def sendmail(self, frm, to, msg): sent["msg"] = msg
+    monkeypatch.setattr(mailer.smtplib, "SMTP_SSL", SMTP)
+    monkeypatch.setattr(settings, "gmail_user", "a@gmail.com")
+    monkeypatch.setattr(settings, "gmail_password", "abcd efgh ijkl mnop")
+    f = tmp_path / "x.json"
+    f.write_text('{"a": 1}')
+    assert mailer.send("b@x.com", "subj", "<p>hi</p>", attachments=[f])
+    m = message_from_string(sent["msg"])
+    names = [p.get_filename() for p in m.walk() if p.get_filename()]
+    assert m.is_multipart() and names == ["x.json"]

@@ -213,6 +213,7 @@ Admins can edit every setting under **Admin → Settings (.env)**. It saves the 
 | `SWA_TIMEZONE` | container `TZ` | Browser time zone; match where the server's IP is |
 | `SWA_AUTO_LOGIN` | `true` | Allow users to turn on automatic sign-in |
 | `SWA_CODE_WAIT_SECONDS` | `600` | How long a sign-in waits for a verification code |
+| `SWA_EMAIL_WARNINGS` | `off` | `warnings` emails the admins about every log warning and error, `errors` only errors, with the browser screenshot and any raw JSON the entry mentions attached (files over 5 MB are left on the Log tab). The same message goes out at most once an hour, and at most 12 such emails an hour |
 | `SWA_STALE_HOURS` | `26` | Email the admins (once) when no search run has finished for this long while watches are active; `0` turns it off. `/health` (also `/healthz`, used by the container's health check) returns 503 if the worker thread has stopped |
 | `SWA_DIGEST_AT` | `18:00` | When daily/weekly digests are emailed (each user picks *each deal*, *daily digest* or *weekly digest* under Settings → Alerts) |
 | `SWA_BACKUP_KEEP` | `7` | Copy the database to `data/backups/app-YYYY-MM-DD.db` once a day (taken safely while the app runs) and keep this many; `0` turns it off. Restore: stop the container, copy a backup over `data/app.db`, start it |
