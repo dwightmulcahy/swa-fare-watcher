@@ -33,7 +33,10 @@
   </ul>
 </section>
 {% endif %}
-{% if not seat_jobs %}<p class="muted">Nothing scheduled: the flights have left, or the watch is paused.</p>{% endif %}
+{% if not w.booked %}<p class="flash {{ 'err' if w.last_status and 'ouldn' in w.last_status or 'blocked' in (w.last_status or '') else '' }}">{{ w.last_status or "The flights haven't been read from the booking yet." }}
+  {% if 'Looking up' in (w.last_status or '') %}Refresh in a minute.{% endif %}</p>
+<form method="post" action="/watches/{{ w.id }}/lookup" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Look up the booking again</button></form>
+{% elif not seat_jobs %}<p class="muted">Nothing scheduled: the flights have left, or the watch is paused.</p>{% endif %}
 {% else %}
 <div class="stats">
   {% if kind == 'rebook' %}

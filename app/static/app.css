@@ -384,3 +384,7 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .settings-form .control input:not([type=checkbox]), .settings-form .control select { max-width: 32rem; width: 100%; }
 .settings-form details.advanced summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: .5rem 0; }
 @media (max-width: 640px) { .settings-form .setting { grid-template-columns: 1fr; } .settings-form .setting .hint { grid-column: 1; } }
+.watch-form details.manual-flights { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .8rem 1.25rem; margin: 0 0 1rem; }
+.watch-form details.manual-flights > summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+.watch-form details.manual-flights > fieldset { box-shadow: none; margin: .8rem 0 0; }

@@ -15,8 +15,12 @@
       <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off" required></label>
       <label>Last name <input name="booking_last" value="{{ w.booking_last or '' }}" autocomplete="off" required></label>
     </div>
+    <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="Spring trip seats"></label>
+    <p class="hint">After you save, it looks the booking up on southwest.com and reads the flights, dates and departure times from it.</p>
   </fieldset>
-  {% set placeholder = "Spring trip seats" %}{% include "_booked_route.html" %}
+  <details class="manual-flights card-ish" {{ "open" if w.booked or w.origin }}>
+    <summary>Enter the flights by hand <span class="hint">optional: left blank, they're read from the booking after you save</span></summary>
+  {% set placeholder = "Spring trip seats" %}{% set hide_name = True %}{% include "_booked_route.html" %}
   {% for leg, label in [("out", "Outbound"), ("ret", "Return")] %}{% set b = bk.get(leg, {}) %}
   <fieldset {% if leg == "ret" %}data-when="trip_type:roundtrip" {{ "" if rt else "hidden" }}{% endif %}>
     <legend>{{ label }} flight</legend>
@@ -25,6 +29,7 @@
       <label>Departs <span class="hint">local time at {{ "the From" if leg == "out" else "the To" }} airport</span><input name="{{ leg }}_time" type="time" value="{{ b.time or '' }}"></label>
     </div>
   </fieldset>{% endfor %}
+  </details>
   <fieldset>
     <legend>Seat preferences</legend>
     <div class="row">

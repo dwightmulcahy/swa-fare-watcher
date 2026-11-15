@@ -540,3 +540,18 @@ def test_seat_picker_never_confirms_a_charge(site, monkeypatch, tmp_path):
         with pytest.raises(seat_picker.NotFree):
             picker.run(time.time() + 5, poll=(0.2, 0.3), sleep=time.sleep)
         assert b.page.evaluate("localStorage.getItem('paid')") is None
+
+
+def test_trip_page_lookup_reads_the_flights(site, monkeypatch, tmp_path):
+    from app import seat_picker, seats, swa
+    from app.config import settings
+
+    root = site.replace("/index.html", "")
+    monkeypatch.setattr(seat_picker, "MANAGE_URL", root + "/air/manage-reservation/index.html")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    with swa.BrowserSearcher(profile_key="t-trip", human=False) as b:
+        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", dict(seats.DEFAULT_PREFS), "none")
+        picker.open_reservation()
+        legs = seat_picker.parse_trip(b.page.inner_text("body"))
+    assert legs == [{"leg": "out", "date": "2026-11-14", "time": "13:15", "from": "LIR", "to": "HOU",
+                     "flights": "567"}]
