@@ -192,3 +192,115 @@ def test_pages_render_for_each_kind(client):
     assert "Conf. ABC123" in page and "Search now" not in page and "Seat selection" in page
     dash = client.get("/").text
     assert "kind-seats" in dash and "Scheduled" in dash
+
+
+TRIP = """Departing
+Sat, November 14, 2026
+Flight
+WN567
+Boeing 737-800 (subject to change)
+Departs
+Liberia (Guanacaste)
+1:15
+PM
+Liberia (Guanacaste), Costa Rica - LIR
+On Time
+Arrives
+Houston
+4:45
+PM
+Houston (Hobby), TX - HOU
+Seat Assignments
+Returning
+Sat, November 21, 2026
+Flight
+WN1203
+Departs
+Houston
+9:05
+AM
+Houston (Hobby), TX - HOU
+Arrives
+Dallas
+10:10
+AM
+Dallas (Love Field), TX - DAL
+Flight
+WN4972
+Departs
+Dallas
+12:40
+PM
+Dallas (Love Field), TX - DAL
+Arrives
+Liberia
+4:30
+PM
+Liberia (Guanacaste), Costa Rica - LIR
+"""
+
+
+def test_parse_trip_page_flights():
+    from app.seat_picker import parse_trip
+    legs = parse_trip(TRIP)
+    assert legs == [
+        {"leg": "out", "date": "2026-11-14", "time": "13:15", "from": "LIR", "to": "HOU", "flights": "567"},
+        {"leg": "ret", "date": "2026-11-21", "time": "09:05", "from": "HOU", "to": "LIR", "flights": "1203/4972"},
+    ]
+    assert parse_trip("nothing here") == []
+    assert parse_trip("Departing\nSun, November 15, 2026\nDeparts\nX\n12:05\nAM\nX - LIR\nArrives\nY - HOU")[0]["time"] == "00:05"
+
+
+def test_seat_watch_with_just_the_booking_looks_it_up(client, worker, monkeypatch):
+    from app import db
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    started = []
+    monkeypatch.setattr(worker, "lookup_booking", lambda wid: started.append(wid))
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+            "seat_status": "priority", "seat_position": "window", "active": "1"}
+    loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
+    wid = int(loc.rstrip("/").split("/")[-1])
+    import time as _t
+    for _ in range(50):
+        if started:
+            break
+        _t.sleep(0.02)
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    assert started == [wid] and w["booked"] is None and w["name"] == "Seats ABC123"
+    page = client.get(loc).text
+    assert "Looking up the booking" in page and "Look up the booking again" in page
+
+
+def test_lookup_booking_fills_the_watch_and_plans_seats(client, worker):
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    worker.lookup_booking = lambda wid: None          # don't start one from the web request
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+            "seat_status": "priority", "seat_position": "window", "active": "1"}
+    loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
+    wid = int(loc.rstrip("/").split("/")[-1])
+    from app import db
+    from app.worker import Worker
+    future_trip = TRIP.replace("2026", "2030")
+
+    class Page:
+        def inner_text(self, sel): return future_trip
+
+    class Browser:
+        humanize, human, page = False, None, Page()
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def warm_up(self): pass
+    import app.seat_picker as sp
+    real = sp.SeatPicker.open_reservation
+    sp.SeatPicker.open_reservation = lambda self: None
+    try:
+        legs = Worker.lookup_booking(worker, wid, browser_factory=Browser)
+    finally:
+        sp.SeatPicker.open_reservation = real
+    assert [x["leg"] for x in legs] == ["out", "ret"]
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    assert (w["origin"], w["destination"], w["trip_type"]) == ("LIR", "HOU", "roundtrip")
+    assert len(db.query("SELECT * FROM seat_jobs WHERE watch_id=?", (wid,))) == 2
+    assert w["last_status"] == "Booking read: 2 flight(s)"

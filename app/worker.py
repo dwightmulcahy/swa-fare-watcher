@@ -696,6 +696,53 @@ class Worker:
                                                   status != "failed", seat_picker.MANAGE_URL))
         return status, changes, note
 
+    def lookup_booking(self, watch_id, browser_factory=None):
+        """Read a seat watch's flights (dates, departure times, airports, flight numbers) from its
+        booking's trip page, save them and plan the seat jobs. Returns the legs found."""
+        import json
+
+        from . import seat_picker
+        w = db.one("SELECT * FROM watches WHERE id=?", (watch_id,))
+        if not w:
+            return None
+        uid = w["user_id"]
+        status = "Couldn't read the booking"
+        legs = []
+        self.seat_busy.add(uid)
+        try:
+            factory = browser_factory or (lambda: self.searcher_factory(
+                None, profile_key=uid if self.running_user != uid else f"{uid}-seats"))
+            with factory() as browser:
+                picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
+                                                seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
+                browser.warm_up()
+                picker.open_reservation()
+                legs = seat_picker.parse_trip(picker.page.inner_text("body"))
+        except swa.Blocked as e:
+            status = f"Southwest blocked the lookup ({e}); enter the flights by hand"
+        except Exception as e:
+            status = f"Couldn't look up the booking ({e.__class__.__name__}); check the confirmation # and name"
+        finally:
+            self.seat_busy.discard(uid)
+        if legs:
+            out = next(x for x in legs if x["leg"] == "out")
+            booked = [{"leg": x["leg"], "date": x["date"], "time": x["time"], "from": x["from"],
+                       "flights": x["flights"], "cash": None, "points": None} for x in legs]
+            with db.tx() as con:
+                con.execute("UPDATE watches SET origin=?, destination=?, trip_type=?, booked=?, dates=?, ret_dates=?, "
+                            "last_status=? WHERE id=?",
+                            (out["from"], out["to"], "roundtrip" if len(legs) > 1 else "oneway", json.dumps(booked),
+                             out["date"], next((x["date"] for x in legs if x["leg"] == "ret"), None),
+                             f"Booking read: {len(legs)} flight(s)", watch_id))
+            db.sync_seat_jobs(watch_id)
+            applog.info(f"{w['name']}: read the booking: " + "; ".join(
+                f"{x['from']}→{x['to']} {x['date']} {x['time']}" for x in legs), user_id=uid, source="seats")
+        else:
+            with db.tx() as con:
+                con.execute("UPDATE watches SET last_status=? WHERE id=?", (status, watch_id))
+            applog.warn(f"{w['name']}: {status}", user_id=uid, source="seats")
+        return legs
+
     def housekeeping(self):
         """Background chores, checked every few minutes; each is safe to repeat."""
         try:

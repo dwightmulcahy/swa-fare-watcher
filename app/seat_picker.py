@@ -189,6 +189,53 @@ class SeatPicker:
             self.reload_seat_map()
 
 
+def parse_trip(text):
+    """Flights on a trip page's text: [{"leg", "date", "time", "from", "to", "flights"}].
+    Each trip block starts "Departing"/"Returning" + "Sat, November 14, 2026" and lists
+    "Flight / WN567", "Departs / <city> / 1:15 / PM / <city>, <region> - LIR" and "Arrives ... - HOU"
+    (a connection has several; the first departure and last arrival count)."""
+    import datetime as dt
+    lines = [x.strip() for x in (text or "").splitlines() if x.strip()]
+    legs, cur = [], None
+    for i, line in enumerate(lines):
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if line in ("Departing", "Returning"):
+            try:
+                day = dt.datetime.strptime(nxt, "%a, %B %d, %Y").date()
+            except ValueError:
+                continue
+            if len(legs) == 2:
+                break
+            cur = {"leg": "ret" if legs else "out", "date": day.isoformat(), "time": None, "from": None,
+                   "to": None, "flights": []}
+            legs.append(cur)
+        elif cur is None:
+            continue
+        elif line == "Flight":
+            m = re.match(r"WN\s*(\d+)", nxt)
+            if m:
+                cur["flights"].append(m.group(1))
+        elif line in ("Departs", "Arrives"):
+            window = lines[i + 1:i + 7]
+            code = next((m.group(1) for x in window for m in [re.search(r" - ([A-Z]{3})$", x)] if m), None)
+            if line == "Departs" and cur["from"] is None:
+                cur["from"] = code
+                for j, x in enumerate(window):
+                    t = re.fullmatch(r"(\d{1,2}):(\d{2})\s*([AP]M)?", x)
+                    if t:
+                        ampm = t.group(3) or (window[j + 1] if j + 1 < len(window) else "")
+                        h = int(t.group(1)) % 12 + (12 if ampm.upper() == "PM" else 0)
+                        cur["time"] = f"{h:02d}:{t.group(2)}"
+                        break
+            elif line == "Arrives":
+                cur["to"] = code
+    out = []
+    for leg in legs:
+        if leg["from"] and leg["to"] and leg["time"]:
+            out.append({**leg, "flights": "/".join(leg["flights"])})
+    return out
+
+
 def money(text):
     m = re.search(r"([\d,]+(?:\.\d+)?)", text or "")
     return float(m.group(1).replace(",", "")) if m else None

@@ -531,15 +531,17 @@ def create_app(worker=None, start_worker=True):
              "trip_type": "roundtrip" if rt else "oneway",
              "adults": num("adults", 1, 8) or 1,
              "active": 1 if f.get("active", "1") == "1" else 0}
+        # a seat watch with no flights entered: they're read from the booking after saving
+        lookup = kind == "seats" and not (w["origin"] or w["destination"] or str(f.get("out_date", "")).strip())
         for k, label in (("origin", "From"), ("destination", "To")):
-            if not IATA.match(w[k] or ""):
+            if not lookup and not IATA.match(w[k] or ""):
                 errs.append(f"{label} must be one 3-letter airport code.")
-        if not errs and w["origin"] == w["destination"]:
+        if not errs and not lookup and w["origin"] == w["destination"]:
             errs.append("From and To must differ.")
-        if not w["name"] and not errs:
+        if not w["name"] and not errs and not lookup:
             w["name"] = f"{swa.route_label(w)} booked" if kind == "rebook" else f"{swa.route_label(w)} seats"
         booked = []
-        for leg in ("out", "ret") if rt else ("out",):
+        for leg in () if lookup else ("out", "ret") if rt else ("out",):
             label = "return" if leg == "ret" else "outbound"
             d = str(f.get(f"{leg}_date", "")).strip()
             try:
@@ -561,7 +563,7 @@ def create_app(worker=None, start_worker=True):
                 elif not seats.airport_tz(b["from"]):
                     errs.append(f"Unknown airport {b['from']}.")
             booked.append(b)
-        w["booked"] = json.dumps(booked)
+        w["booked"] = json.dumps(booked) if booked else None
         w["dates"] = ",".join(b["date"] for b in booked if b["leg"] == "out") or None
         w["ret_dates"] = ",".join(b["date"] for b in booked if b["leg"] == "ret") or None
         if kind == "seats":
@@ -571,12 +573,33 @@ def create_app(worker=None, start_worker=True):
                      booking_last=str(f.get("booking_last", "")).strip()[:30] or None)
             if not (len(conf) == 6 and w["booking_first"] and w["booking_last"]):
                 errs.append("Enter the 6-character confirmation number and the first and last name as booked.")
+            if lookup and not w["name"]:
+                w["name"] = f"Seats {conf}"
             status = str(f.get("seat_status", "none"))
             w["seat_status"] = status if status in seats.STATUSES else "none"
             pos = str(f.get("seat_position", "window"))
             w["seat_prefs"] = json.dumps({"position": pos if pos in seats.POSITIONS else "any",
                                           **{k: bool(f.get(f"seat_{k}")) for k in seats.WISHES}})
         return w, errs
+
+    def _maybe_lookup(wid, w):
+        """A seat watch saved without its flights: read them from the booking in the background."""
+        if w.get("kind") == "seats" and not w.get("booked") and w.get("active"):
+            with db.tx() as con:
+                con.execute("UPDATE watches SET last_status=? WHERE id=?",
+                            ("Looking up the booking on southwest.com…", wid))
+            threading.Thread(target=app.state.worker.lookup_booking, args=(wid,), name="swa-lookup",
+                             daemon=True).start()
+
+    @app.post("/watches/{wid}/lookup")
+    async def relookup(request: Request, wid: int):
+        u, s = require(request)
+        await form(request, s)
+        w = dict(watch_or_404(u, wid))
+        if w["kind"] != "seats":
+            raise Redirect(f"/watches/{wid}")
+        _maybe_lookup(wid, {**w, "booked": None})
+        raise Redirect(f"/watches/{wid}?ok=Looking+up+the+booking:+refresh+in+a+minute")
 
     def parse_any(f, kind):
         return parse_booked(f, kind) if kind in ("rebook", "seats") else parse_watch(f)
@@ -671,6 +694,7 @@ def create_app(worker=None, start_worker=True):
                 f"INSERT INTO watches(user_id, created_at, {', '.join(cols)}) VALUES (?,?,{','.join('?' * len(cols))})",
                 (u["id"], db.now(), *w.values())).lastrowid
         db.sync_seat_jobs(wid)
+        _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+created")
 
     def _seat_jobs(wid):
@@ -760,6 +784,7 @@ def create_app(worker=None, start_worker=True):
             con.execute(f"UPDATE watches SET {', '.join(f'{k}=?' for k in w)} WHERE id=? AND user_id=?",
                         (*w.values(), wid, u["id"]))
         db.sync_seat_jobs(wid)
+        _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+saved")
 
     @app.post("/watches/{wid}/toggle")
