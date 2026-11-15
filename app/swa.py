@@ -1517,12 +1517,21 @@ class BrowserSearcher:
         except Exception:
             return None
         hit = re.compile(rf"(^|[^A-Z]){code}([^A-Z]|$)")
-        for opt in options.all()[:12]:
-            if hit.search(opt.inner_text(timeout=1000).upper()):
-                if pick:
-                    self._click(opt)
-                return opt
-        return None
+        # the list shows before it's filtered for what was typed (popular or earlier matches),
+        # so keep reading it for a few seconds until the airport turns up
+        end = time.monotonic() + max(wait, 3000) / 1000
+        while True:
+            for opt in options.all()[:15]:
+                try:
+                    if hit.search(opt.inner_text(timeout=1000).upper()):
+                        if pick:
+                            self._click(opt)
+                        return opt
+                except Exception:
+                    break                          # the list changed under us: read it again
+            if time.monotonic() >= end:
+                return None
+            self.page.wait_for_timeout(300)
 
     def _set_checkbox(self, selector, on):
         box = self.page.locator(selector).first

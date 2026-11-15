@@ -29,11 +29,16 @@ tripList.querySelectorAll("[role=option]").forEach((o) => o.onclick = () => {
   trip.querySelector("span").textContent = o.textContent; tripList.hidden = true; });
 for (const [id, list] of [["originationAirportCode", "origin-list"], ["destinationAirportCode", "dest-list"]]) {
   const input = document.getElementById(id), ul = document.getElementById(list);
+  const show = (entries) => ul.replaceChildren(...entries.map(([c, n]) => {
+    const li = document.createElement("li"); li.setAttribute("role", "option"); li.textContent = n;
+    li.onclick = () => { input.value = c; ul.replaceChildren(); }; return li; }));
+  let timer = null;
   input.addEventListener("input", () => {
     const t = input.value.toUpperCase();
-    ul.replaceChildren(...Object.entries(NAMES).filter(([c, n]) => t && (c.startsWith(t) || n.toUpperCase().includes(t)))
-      .map(([c, n]) => { const li = document.createElement("li"); li.setAttribute("role", "option"); li.textContent = n;
-        li.onclick = () => { input.value = c; ul.replaceChildren(); }; return li; }));
+    // like Southwest: popular airports show at once, the filtered list a moment later
+    if (!ul.children.length) show(Object.entries(NAMES).filter(([c]) => c === "HOU" || c === "JAN"));
+    clearTimeout(timer);
+    timer = setTimeout(() => show(Object.entries(NAMES).filter(([c, n]) => t && (c.startsWith(t) || n.toUpperCase().includes(t)))), 700);
   });
 }
 const pax = document.querySelector('[name="adultPassengersCount"]'), paxbox = document.getElementById("paxbox");
