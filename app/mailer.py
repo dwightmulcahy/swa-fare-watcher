@@ -3,12 +3,14 @@ import datetime as dt
 import html
 import smtplib
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from . import swa
 from .config import settings
 
 
-def send(to, subject, body_html) -> bool:
+def send(to, subject, body_html, attachments=()) -> bool:
+    """Email `body_html`, with optional file attachments (paths)."""
     if not to:
         return False
     if not (settings.gmail_user and settings.gmail_password):
@@ -17,6 +19,16 @@ def send(to, subject, body_html) -> bool:
         return False
     from . import applog
     msg = MIMEText(body_html, "html")
+    if attachments:
+        from email.mime.application import MIMEApplication
+        from email.mime.multipart import MIMEMultipart
+        outer = MIMEMultipart("mixed")
+        outer.attach(msg)
+        for path in attachments:
+            part = MIMEApplication(Path(path).read_bytes())
+            part.add_header("Content-Disposition", "attachment", filename=Path(path).name)
+            outer.attach(part)
+        msg = outer
     msg["Subject"], msg["From"], msg["To"] = subject, settings.gmail_user, to
     password = settings.gmail_password.replace(" ", "")   # app passwords are shown as "abcd efgh ..."
     errors = []

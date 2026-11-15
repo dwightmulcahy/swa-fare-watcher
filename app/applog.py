@@ -67,6 +67,11 @@ def log(message, level="info", user_id=None, watch_id=None, source="app", exc=Fa
             _prune()
     except Exception:
         pass  # logging must never break the caller (e.g. DB not initialised yet)
+    try:
+        from . import alerts
+        alerts.notify(level, source, text, rel, user_id)
+    except Exception:
+        pass
 
 
 def _prune():

@@ -97,6 +97,9 @@ GROUPS = [
     ]),
     ("Alerts and upkeep", [
         Setting("SWA_DIGEST_AT", "18:00", "When daily and weekly digest emails go out", "time"),
+        Setting("SWA_EMAIL_WARNINGS", "off", "Email the admins about log entries, with the screenshot and any raw "
+                "JSON attached: warnings (and errors), errors only, or off. The same message at most once an "
+                "hour, at most 12 emails an hour", "choice", ("off", "errors", "warnings")),
         Setting("SWA_STALE_HOURS", "26", "Email the admins when no run has finished for this long; 0 = off",
                 "float"),
         Setting("SWA_BACKUP_KEEP", "7", "Daily database backups kept in data/backups; 0 = off", "int"),

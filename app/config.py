@@ -88,6 +88,9 @@ class Settings:
         self.stale_hours = max(0.0, float(_env("SWA_STALE_HOURS", "26")))
         # Daily/weekly digest emails go out at this local time (users choose the mode in Settings)
         self.digest_at = _env("SWA_DIGEST_AT", "18:00")
+        # Email the admins about log warnings and errors ("warnings"), only errors ("errors") or not ("off")
+        v = (_env("SWA_EMAIL_WARNINGS", "off") or "off").lower()
+        self.email_warnings = v if v in ("off", "errors", "warnings") else "off"
         self._secret = _env("SECRET_KEY")
 
     @property
