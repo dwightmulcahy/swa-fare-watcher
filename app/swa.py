@@ -1869,6 +1869,22 @@ class BrowserSearcher:
             if days is not None:
                 self._cal_shown = (*key, fare_type)
                 return days
+        if fare_type == "POINTS":
+            # Southwest rejects the points calendar's address (VALIDATION__CURRENCY_CODE__REQUIRED):
+            # open the dollars calendar there and switch it to Points, as a person would
+            if self._address_calendar(origin, dest, date, adults, "USD", tag + "-via-dollars") is None:
+                return None
+            days = self._calendar_click(date, "POINTS", tag)
+            if days is not None:
+                self._cal_shown = (*key, "POINTS")
+                applog.info(f"{tag}: opened the dollars calendar and switched it to Points", source="search",
+                            user_id=self._uid())
+            return days
+        return self._address_calendar(origin, dest, date, adults, fare_type, tag)
+
+    def _address_calendar(self, origin, dest, date, adults, fare_type, tag):
+        """Load the low-fare calendar from its address (bookmark-style)."""
+        key = (origin, dest, date[:7], adults)
         q = {
             "adultPassengersCount": adults, "adultsCount": adults,
             "currencyCode": "PTS" if fare_type == "POINTS" else "USD",
