@@ -152,7 +152,7 @@ def render_hits(hits):
                            "(flight credit, or to your card on refundable fares; points go back to your account)",
                            _leg_line("Flight", h["date"], r, h["url"]),
                            f'${r["cash"]:,.0f}' if r["cash"] else "", pts, "", h["use"],
-                           button="Change flight", button_url=MANAGE_URL)
+                           button="Change flight", button_url=h.get("manage_url") or MANAGE_URL)
             continue
         cards += _card(h["watch"], h["url"], "One way", _leg_line("Flight", h["date"], r, None),
                        f'${r["cash"]:,.0f}' if r["cash"] else "", pts,

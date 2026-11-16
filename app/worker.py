@@ -9,7 +9,7 @@ import random
 import threading
 import time
 
-from . import applog, db, mailer, seats, swa
+from . import applog, db, mailer, seat_picker, seats, swa
 from .config import settings
 from .security import decrypt_json, encrypt_json
 
@@ -428,6 +428,8 @@ def rebook_hits(con, w, booked, legs):
             "watch": f'{w["name"]}: your booked {"return" if b["leg"] == "ret" else "flight"} got cheaper',
             "use": f"Rebook and save {save} (you paid {paid})",
             "url": swa.booking_url(frm, to, b["date"], w["adults"]),
+            "manage_url": seat_picker.manage_url(*(w[k] if k in w.keys() else None
+                                                  for k in ("booking_conf", "booking_first", "booking_last"))),
         })
     return out
 
@@ -696,7 +698,9 @@ class Worker:
                        "failed": "Seat selection needs you"}[status]
             mailer.send(user["email"], f"SWA {subject}: {w['name']} ({leg})",
                         mailer.render_seat_result(f"{w['name']}: {leg} flight", changes, note,
-                                                  status != "failed", seat_picker.MANAGE_URL, report))
+                                                  status != "failed",
+                                                  seat_picker.manage_url(w["booking_conf"], w["booking_first"],
+                                                                         w["booking_last"]), report))
         return status, changes, note
 
     def lookup_booking(self, watch_id, browser_factory=None):

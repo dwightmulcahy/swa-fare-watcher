@@ -197,6 +197,7 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
     assert db.one("SELECT status FROM seat_jobs WHERE id=?", (job["id"],))["status"] == "done"
     assert "Seat selected" in sent[-1][1] and "9A (Preferred, Window)" in sent[-1][2]
     assert "21.0" in sent[-1][2] and "chosen" in sent[-1][2]
+    assert "confirmationNumber=ABC123&amp;passengerFirstName=Pat&amp;passengerLastName=Lee" in sent[-1][2]
 
 
 def test_seat_job_that_would_charge_reports_and_changes_nothing(client, worker, sent):
@@ -371,3 +372,11 @@ def test_lookup_booking_fills_the_watch_and_plans_seats(client, worker):
     assert (w["origin"], w["destination"], w["trip_type"]) == ("LIR", "HOU", "roundtrip")
     assert len(db.query("SELECT * FROM seat_jobs WHERE watch_id=?", (wid,))) == 2
     assert w["last_status"] == "Booking read: 2 flight(s)"
+
+
+def test_manage_link_prefills_the_lookup():
+    from app import seat_picker
+    assert seat_picker.manage_url("ABC123", "Mary Ann", "Lee") == (
+        "https://www.southwest.com/air/manage-reservation/index.html"
+        "?confirmationNumber=ABC123&passengerFirstName=Mary+Ann&passengerLastName=Lee")
+    assert seat_picker.manage_url(None, "Pat", "Lee") == seat_picker.MANAGE_URL
