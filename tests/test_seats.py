@@ -27,13 +27,37 @@ def test_choose_by_preferences_and_status():
     best = seats.choose(MAP, window, "priority")
     assert best["seat"] == "9A" or "window" in best["features"]      # a real window, never a middle
     assert "middle" not in best["features"] and seats.better(best, cur, window)
-    legroom_any = {**seats.DEFAULT_PREFS, "position": "any", "no_middle": False}
+    legroom_any = {"position": "any", "order": ["extra_legroom", "front"]}
     pick = seats.choose(MAP, legroom_any, "priority")
     assert pick["type"] == "extra" and pick["seat"] == "1E"            # front-most Extra Legroom
     assert seats.choose(MAP, legroom_any, "plus_premier")["type"] != "extra"   # not free for that card
     assert seats.choose(MAP, legroom_any, "priority", taken={"1E"})["seat"] != "1E"
     paid = [{**x, "price": 39.0} for x in MAP]
     assert seats.choose(paid, window, "priority") is None             # never anything that costs
+
+
+def test_order_decides_which_wish_wins():
+    legroom_first = {"position": "window", "order": ["extra_legroom", "seat_type", "front"]}
+    window_first = {"position": "window", "order": ["seat_type", "extra_legroom", "front"]}
+    a = seats.choose(MAP, legroom_first, "priority")
+    b = seats.choose(MAP, window_first, "priority")
+    assert a["type"] == "extra" and "window" in b["features"]
+    assert seats.fit(a, legroom_first) > seats.fit(b, legroom_first)
+    assert seats.fit(b, window_first) > seats.fit(a, window_first)
+    perfect = {"seat": "1F", "row": 1, "type": "extra", "features": {"window", "exit row"}, "price": 0}
+    assert round(seats.fit(perfect, window_first)) == 100
+    far = {**perfect, "seat": "3F", "row": 3}
+    assert not seats.better(far, perfect, {"position": "window", "order": ["seat_type"]})  # rows alone don't move
+
+
+def test_old_preferences_become_an_order():
+    old = {"seat_prefs": json.dumps({"position": "aisle", "extra_legroom": True, "front": False, "no_middle": True,
+                                     "window_view": False, "exit_row": True, "bulkhead": False})}
+    p = seats.prefs_of(old)
+    assert p["order"] == ["no_middle", "extra_legroom", "seat_type", "exit_row"] and p["exit_row"] and not p["front"]
+    assert seats.prefs_of({"seat_prefs": None})["order"] == seats.DEFAULT_ORDER
+    anyp = seats.prefs_of({"seat_prefs": json.dumps({"position": "any", "order": ["seat_type", "front", "bogus"]})})
+    assert anyp["order"] == ["front"]
 
 
 def test_ranked_lists_free_seats_best_first():
@@ -85,17 +109,20 @@ def test_seat_watch_form_saves_preferences(client):
     assert 'name="seat_status"' in page and "max_price" not in page and "out_cash" not in page
     data = {"csrf": t, "kind": "seats", "booking_conf": "abc12-3", "booking_first": "Pat", "booking_last": "Lee",
             "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10),
-            "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "seat_exit_row": "1",
+            "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "rank_exit_row": "1",
+            "rank_no_middle": "2", "rank_front": "3",
             "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     w = db.one("SELECT * FROM watches WHERE id=?", (int(loc.rstrip("/").split("/")[-1]),))
     assert (w["kind"], w["seat_auto"], w["booking_conf"], w["seat_status"]) == ("seats", 1, "ABC123", "priority")
     p = json.loads(w["seat_prefs"])
-    assert p["position"] == "aisle" and p["exit_row"] and not p["extra_legroom"]
+    assert p == {"position": "aisle", "order": ["exit_row", "no_middle", "front"]}
     b = json.loads(w["booked"])[0]
     assert b["time"] == "13:15" and b["from"] == "LIR"
     edit = client.get(loc + "/edit").text
     assert 'value="ABC123"' in edit and 'value="priority" selected' in edit
+    assert edit.index('name="rank_exit_row"') < edit.index('name="rank_no_middle"') < edit.index('name="rank_front"')
+    assert edit.index('name="rank_front"') < edit.index('name="rank_extra_legroom"')    # off ones last
     assert "departure time" in client.post("/watches", data={**data, "out_time": ""}).text
     assert "confirmation number" in client.post("/watches", data={**data, "booking_conf": ""}).text
 

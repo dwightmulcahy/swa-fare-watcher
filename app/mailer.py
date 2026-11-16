@@ -220,7 +220,7 @@ def render_seat_result(title, changes, note, ok, manage_url, report=None):
     <span style="{FONT};font-size:18px;font-weight:bold;color:#fff">{e(title)}</span></td></tr>
   <tr><td style="padding:14px 16px">{body}
     <p style="{FONT};font-size:14px;color:{colour}">{e(note)}</p>{_seat_report(report)}
-    <p style="{FONT};font-size:12px;color:#636363">Scores follow your seat preferences, higher is better; only seats priced $0 for you are listed.</p>
+    <p style="{FONT};font-size:12px;color:#636363">Score = how well a seat matches your ranked preferences (100 = all of them); only seats priced $0 for you are listed.</p>
     <a href="{e(manage_url)}" style="{FONT};background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
        padding:8px 16px;border-radius:4px;text-decoration:none;display:inline-block">Open my reservation</a></td></tr>
 </table></td></tr></table></body></html>"""

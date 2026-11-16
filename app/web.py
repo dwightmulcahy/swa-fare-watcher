@@ -578,8 +578,13 @@ def create_app(worker=None, start_worker=True):
             status = str(f.get("seat_status", "none"))
             w["seat_status"] = status if status in seats.STATUSES else "none"
             pos = str(f.get("seat_position", "window"))
-            w["seat_prefs"] = json.dumps({"position": pos if pos in seats.POSITIONS else "any",
-                                          **{k: bool(f.get(f"seat_{k}")) for k in seats.WISHES}})
+            ranks = []
+            for i, k in enumerate(seats.CRITERIA):
+                r = str(f.get(f"rank_{k}", "") or ("99" if f.get(f"seat_{k}") else ""))
+                if r.isdigit():
+                    ranks.append((int(r), i, k))
+            p = seats.normalize(pos if pos in seats.POSITIONS else "any", [k for *_, k in sorted(ranks)])
+            w["seat_prefs"] = json.dumps({"position": p["position"], "order": p["order"]})
         return w, errs
 
     def _maybe_lookup(wid, w):
