@@ -40,6 +40,7 @@ class SeatPicker:
         self.conf, self.first, self.last = conf, first, last
         self.prefs, self.status, self.uid = prefs, status, user_id
         self.rng = browser.human.rng if browser.human else random
+        self.report = []     # per flight and passenger: current seat and the best free seats, scored
 
     def log(self, msg, level="info", **kw):
         getattr(applog, level)(msg, source="seats", user_id=self.uid, **kw)
@@ -98,7 +99,7 @@ class SeatPicker:
         """[(flight index, passenger index, current seat, new seat dict)] for every passenger on
         every flight shown where a better free seat is available now. Clicks only tabs and
         passengers (no seat yet)."""
-        out = []
+        out, report = [], []
         for fi, tab in enumerate(self.flights()):
             if tab is not None and tab.get_attribute("aria-selected") != "true":
                 self.b._click(tab)
@@ -111,12 +112,20 @@ class SeatPicker:
                 smap = self.seat_map()
                 cur_code = self.current_seat(pax.get_attribute("aria-label"))
                 cur = next((s for s in smap if s["seat"] == cur_code), None)
-                new = seats.choose(smap, self.prefs, self.status, taken)
+                options = seats.ranked(smap, self.prefs, self.status, taken)
+                new = options[0] if options else None
+                report.append({
+                    "flight": (tab.get_attribute("aria-label") or "").split(" hours")[0] if tab is not None else "",
+                    "passenger": (pax.get_attribute("aria-label") or "").split(" Seat:")[0],
+                    "current": _scored(cur, self.prefs),
+                    "options": [_scored(x, self.prefs) for x in options[:6]],
+                    "picked": new["seat"] if seats.better(new, cur, self.prefs) else None})
                 if seats.better(new, cur, self.prefs):
                     out.append((fi, pi, cur_code, new))
                     taken.add(new["seat"])
                 elif cur_code:
                     taken.add(cur_code)
+        self.report = report
         return out
 
     def apply(self, plan):
@@ -234,6 +243,13 @@ def parse_trip(text):
         if leg["from"] and leg["to"] and leg["time"]:
             out.append({**leg, "flights": "/".join(leg["flights"])})
     return out
+
+
+def _scored(seat, prefs):
+    if seat is None:
+        return None
+    return {"seat": seat["seat"], "describe": seats.describe(seat), "price": seat["price"],
+            "score": round(seats.score(seat, prefs), 1)}
 
 
 def money(text):
