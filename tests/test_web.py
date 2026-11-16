@@ -276,3 +276,19 @@ def test_css_and_js_urls_change_with_their_content(client):
     assert css and js
     assert css.group(2) == hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:10]
     assert client.get(css.group(1)).status_code == 200 and client.get(js.group(1)).status_code == 200
+
+
+def test_watch_page_shows_the_next_run(client):
+    import datetime as dt
+    token = admin_client(client)
+    r = client.post("/watches", data=watch_form(token), follow_redirects=False)
+    wid = int(r.headers["location"].split("/")[2].split("?")[0])
+    uid = db.one("SELECT id FROM users WHERE username='admin'")["id"]
+    w = client.app.state.worker
+    w.planned[uid] = dt.datetime(2030, 1, 2, 14, 20)
+    page = client.get(f"/watches/{wid}").text
+    assert "Next run" in page and "Wed Jan 2, 14:20" in page
+    w.planned.pop(uid)
+    with db.tx() as con:
+        con.execute("UPDATE users SET blocked_until='2999-01-01T00:00:00+00:00' WHERE id=?", (uid,))
+    assert "After a block page" in client.get(f"/watches/{wid}").text

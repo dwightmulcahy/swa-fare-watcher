@@ -19,6 +19,7 @@
 <div class="stats">
   <div class="stat"><span class="label">Booking</span><span class="value small">Conf. {{ w.booking_conf }} · {{ w.booking_first }} {{ w.booking_last }}</span></div>
   <div class="stat"><span class="label">Flights</span><span class="value small">{% for leg, b in bk.items() %}{{ "Back" if leg == "ret" else "Out" }} {{ b.date }} {{ b.time }} from {{ b['from'] }}<br>{% endfor %}</span></div>
+  <div class="stat"><span class="label">Next check</span><span class="value small">{{ next_check[0] }}</span><span class="muted small">{{ next_check[1] }}</span></div>
   <div class="stat"><span class="label">Preferences</span><span class="value small">{{ seats.STATUSES[w.seat_status or 'none'][0] }}<br>
     {{ seats.POSITIONS[sp.position] }}{% for k in sp.order %}<br>{{ loop.index }}. {{ seats.CRITERIA[k] }}{% endfor %}</span></div>
 </div>
@@ -42,6 +43,7 @@
   {% if kind == 'rebook' %}
   <div class="stat"><span class="label">You paid</span><span class="value small">{% for leg, b in bk.items() %}{{ "Back" if leg == "ret" else "Out" }} {{ b.date }}{% if b.flights %} #{{ b.flights }}{% endif %}: {% if b.cash %}${{ b.cash }}{% endif %}{% if b.cash and b.points %} / {% endif %}{% if b.points %}{{ b.points|pts }} pts{% endif %}<br>{% endfor %}</span></div>
   <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
+  <div class="stat"><span class="label">Next run</span><span class="value small">{{ next_check[0] }}</span><span class="muted small">{{ next_check[1] }}</span></div>
 </div>
   {% else %}
   <div class="stat"><span class="label">Upcoming dates searched</span>
@@ -58,6 +60,7 @@
   <div class="stat"><span class="label">Price target</span><span class="value small">
     {% if w.max_price %}≤ ${{ w.max_price|int }}{% endif %}{% if w.max_price and w.max_points %} or {% endif %}{% if w.max_points %}≤ {{ w.max_points|pts }} pts{% endif %}{% if not w.max_price and not w.max_points %}Cheapest fare{% endif %} · ≥ {{ w.min_cpp }}¢/pt</span></div>
   <div class="stat"><span class="label">Last run</span><span class="value small">{{ w.last_run_at|when }}</span><span class="muted small">{{ w.last_status or 'Not run yet' }}</span></div>
+  <div class="stat"><span class="label">Next run</span><span class="value small">{{ next_check[0] }}</span><span class="muted small">{{ next_check[1] }}</span></div>
 </div>
   {% endif %}
 

@@ -456,3 +456,23 @@ def test_seat_watch_gives_up_after_repeated_failures(client, worker, sent):
         status, _, note = _run_visit(worker, db.one(q, (job["id"],)), boom, [])
         assert status == want
     assert "3 times in a row" in note and len(sent) == 1 and "needs you" in sent[-1][1]
+
+
+def test_watch_page_shows_the_next_seat_check(client):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    opens = seats.opens_at(future(10), "13:15", "LIR")
+    page = client.get(f"/watches/{wid}").text
+    assert "Next check" in page and "seat selection opens" in page
+    assert (opens - dt.timedelta(seconds=150)).astimezone().strftime("%a %b %-d, %H:%M") in page
+    nxt = dt.datetime(2030, 1, 2, 15, 40, tzinfo=dt.timezone.utc)
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='watching', next_at=? WHERE watch_id=?", (nxt.isoformat(), wid))
+    page = client.get(f"/watches/{wid}").text
+    assert nxt.astimezone().strftime("%a %b %-d, %H:%M") in page and "checking for a better seat" in page
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='done', next_at=NULL WHERE watch_id=?", (wid,))
+    assert "Nothing scheduled" in client.get(f"/watches/{wid}").text
+    with db.tx() as con:
+        con.execute("UPDATE watches SET active=0 WHERE id=?", (wid,))
+    assert "Turn the watch back on" in client.get(f"/watches/{wid}").text
