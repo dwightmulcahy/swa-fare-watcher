@@ -63,8 +63,9 @@ def test_signs_in_with_human_input(site, tmp_path):
     assert res.detail == "header shows account instead of Log in"  # no "Log out"/"Hi," on the page
     assert events.get("trap") is None, "followed the 'Forgot login?' link"
     assert events["untrusted"] == 0 and events["keys"] >= len("dwight123S3cret!pass")
-    # only scrolls back up as far as it read down (the old bug scrolled up at the top of the page)
-    assert events["wheelsUp"] <= events["wheelsDown"] + 2, events
+    # only scrolls back up about as far as it read down (the old bug scrolled up at the top of the
+    # page); compared in pixels, since an upward scroll may come in more, smaller wheel ticks
+    assert events["pxUp"] <= events["pxDown"] + 300, events
     shots = sorted(p.name for p in rec.dir.glob("*.png"))
     assert shots[0].endswith("home.png") and shots[-1].endswith("signed-in.png")
 

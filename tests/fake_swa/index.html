@@ -42,10 +42,11 @@
 </main>
 <script>
 const mode = new URLSearchParams(location.search).get('mode') || 'ok';
-const events = window.events = {untrusted: 0, keys: 0, moves: 0, wheelsUp: 0, wheelsDown: 0};
+const events = window.events = {untrusted: 0, keys: 0, moves: 0, wheelsUp: 0, wheelsDown: 0, pxUp: 0, pxDown: 0};
 addEventListener('keydown', e => { events.keys++; if (!e.isTrusted) events.untrusted++; });
 addEventListener('mousemove', e => { events.moves++; if (!e.isTrusted) events.untrusted++; });
-addEventListener('wheel', e => { if (e.deltaY < 0) events.wheelsUp++; else events.wheelsDown++; });
+addEventListener('wheel', e => { if (e.deltaY < 0) { events.wheelsUp++; events.pxUp -= e.deltaY; }
+  else { events.wheelsDown++; events.pxDown += e.deltaY; } });
 function signedIn() {
   // like Southwest: the header swaps "Log in" for the member's name and points; no "Log out" text
   document.getElementById('pop').classList.remove('open');
