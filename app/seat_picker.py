@@ -80,7 +80,7 @@ class SeatPicker:
     # ----- reading the map
     def seat_map(self):
         labels = self.page.eval_on_selector_all(SEAT_BUTTON, "els => els.map(e => e.getAttribute('aria-label'))")
-        return [s for s in map(seats.parse_seat, labels) if s]
+        return seats.annotate([s for s in map(seats.parse_seat, labels) if s])
 
     def passengers(self):
         return self.page.locator(PASSENGER).all()

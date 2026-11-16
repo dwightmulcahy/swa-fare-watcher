@@ -50,6 +50,19 @@ def test_order_decides_which_wish_wins():
     assert not seats.better(far, perfect, {"position": "window", "order": ["seat_type"]})  # rows alone don't move
 
 
+def test_exit_window_with_no_seat_in_front():
+    import copy
+    plane = seats.annotate([x for x in copy.deepcopy(MAP) if x["seat"] not in ("14A", "14F")])  # door space
+    open_ = {x["seat"] for x in plane if seats.OPEN_FRONT in x["features"]}
+    assert open_ == {"15A", "15F"}                       # not row 1 (nothing ahead) or full rows
+    assert not any(seats.OPEN_FRONT in x["features"] for x in seats.annotate(copy.deepcopy(MAP)))
+    s15 = next(x for x in plane if x["seat"] == "15A")
+    assert "no seat in front" in seats.describe(s15)
+    prefs = {"position": "window", "order": ["open_front", "seat_type", "front"]}
+    free = [{**x, "available": True, "price": 0} if x["seat"] in ("15A", "2A") else x for x in plane]
+    assert seats.choose(free, prefs, "priority")["seat"] == "15A"
+
+
 def test_old_preferences_become_an_order():
     old = {"seat_prefs": json.dumps({"position": "aisle", "extra_legroom": True, "front": False, "no_middle": True,
                                      "window_view": False, "exit_row": True, "bulkhead": False})}

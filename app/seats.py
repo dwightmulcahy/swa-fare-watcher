@@ -28,6 +28,7 @@ CRITERIA = {
     "seat_type": "My seat position (window / aisle above)",
     "extra_legroom": "Extra Legroom (Preferred counts half)",
     "exit_row": "Exit row",
+    "open_front": "Exit-row window with no seat in front (extra legroom)",
     "bulkhead": "Bulkhead (front row of a cabin)",
     "window_view": "A window that has a view",
     "front": "As far forward as possible",
@@ -62,6 +63,23 @@ def parse_seat(label):
         "selected": "selected for passenger" in rest.lower(),
         "type": kind, "features": features,
     }
+
+
+OPEN_FRONT = "no seat in front"
+
+
+def annotate(seat_map):
+    """Mark exit-row window seats with no seat in front of them: on bigger planes the row ahead of an exit
+    leaves out its window seats for the door, so the one behind gets the open floor. The row ahead
+    must have seats (not a galley or the front of the cabin)."""
+    have = {(s["row"], s["col"]) for s in seat_map}
+    rows = {s["row"] for s in seat_map}
+    for s in seat_map:
+        ahead = s["row"] - 1
+        if ("window" in s["features"] and "exit row" in s["features"] and ahead in rows and (ahead, s["col"]) not in have
+                and sum(1 for r, _ in have if r == ahead) >= 2):
+            s["features"].add(OPEN_FRONT)
+    return seat_map
 
 
 def prefs_of(w):
@@ -99,6 +117,8 @@ def _value(seat, key, prefs):
         return 0.0 if "middle" in f else 1.0
     if key == "extra_legroom":
         return {"extra": 1.0, "preferred": 0.5, "standard": 0.0}[seat["type"]]
+    if key == "open_front":
+        return 1.0 if OPEN_FRONT in f else 0.0
     if key == "exit_row":
         return 1.0 if "exit row" in f else 0.0
     if key == "bulkhead":
@@ -155,7 +175,8 @@ def describe(seat):
     f = seat["features"]
     pos = "Window" if "window" in f else "Aisle" if "aisle" in f else "Middle"
     kind = {"extra": "Extra Legroom", "preferred": "Preferred", "standard": "Standard"}[seat["type"]]
-    extra = [x for x, k in (("exit row", "exit row"), ("bulkhead", "bulkhead seat")) if k in f]
+    extra = [x for x, k in (("exit row", "exit row"), ("bulkhead", "bulkhead seat"), (OPEN_FRONT, OPEN_FRONT))
+             if k in f]
     return f"{seat['seat']} ({', '.join([kind, pos, *extra])})"
 
 
