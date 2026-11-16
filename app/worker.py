@@ -660,7 +660,7 @@ class Worker:
         opens = dt.datetime.fromisoformat(job["opens_at"])
         applog.info(f"{w['name']}: seat selection for the {leg} flight opens at "
                     f"{opens.astimezone():%H:%M}; opening the booking", user_id=uid, source="seats")
-        status, changes, note = "failed", [], ""
+        status, changes, note, report = "failed", [], "", []
         same_profile = self.running_user != uid
         self.seat_busy.add(uid)
         try:
@@ -670,7 +670,10 @@ class Worker:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
                 until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW
-                changes, note = picker.run(until, sleep=self.sleep)
+                try:
+                    changes, note = picker.run(until, sleep=self.sleep)
+                finally:
+                    report = getattr(picker, "report", []) or []
                 status = "done" if changes else "unchanged"
         except seat_picker.NotFree as e:
             note = f"Stopped before paying anything: {e}. Your seat wasn't changed."
@@ -693,7 +696,7 @@ class Worker:
                        "failed": "Seat selection needs you"}[status]
             mailer.send(user["email"], f"SWA {subject}: {w['name']} ({leg})",
                         mailer.render_seat_result(f"{w['name']}: {leg} flight", changes, note,
-                                                  status != "failed", seat_picker.MANAGE_URL))
+                                                  status != "failed", seat_picker.MANAGE_URL, report))
         return status, changes, note
 
     def lookup_booking(self, watch_id, browser_factory=None):

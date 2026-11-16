@@ -521,6 +521,8 @@ def test_seat_picker_waits_for_free_seats_then_confirms(site, monkeypatch, tmp_p
         assert b.page.evaluate("localStorage.getItem('paid')") == "0.00"
         assert b.page.evaluate("localStorage.getItem('lookup')") == "ABC123|Pat|Lee"
     assert note == "confirmed" and changes == [("11F", "9A (Preferred, Window)")]
+    rep = picker.report[0]
+    assert rep["current"]["seat"] == "11F" and rep["picked"] == "9A" and rep["options"][0]["seat"] == "9A"
 
 
 def test_seat_picker_never_confirms_a_charge(site, monkeypatch, tmp_path):
@@ -530,8 +532,8 @@ def test_seat_picker_never_confirms_a_charge(site, monkeypatch, tmp_path):
     root = site.replace("/index.html", "")
     monkeypatch.setattr(seat_picker, "MANAGE_URL", root + "/air/manage-reservation/index.html")
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    monkeypatch.setattr(seats, "choose", lambda smap, *a, **k: next(  # pretend a $39 seat looked free
-        {**s, "price": 0} for s in smap if s["seat"] == "9A"))
+    monkeypatch.setattr(seats, "ranked", lambda smap, *a, **k: [  # pretend a $39 seat looked free
+        {**s, "price": 0} for s in smap if s["seat"] == "9A"])
     with swa.BrowserSearcher(profile_key="t-seat-paid", human=False) as b:
         b.warm_up = lambda: None
         b.page.goto(root + "/index.html")

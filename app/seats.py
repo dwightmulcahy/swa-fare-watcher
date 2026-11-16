@@ -104,6 +104,14 @@ def choose(seats, prefs, status="none", taken=()):
     return max(ok, key=lambda s: score(s, prefs), default=None)
 
 
+def ranked(seats, prefs, status="none", taken=()):
+    """Free (price 0) available seats this status can get, best first."""
+    allowed = STATUSES.get(status, STATUSES["none"])[1]
+    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in allowed
+          and s["seat"] not in taken]
+    return sorted(ok, key=lambda s: -score(s, prefs))
+
+
 def better(new, current, prefs, margin=1.0):
     """Is moving from `current` (None = no seat yet) to `new` an improvement?"""
     if new is None:

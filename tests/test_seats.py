@@ -36,6 +36,30 @@ def test_choose_by_preferences_and_status():
     assert seats.choose(paid, window, "priority") is None             # never anything that costs
 
 
+def test_ranked_lists_free_seats_best_first():
+    prefs = dict(seats.DEFAULT_PREFS)
+    r = seats.ranked(MAP, prefs, "priority")
+    assert r[0] == seats.choose(MAP, prefs, "priority") and len(r) > 6
+    assert all(x["price"] == 0 and x["available"] for x in r)
+    sc = [seats.score(x, prefs) for x in r]
+    assert sc == sorted(sc, reverse=True)
+    assert all(x["type"] != "extra" for x in seats.ranked(MAP, prefs, "plus_premier"))
+
+
+def test_seat_email_shows_scored_options_even_when_unchanged():
+    from app import mailer
+    report = [{"flight": "Flight 1 LIR to HOU", "passenger": "Pat Lee",
+               "current": {"seat": "1F", "describe": "1F (Extra Legroom, Window)", "price": 0, "score": 69.0},
+               "options": [{"seat": "9A", "describe": "9A (Preferred, Window)", "price": 0, "score": 33.0}],
+               "picked": None}]
+    body = mailer.render_seat_result("Trip: outbound flight", [], "no better free seat was offered", True,
+                                     "https://x/", report)
+    assert "Pat Lee" in body and "1F (Extra Legroom, Window)" in body and "your seat" in body
+    assert "9A (Preferred, Window)" in body and "33.0" in body and "chosen" not in body
+    report[0]["picked"] = "9A"
+    assert "chosen" in mailer.render_seat_result("T", [], "", True, "https://x/", report)
+
+
 def test_no_change_when_current_seat_is_as_good():
     prefs = {**seats.DEFAULT_PREFS, "position": "window"}
     great = seats.parse_seat("Seat 1F Selected for passenger number 1 X. $0. (Chargeable, Front cabin, "
@@ -118,6 +142,8 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
     class Picker:
         def __init__(self, b, conf, first, last, prefs, status, user_id=None):
             assert (conf, first, last, status) == ("ABC123", "Pat", "Lee", "priority")
+        report = [{"flight": "", "passenger": "Pat Lee", "current": None, "picked": "9A",
+                   "options": [{"seat": "9A", "describe": "9A (Preferred, Window)", "price": 0, "score": 21.0}]}]
         def run(self, until, sleep=None, **kw):
             return [("11F", "9A (Preferred, Window)")], "confirmed"
     import app.seat_picker as sp
@@ -130,6 +156,7 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
     assert status == "done" and changes[0][1].startswith("9A")
     assert db.one("SELECT status FROM seat_jobs WHERE id=?", (job["id"],))["status"] == "done"
     assert "Seat selected" in sent[-1][1] and "9A (Preferred, Window)" in sent[-1][2]
+    assert "21.0" in sent[-1][2] and "chosen" in sent[-1][2]
 
 
 def test_seat_job_that_would_charge_reports_and_changes_nothing(client, worker, sent):

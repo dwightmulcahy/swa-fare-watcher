@@ -177,8 +177,35 @@ def render_hits(hits):
 </table></td></tr></table></body></html>"""
 
 
-def render_seat_result(title, changes, note, ok, manage_url):
-    """Email after a seat-selection attempt."""
+def _seat_report(report):
+    """Per flight and passenger: their seat and the best free seats, with scores (higher = better
+    for your preferences)."""
+    e = html.escape
+    out = ""
+    for r in report or []:
+        cur = r.get("current")
+        head = " · ".join(x for x in (r.get("flight"), r.get("passenger")) if x)
+        rows = ""
+        if cur:
+            rows += (f"<tr style='background:#FFF4D6'><td style='padding:4px 8px'><b>{e(cur['describe'])}</b> "
+                     f"<span style='color:#636363'>(your seat)</span></td><td style='padding:4px 8px;text-align:right'>"
+                     f"{cur['score']}</td></tr>")
+        for o in r.get("options") or []:
+            mark = " ✓ chosen" if o["seat"] == r.get("picked") else ""
+            rows += (f"<tr><td style='padding:4px 8px'>{e(o['describe'])}<b style='color:#1a7f37'>{mark}</b></td>"
+                     f"<td style='padding:4px 8px;text-align:right'>{o['score']}</td></tr>")
+        if not r.get("options"):
+            rows += "<tr><td colspan='2' style='padding:4px 8px;color:#636363'>No free seats you can get were open.</td></tr>"
+        out += (f"<p style='{FONT};font-size:13px;color:{NAVY};margin:14px 0 4px'><b>{e(head or 'Seats')}</b></p>"
+                f"<table role='presentation' cellpadding='0' cellspacing='0' style='{FONT};font-size:13px;color:{NAVY};"
+                f"border:1px solid {SILVER};border-collapse:collapse;width:100%'>"
+                f"<tr style='background:#F2F2F2'><th style='padding:4px 8px;text-align:left'>Free seats you can get</th>"
+                f"<th style='padding:4px 8px;text-align:right'>Score</th></tr>{rows}</table>")
+    return out
+
+
+def render_seat_result(title, changes, note, ok, manage_url, report=None):
+    """Email after a seat-selection attempt, with the scored free seats it chose from."""
     e = html.escape
     if changes:
         rows = "".join(f"<li><b>{e(new)}</b>" + (f" (was {e(cur)})" if cur else "") + "</li>" for cur, new in changes)
@@ -192,7 +219,8 @@ def render_seat_result(title, changes, note, ok, manage_url):
   <tr><td style="background:{NAVY};padding:14px 16px;border-radius:6px 6px 0 0">
     <span style="{FONT};font-size:18px;font-weight:bold;color:#fff">{e(title)}</span></td></tr>
   <tr><td style="padding:14px 16px">{body}
-    <p style="{FONT};font-size:14px;color:{colour}">{e(note)}</p>
+    <p style="{FONT};font-size:14px;color:{colour}">{e(note)}</p>{_seat_report(report)}
+    <p style="{FONT};font-size:12px;color:#636363">Scores follow your seat preferences, higher is better; only seats priced $0 for you are listed.</p>
     <a href="{e(manage_url)}" style="{FONT};background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
        padding:8px 16px;border-radius:4px;text-decoration:none;display:inline-block">Open my reservation</a></td></tr>
 </table></td></tr></table></body></html>"""
