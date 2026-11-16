@@ -220,6 +220,13 @@ def mark_hot(con, hits, now=None):
                             (until, h["watch_id"], leg, d))
 
 
+def _seat_fit(r):
+    """A seat report entry's fit after this visit: the seat it moved to, else the one kept."""
+    if r.get("picked"):
+        return next((o["score"] for o in r.get("options") or [] if o["seat"] == r["picked"]), 0)
+    return (r.get("current") or {}).get("score") or 0
+
+
 def page_budget(user_id, day=None):
     """Today's page-load budget for this user: random in SWA_DAILY_PAGE_BUDGET, fixed for the day."""
     lo, hi = settings.page_budget
@@ -628,12 +635,39 @@ class Worker:
     # ----- seat selection (48 h before departure)
     SEAT_EARLY = 150          # be on the seat map this many seconds before selection opens
     SEAT_WINDOW = 25 * 60     # and keep checking for this long after
+    SEAT_STOP_BEFORE = 3600   # then come back now and then until this long before departure
+    SEAT_GAP = (2.0, 6.0)     # hours between checks
+    SEAT_GAP_LATE = (0.75, 2.0)   # ... in the last SEAT_LATE_HOURS
+    SEAT_LATE_HOURS = 12
+    SEAT_QUIET = (23.0, 6.5)  # no checks between these local hours (asleep)
+    SEAT_MAX_FAILS = 3
+
+    def next_seat_visit(self, now, departs, rng=random):
+        """When to look at the seat map again (UTC), like a person checking back: every few hours,
+        more often in the last 12, never at night. None once it's too close to departure."""
+        left = (departs - now).total_seconds() / 3600
+        nxt = now + dt.timedelta(hours=rng.uniform(*(self.SEAT_GAP_LATE if left <= self.SEAT_LATE_HOURS
+                                                     else self.SEAT_GAP)))
+        local = nxt.astimezone()
+        h = local.hour + local.minute / 60
+        night, morning = self.SEAT_QUIET
+        if h >= night or h < morning:
+            day = local.date() + dt.timedelta(days=1 if h >= night else 0)
+            wake = dt.datetime.combine(day, dt.time(int(morning), int(morning % 1 * 60)), tzinfo=local.tzinfo)
+            nxt = (wake + dt.timedelta(minutes=rng.uniform(0, 50))).astimezone(dt.timezone.utc)
+        deadline = departs - dt.timedelta(seconds=self.SEAT_STOP_BEFORE)
+        if nxt >= deadline:
+            if deadline - now < dt.timedelta(minutes=30):
+                return None
+            nxt = deadline - dt.timedelta(minutes=rng.uniform(5, 25))
+        return nxt
 
     def due_seat_jobs(self, now=None):
         now = now or dt.datetime.now(dt.timezone.utc)
         soon = (now + dt.timedelta(seconds=self.SEAT_EARLY)).isoformat(timespec="seconds")
         return db.query("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
-                        "WHERE j.status='pending' AND j.opens_at<=? AND w.active=1 AND w.seat_auto=1", (soon,))
+                        "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status='watching' AND j.next_at<=?)) "
+                        "AND w.active=1 AND w.seat_auto=1", (soon, now.isoformat(timespec="seconds")))
 
     def _seat_loop(self):
         while True:
@@ -641,7 +675,7 @@ class Worker:
                 for job in self.due_seat_jobs():
                     with db.tx() as con:   # claim it
                         if con.execute("UPDATE seat_jobs SET status='running', updated=? WHERE id=? "
-                                       "AND status='pending'", (db.now(), job["id"])).rowcount != 1:
+                                       "AND status=?", (db.now(), job["id"], job["status"])).rowcount != 1:
                             continue
                     threading.Thread(target=self.run_seat_job, args=(dict(job),), name="swa-seat-job",
                                      daemon=True).start()
@@ -650,8 +684,13 @@ class Worker:
             time.sleep(20)
 
     def run_seat_job(self, job, picker_factory=None):
-        """Open the booking just before seat selection opens and move each passenger to the best
-        free seat that beats theirs. Emails the result either way."""
+        """One visit to the booking's seat map. The first, as selection opens, keeps reloading for
+        SEAT_WINDOW; later ones (seats free up during the 48 hours) look once. Every visit moves a
+        passenger whose seat a free one beats. It keeps coming back until everyone has a seat that
+        meets all their ranked wishes or departure is an hour off. An email for each change, and a
+        summary at the end."""
+        import json
+
         from . import seat_picker
         w = db.one("SELECT * FROM watches WHERE id=?", (job["watch_id"],))
         user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],)) if w else None
@@ -660,9 +699,13 @@ class Worker:
         uid = user["id"]
         leg = "return" if job["leg"] == "ret" else "outbound"
         opens = dt.datetime.fromisoformat(job["opens_at"])
-        applog.info(f"{w['name']}: seat selection for the {leg} flight opens at "
-                    f"{opens.astimezone():%H:%M}; opening the booking", user_id=uid, source="seats")
-        status, changes, note, report = "failed", [], "", []
+        departs = opens + dt.timedelta(hours=seats.OPEN_HOURS)
+        first = not job.get("visits")
+        applog.info(f"{w['name']}: " + (f"seat selection for the {leg} flight opens at {opens.astimezone():%H:%M}; "
+                                        "opening the booking" if first else
+                                        f"checking the {leg} flight's seat map for a better seat"),
+                    user_id=uid, source="seats")
+        changes, note, report, stop, fails = [], "", [], None, job.get("fails") or 0
         same_profile = self.running_user != uid
         self.seat_busy.add(uid)
         try:
@@ -671,37 +714,58 @@ class Worker:
             with factory() as browser:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
-                until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW
+                until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if first else 0
                 try:
                     changes, note = picker.run(until, sleep=self.sleep)
                 finally:
                     report = getattr(picker, "report", []) or []
-                status = "done" if changes else "unchanged"
+            fails = 0
         except seat_picker.NotFree as e:
-            note = f"Stopped before paying anything: {e}. Your seat wasn't changed."
+            stop = f"Stopped before paying anything: {e}. Your seat wasn't changed."
         except swa.Blocked as e:
-            note = f"Southwest blocked the page ({e}). Pick your seat yourself."
+            stop = f"Southwest blocked the page ({e}). Pick your seat yourself."
         except Exception as e:
-            note = f"Couldn't finish ({e.__class__.__name__}: {str(e)[:200]}). Pick your seat yourself."
+            fails += 1
+            note = f"Couldn't finish ({e.__class__.__name__}: {str(e)[:200]})"
+            applog.warn(f"{w['name']}: seat check ({leg}): {note}", user_id=uid, source="seats")
+            if fails >= self.SEAT_MAX_FAILS:
+                stop = f"{note}, {fails} times in a row. Pick your seat yourself."
         finally:
             self.seat_busy.discard(uid)
-        if status == "unchanged":
-            note = "Your current seat is already the best free match, so it wasn't changed."
-        elif status == "done":
-            note = f"Seat change {note}."
+        log = json.loads(job.get("log") or "[]") + [list(c) for c in changes]
+        now = dt.datetime.now(dt.timezone.utc)
+        perfect = bool(report) and all(_seat_fit(r) >= 99.95 for r in report)
+        nxt = None if stop or perfect else self.next_seat_visit(now, departs)
+        if nxt:
+            status = "watching"
+            text = (f"Seat change {note}. " if changes else "") + \
+                f"Checking again {nxt.astimezone():%a %H:%M} for a better free seat."
+        else:
+            status = "failed" if stop else "done" if log else "unchanged"
+            text = stop or ("Everyone has a seat that meets all your preferences." if perfect else
+                            "Stopped an hour before departure.")
+            if log and not stop:
+                text = f"Done: {len(log)} seat change{'s' if len(log) != 1 else ''}. {text}"
+            elif not log and not stop:
+                text = f"Your current seat stayed the best free match. {text}"
         with db.tx() as con:
-            con.execute("UPDATE seat_jobs SET status=?, note=?, updated=? WHERE id=?",
-                        (status, note, db.now(), job["id"]))
-        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {note}", user_id=uid, source="seats")
-        if user["email"]:
-            subject = {"done": "Seat selected", "unchanged": "Seat checked, no change",
-                       "failed": "Seat selection needs you"}[status]
+            con.execute("UPDATE seat_jobs SET status=?, note=?, updated=?, next_at=?, visits=visits+1, fails=?, "
+                        "log=? WHERE id=?",
+                        (status, text, db.now(), nxt.isoformat(timespec="seconds") if nxt else None, fails,
+                         json.dumps(log), job["id"]))
+        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, source="seats")
+        if user["email"] and (changes or not nxt):
+            url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
+            if nxt:          # a change, still watching
+                subject, shown = "Seat selected", changes
+            else:            # the summary (with this visit's change, if any)
+                subject = {"done": "Seat watch finished", "unchanged": "Seat watch finished, no change",
+                           "failed": "Seat selection needs you"}[status]
+                shown = [tuple(c) for c in log]
             mailer.send(user["email"], f"SWA {subject}: {w['name']} ({leg})",
-                        mailer.render_seat_result(f"{w['name']}: {leg} flight", changes, note,
-                                                  status != "failed",
-                                                  seat_picker.manage_url(w["booking_conf"], w["booking_first"],
-                                                                         w["booking_last"]), report))
-        return status, changes, note
+                        mailer.render_seat_result(f"{w['name']}: {leg} flight", shown, text, status != "failed",
+                                                  url, report))
+        return status, changes, text
 
     def lookup_booking(self, watch_id, browser_factory=None):
         """Read a seat watch's flights (dates, departure times, airports, flight numbers) from its

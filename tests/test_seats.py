@@ -193,10 +193,11 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
         status, changes, note = worker.run_seat_job(dict(job), picker_factory=Browser)
     finally:
         sp.SeatPicker = real
-    assert status == "done" and changes[0][1].startswith("9A")
-    assert db.one("SELECT status FROM seat_jobs WHERE id=?", (job["id"],))["status"] == "done"
+    assert status == "watching" and changes[0][1].startswith("9A")        # 21/100: keeps looking
+    j = db.one("SELECT * FROM seat_jobs WHERE id=?", (job["id"],))
+    assert j["status"] == "watching" and j["visits"] == 1 and json.loads(j["log"]) == [["11F", "9A (Preferred, Window)"]]
     assert "Seat selected" in sent[-1][1] and "9A (Preferred, Window)" in sent[-1][2]
-    assert "21.0" in sent[-1][2] and "chosen" in sent[-1][2]
+    assert "21.0" in sent[-1][2] and "chosen" in sent[-1][2] and "Checking again" in sent[-1][2]
     assert "confirmationNumber=ABC123&amp;passengerFirstName=Pat&amp;passengerLastName=Lee" in sent[-1][2]
 
 
@@ -380,3 +381,78 @@ def test_manage_link_prefills_the_lookup():
         "https://www.southwest.com/air/manage-reservation/index.html"
         "?confirmationNumber=ABC123&passengerFirstName=Mary+Ann&passengerLastName=Lee")
     assert seat_picker.manage_url(None, "Pat", "Lee") == seat_picker.MANAGE_URL
+
+
+def test_next_seat_check_like_a_person(worker):
+    import random
+    utc = dt.timezone.utc
+    departs = dt.datetime(2026, 11, 20, 18, 0, tzinfo=utc)
+    rng = random.Random(1)
+    gaps, late = [], []
+    for _ in range(200):
+        now = departs - dt.timedelta(hours=rng.uniform(13, 47))
+        n = worker.next_seat_visit(now, departs, rng)
+        local = n.astimezone()
+        assert not (local.hour >= 23 or local.hour + local.minute / 60 < 6.5) or n > departs - dt.timedelta(hours=2)
+        assert n <= departs - dt.timedelta(hours=1)
+        gaps.append((n - now).total_seconds() / 3600)
+    worker.SEAT_QUIET = (24, 0)                                # no nights, to compare gaps alone
+    for _ in range(200):
+        now = departs - dt.timedelta(hours=rng.uniform(3, 11))
+        late.append((worker.next_seat_visit(now, departs, rng) - now).total_seconds() / 3600)
+    assert min(gaps) >= 2 and max(late) <= 2                   # more often in the last 12 hours
+    assert worker.next_seat_visit(departs - dt.timedelta(minutes=80), departs) is None
+
+
+def _run_visit(worker, job, run, report):
+    import app.seat_picker as sp
+
+    class Browser:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    class Picker:
+        def __init__(self, *a, **k): self.report = []
+        def run(self, until, **k):
+            self.report = report
+            return run(until)
+    real, sp.SeatPicker = sp.SeatPicker, Picker
+    try:
+        return worker.run_seat_job(dict(job), picker_factory=Browser)
+    finally:
+        sp.SeatPicker = real
+
+
+def test_seat_watch_keeps_checking_until_perfect_then_sends_a_summary(client, worker, sent):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    job = worker.due_seat_jobs(seats.opens_at(future(10), "13:15", "LIR"))[0]
+    meh = [{"current": {"seat": "11F", "describe": "11F", "price": 0, "score": 40.0}, "options": [], "picked": None}]
+    untils = []
+    status, _, note = _run_visit(worker, job, lambda u: (untils.append(u), ([], "no better"))[1], meh)
+    assert status == "watching" and not sent and untils[0] > 0              # first visit waits at the opening
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?", (job["id"],))
+    assert worker.due_seat_jobs(dt.datetime.fromisoformat(j["next_at"]) - dt.timedelta(minutes=1)) == []
+    assert worker.due_seat_jobs(dt.datetime.fromisoformat(j["next_at"]))[0]["id"] == job["id"]
+    best = [{"current": meh[0]["current"], "picked": "1F",
+             "options": [{"seat": "1F", "describe": "1F (Extra Legroom, Window)", "price": 0, "score": 100.0}]}]
+    status, _, note = _run_visit(worker, j, lambda u: (untils.append(u), ([("11F", "1F (Extra Legroom, Window)")],
+                                                                          "confirmed"))[1], best)
+    assert untils[1] == 0                                                   # later visits look once
+    assert status == "done" and "meets all your preferences" in note and len(sent) == 1
+    assert "Seat watch finished" in sent[-1][1] and "1F (Extra Legroom, Window)" in sent[-1][2]
+    assert db.one("SELECT next_at FROM seat_jobs WHERE id=?", (job["id"],))["next_at"] is None
+
+
+def test_seat_watch_gives_up_after_repeated_failures(client, worker, sent):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    job = worker.due_seat_jobs(seats.opens_at(future(10), "13:15", "LIR"))[0]
+
+    def boom(u):
+        raise RuntimeError("page changed")
+    q = "SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?"
+    for want in ("watching", "watching", "failed"):
+        status, _, note = _run_visit(worker, db.one(q, (job["id"],)), boom, [])
+        assert status == want
+    assert "3 times in a row" in note and len(sent) == 1 and "needs you" in sent[-1][1]

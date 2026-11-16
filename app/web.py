@@ -647,12 +647,12 @@ def create_app(worker=None, start_worker=True):
                 " MIN(cash) AS any_cash, COUNT(*) AS n FROM fares"
                 " WHERE watch_id=? AND ts=(SELECT MAX(ts) FROM fares WHERE watch_id=?)", (w["id"], w["id"]))
         seat_next = {}
-        labels = {"pending": "Scheduled", "running": "Picking now", "done": "Seat changed",
-                  "unchanged": "Kept current seat", "failed": "Needs you"}
+        labels = {"pending": "Scheduled", "running": "Picking now", "watching": "Watching for better",
+                  "done": "Seat changed", "unchanged": "Kept current seat", "failed": "Needs you"}
         for w in watches:
             if (w["kind"] or "fare") == "seats":
                 jobs = _seat_jobs(w["id"])
-                j = next((x for x in jobs if x["status"] in ("pending", "running")), jobs[-1] if jobs else None)
+                j = next((x for x in jobs if x["status"] in ("pending", "running", "watching")), jobs[-1] if jobs else None)
                 if j:
                     seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {j['opens_local']}"}
         return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
@@ -706,7 +706,9 @@ def create_app(worker=None, start_worker=True):
         out = []
         for j in db.query("SELECT * FROM seat_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
             opens = dt.datetime.fromisoformat(j["opens_at"]).astimezone()
+            nxt = dt.datetime.fromisoformat(j["next_at"]).astimezone() if j["next_at"] else None
             out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}",
+                        "next_local": f"{nxt:%a %b %-d, %H:%M}" if nxt else "",
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
         return out
 
