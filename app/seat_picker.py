@@ -21,6 +21,17 @@ LOOKUP = {
     "last": '[id="reservationForm.last_name"]',
     "submit": "#lookupReservation",
 }
+def manage_url(conf, first, last):
+    """The manage-reservation page with the lookup form filled in (the same query Southwest's own
+    emails use); the plain page if anything is missing."""
+    from urllib.parse import urlencode
+    base = "https://www.southwest.com/air/manage-reservation/index.html"
+    if not (conf and first and last):
+        return MANAGE_URL
+    return base + "?" + urlencode({"confirmationNumber": conf, "passengerFirstName": first,
+                                   "passengerLastName": last})
+
+
 SEATS_LINK = 'a[href*="/air/seat/select-seats"]'
 SEAT_BUTTON = 'button[aria-label^="Seat "]'
 PASSENGER = '[role=radio][aria-label*="Seat:"]'
