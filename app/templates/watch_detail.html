@@ -20,7 +20,7 @@
   <div class="stat"><span class="label">Booking</span><span class="value small">Conf. {{ w.booking_conf }} · {{ w.booking_first }} {{ w.booking_last }}</span></div>
   <div class="stat"><span class="label">Flights</span><span class="value small">{% for leg, b in bk.items() %}{{ "Back" if leg == "ret" else "Out" }} {{ b.date }} {{ b.time }} from {{ b['from'] }}<br>{% endfor %}</span></div>
   <div class="stat"><span class="label">Preferences</span><span class="value small">{{ seats.STATUSES[w.seat_status or 'none'][0] }}<br>
-    {{ seats.POSITIONS[sp.position] }}{% for k, t in seats.WISHES.items() if sp[k] %} · {{ t }}{% endfor %}</span></div>
+    {{ seats.POSITIONS[sp.position] }}{% for k in sp.order %}<br>{{ loop.index }}. {{ seats.CRITERIA[k] }}{% endfor %}</span></div>
 </div>
 {% if seat_jobs %}
 <section class="card seat-jobs">

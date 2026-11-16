@@ -249,7 +249,7 @@ def _scored(seat, prefs):
     if seat is None:
         return None
     return {"seat": seat["seat"], "describe": seats.describe(seat), "price": seat["price"],
-            "score": round(seats.score(seat, prefs), 1)}
+            "score": round(seats.fit(seat, prefs), 1)}
 
 
 def money(text):

@@ -42,8 +42,13 @@
           <label><input type="radio" name="seat_position" value="{{ k }}" {{ "checked" if sp.position == k }}> {{ t }}</label>{% endfor %}
         </div></div>
     </div>
-    <div class="checks">{% for k, t in seats.WISHES.items() %}
-      <label class="check"><input type="checkbox" name="seat_{{ k }}" value="1" {{ "checked" if sp[k] }}> {{ t }}</label>{% endfor %}
+    <p class="hint">Rank what matters, 1 = most important. A wish always beats everything ranked below it; leave the rest off.</p>
+    {% set n = seats.CRITERIA|length %}
+    <div class="rank-list">{% for k in sp.order + (seats.CRITERIA.keys()|reject("in", sp.order)|list) %}{% set r = sp.order.index(k) + 1 if k in sp.order else 0 %}
+      <label class="rank-item"><select name="rank_{{ k }}" aria-label="Rank for {{ seats.CRITERIA[k] }}">
+        <option value="" {{ "selected" if not r }}>Off</option>{% for i in range(1, n + 1) %}
+        <option value="{{ i }}" {{ "selected" if r == i }}>{{ i }}</option>{% endfor %}
+      </select> {{ seats.CRITERIA[k] }}</label>{% endfor %}
     </div>
   </fieldset>
   {% set active_label = "Active" %}{% include "_watch_foot.html" %}
