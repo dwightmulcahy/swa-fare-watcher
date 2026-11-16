@@ -654,7 +654,9 @@ def create_app(worker=None, start_worker=True):
                 jobs = _seat_jobs(w["id"])
                 j = next((x for x in jobs if x["status"] in ("pending", "running", "watching")), jobs[-1] if jobs else None)
                 if j:
-                    seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {j['opens_local']}"}
+                    when = (f"next {_next_check(w, u, jobs)[0]}" if j["status"] in ("pending", "watching")
+                            else j["opens_local"])
+                    seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {when}"}
         return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
@@ -712,6 +714,40 @@ def create_app(worker=None, start_worker=True):
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
         return out
 
+    def _next_check(w, u, jobs):
+        """(when, detail) of the watch's next automatic run, as the watch page shows it."""
+        fmt = "%a %b %-d, %H:%M"
+        if not w["active"]:
+            return "Paused", "Turn the watch back on to resume"
+        if (w["kind"] or "fare") == "seats":
+            if any(j["status"] == "running" for j in jobs):
+                return "Now", "On the seat map"
+            nxt = []
+            for j in jobs:
+                if j["status"] == "watching" and j["next_at"]:
+                    nxt.append((dt.datetime.fromisoformat(j["next_at"]), f"{j['leg_label']}: checking for a better seat"))
+                elif j["status"] == "pending":
+                    t = dt.datetime.fromisoformat(j["opens_at"]) - dt.timedelta(seconds=app.state.worker.SEAT_EARLY)
+                    nxt.append((t, f"{j['leg_label']}: seat selection opens"))
+            if not nxt:
+                return "Nothing scheduled", "Seat selection is finished, or the flights have left"
+            t, why = min(nxt)
+            return t.astimezone().strftime(fmt), why
+        now = db.now()
+        if u["blocked_until"] and u["blocked_until"] > now:
+            until = dt.datetime.fromisoformat(u["blocked_until"]).astimezone()
+            return "Paused", f"After a block page, scheduled runs resume {until.strftime(fmt)}"
+        if not settings.scheduler:
+            return "Only on Search now", "Scheduled runs are turned off"
+        start, window = app.state.worker.next_run_for(u["id"])
+        if start:
+            return start.astimezone().strftime(fmt), "Your next check-in (dates rotate, so not every date every run)"
+        if window and window[0]:
+            a, b = window
+            when = a.astimezone().strftime(fmt) + (f"–{b.astimezone():%H:%M}" if b else "")
+            return when, "Your next run starts in this window"
+        return "Not planned yet", "Planned when the day's schedule is made"
+
     def _lows(trips):
         m = [x for x in trips if x["matched"]]
         return {"cash": min((x["cash"] for x in m if x["cash"]), default=None),
@@ -760,7 +796,7 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history, seat_jobs=_seat_jobs(wid),
+                      history=history, seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
