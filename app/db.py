@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS seat_jobs(
   watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
   leg TEXT NOT NULL,
   opens_at TEXT NOT NULL,                    -- UTC ISO: when seat selection opens for that flight
-  status TEXT NOT NULL DEFAULT 'pending',    -- pending | running | done | unchanged | failed
+  status TEXT NOT NULL DEFAULT 'pending',    -- pending | running | watching | done | unchanged | failed
   note TEXT,
   updated TEXT
 );
@@ -233,6 +233,12 @@ MIGRATIONS = {
         "seat_auto": "INTEGER NOT NULL DEFAULT 0",   # pick seats when selection opens (48 h before)
         "seat_status": "TEXT",                   # seats.STATUSES key
         "seat_prefs": "TEXT",                    # JSON, see seats.DEFAULT_PREFS
+    },
+    "seat_jobs": {
+        "next_at": "TEXT",                       # UTC ISO: next check while watching for a better seat
+        "visits": "INTEGER NOT NULL DEFAULT 0",
+        "fails": "INTEGER NOT NULL DEFAULT 0",   # visits in a row that couldn't finish
+        "log": "TEXT",                           # JSON [[from seat, to seat], ...] of changes made
     },
     "fares": {
         "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret
