@@ -13,6 +13,8 @@ services:
       - ${QNAP_DATA_DIR:-/share/Container/swa-fare-watcher/data}:/data
       # the same .env, so the admin Settings page can edit it (the app's user 1000 needs write access)
       - ${ENV_FILE:-./.env}:/config/.env
+      # Optional off-NAS backup copies (SWA_BACKUP_COPY_DIR=/backup): a USB disk or a synced share
+      # - /share/USBDisk1/swa-backup:/backup
     # Optional GPU rendering (SWA_GPU=true in .env): pass the Intel GPU in. On the QNAP the device
     # is root-only, so once per boot (or from autorun.sh): chmod 666 /dev/dri/renderD128
     # devices:

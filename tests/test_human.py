@@ -119,6 +119,28 @@ def test_typing_with_typos_ends_with_exact_text(seed):
     assert page.keyboard.text == text
 
 
+@pytest.mark.parametrize("seed", range(40))
+def test_typos_never_lose_a_character_in_a_maxlength_field(seed):
+    """A full field drops keys: a late-noticed typo there must not cost a real character
+    (a confirmation number typed as ABC13 instead of ABC123)."""
+    page, h, _ = make(seed, typo_rate=0.6)
+    kb = page.keyboard
+    down = kb.down
+
+    def capped(key):
+        if len(key) == 1 and len(kb.text) >= 6 and not ({"Control", "Meta"} & kb.held):
+            kb.held.add(key)
+            return
+        down(key)
+    kb.down = capped
+
+    class Field(FakeLocator):
+        def evaluate(self, js):
+            return 6 - len(kb.text)
+    h.type(Field({"x": 10, "y": 10, "width": 200, "height": 30}), "ABC123")
+    assert kb.text == "ABC123"
+
+
 def test_typos_are_corrected_with_backspace():
     page, h, _ = make(5, typo_rate=0.5)
     h.type(FakeLocator({"x": 10, "y": 10, "width": 200, "height": 30}), "southwest")
