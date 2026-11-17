@@ -227,13 +227,17 @@ class Human:
             self.key("Backspace")
         self.pause(0.15, 0.5)
         prev = ""
-        for ch in text:
-            if typos and self.rng.random() < self.typo_rate:
+        room = self._room(locator)   # characters the field still takes (maxlength), None = no limit
+        for i, ch in enumerate(text):
+            left = None if room is None else room - i     # free places before typing ch
+            if typos and (left is None or left >= 1) and self.rng.random() < self.typo_rate:
                 wrong = neighbour_key(ch, self.rng)
                 if wrong:
                     self.key(wrong)
                     self.sleep(self._key_delay(prev, wrong))
-                    if self.rng.random() < 0.35:  # sometimes notice only after the next key
+                    # sometimes notice only after the next key, if the field has room for both:
+                    # a full field drops that key and the two Backspaces would eat a good one
+                    if (left is None or left >= 2) and self.rng.random() < 0.35:
                         self.key(ch)
                         self.pause(0.2, 0.5)
                         self.key("Backspace")
@@ -246,6 +250,15 @@ class Human:
             self.sleep(self._key_delay(prev, ch))
             prev = ch
         self.pause(0.2, 0.6)
+
+    @staticmethod
+    def _room(locator):
+        """How many more characters a field accepts (its maxlength minus what's in it), or None."""
+        try:
+            n = locator.evaluate("e => e.maxLength > 0 ? e.maxLength - (e.value || '').length : -1")
+        except Exception:
+            return None
+        return None if n is None or n < 0 else n
 
     def press(self, key):
         self.pause(0.1, 0.3)
