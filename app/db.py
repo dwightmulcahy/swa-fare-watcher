@@ -1,6 +1,7 @@
 """SQLite storage."""
 import datetime as dt
 import sqlite3
+from pathlib import Path
 from contextlib import contextmanager
 
 from .config import settings
@@ -374,6 +375,32 @@ def backup(keep=None, day=None):
     for old in sorted(folder.glob("app-*.db"))[:-keep]:
         old.unlink()
     return made
+
+
+def copy_backups(dest=None, keep=None):
+    """Copy daily backups not yet in `dest` (another disk or a synced share) there and keep the
+    newest `keep`. The folder must already exist: an unmounted volume isn't silently replaced by a
+    folder inside the container. Returns the copied files."""
+    import shutil
+    dest = dest if dest is not None else settings.backup_copy_dir
+    keep = settings.backup_copy_keep if keep is None else keep
+    if not dest:
+        return []
+    dest = Path(dest)
+    if not dest.is_dir():
+        raise FileNotFoundError(f"backup copy folder {dest} doesn't exist (is it mounted?)")
+    copied = []
+    for src in sorted((settings.data_dir / "backups").glob("app-*.db"))[-keep:]:
+        target = dest / src.name
+        if target.exists() and target.stat().st_size == src.stat().st_size:
+            continue
+        tmp = target.with_name(target.name + ".tmp")
+        shutil.copyfile(src, tmp)
+        tmp.replace(target)
+        copied.append(target)
+    for old in sorted(dest.glob("app-*.db"))[:-keep]:
+        old.unlink()
+    return copied
 
 
 # ---------- domain helpers ----------
