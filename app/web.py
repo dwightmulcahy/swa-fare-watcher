@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa
+from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa, trends
 from . import worker as worker_mod
 from .config import settings
 from .mailer import fmt_dur
@@ -197,12 +197,15 @@ def create_app(worker=None, start_worker=True):
     @app.get("/healthz")
     def health():
         """Container health: the database answers and the worker threads are alive (503 if not)."""
-        db.one("SELECT 1")
+        try:
+            last = db.one("SELECT MAX(finished) f FROM runs")["f"]
+        except Exception as e:
+            return JSONResponse({"status": f"database error: {e.__class__.__name__}"}, status_code=503)
         worker = getattr(app.state, "worker", None)
         ok = worker is None or worker.alive()
-        last = db.one("SELECT MAX(finished) f FROM runs")["f"]
-        return JSONResponse({"status": "ok" if ok else "worker stopped", "last_run_finished": last},
-                            status_code=200 if ok else 503)
+        stuck = worker.stuck() if worker is not None else {}
+        status = "ok" if ok else f"worker loop hung: {stuck}" if stuck else "worker stopped"
+        return JSONResponse({"status": status, "last_run_finished": last}, status_code=200 if ok else 503)
 
     @app.get("/api/status")
     def api_status(request: Request):
@@ -556,6 +559,10 @@ def create_app(worker=None, start_worker=True):
                 b["cash"], b["points"] = num(f"{leg}_cash", 1, 100_000), num(f"{leg}_points", 1, 10_000_000)
                 if b["cash"] is None and b["points"] is None:
                     errs.append(f"Enter what you paid per person for the {label} flight (cash or points).")
+                t = str(f.get(f"{leg}_time", "")).strip()
+                b["time"] = t if re.fullmatch(r"\d{2}:\d{2}", t) else None
+                if f.get("checkin_auto") and not b["time"]:
+                    errs.append(f"Enter the {label} flight's departure time to check in automatically.")
             else:
                 b["time"] = str(f.get(f"{leg}_time", "")).strip()
                 if not re.fullmatch(r"\d{2}:\d{2}", b["time"]):
@@ -566,6 +573,15 @@ def create_app(worker=None, start_worker=True):
         w["booked"] = json.dumps(booked) if booked else None
         w["dates"] = ",".join(b["date"] for b in booked if b["leg"] == "out") or None
         w["ret_dates"] = ",".join(b["date"] for b in booked if b["leg"] == "ret") or None
+        w["checkin_auto"] = 1 if f.get("checkin_auto") else 0
+        if kind == "rebook":
+            conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
+            w.update(booking_conf=conf or None,
+                     booking_first=str(f.get("booking_first", "")).strip()[:30] or None,
+                     booking_last=str(f.get("booking_last", "")).strip()[:30] or None)
+            if w["checkin_auto"] and not (len(conf) == 6 and w["booking_first"] and w["booking_last"]):
+                errs.append("To check in automatically, enter the 6-character confirmation number and the first "
+                            "and last name as booked.")
         if kind == "seats":
             conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
             w.update(seat_auto=1, booking_conf=conf or None,
@@ -677,7 +693,7 @@ def create_app(worker=None, start_worker=True):
         if kind not in FORMS:
             return render(request, "watch_kind.html", u, s)
         w = {"kind": kind, "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
-             "seat_auto": 0, "seat_status": "none", "seat_prefs": None,"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
+             "seat_auto": 0, "seat_status": "none", "seat_prefs": None, "checkin_auto": 0, "name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
              "date_from": None, "date_to": None,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
@@ -700,7 +716,7 @@ def create_app(worker=None, start_worker=True):
             wid = con.execute(
                 f"INSERT INTO watches(user_id, created_at, {', '.join(cols)}) VALUES (?,?,{','.join('?' * len(cols))})",
                 (u["id"], db.now(), *w.values())).lastrowid
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+created")
 
@@ -712,6 +728,14 @@ def create_app(worker=None, start_worker=True):
             out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}",
                         "next_local": f"{nxt:%a %b %-d, %H:%M}" if nxt else "",
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
+        return out
+
+    def _checkin_jobs(wid):
+        out = []
+        for j in db.query("SELECT * FROM checkin_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
+            opens = dt.datetime.fromisoformat(j["opens_at"]).astimezone()
+            out.append({**dict(j), "leg_label": "Return" if j["leg"] == "ret" else "Outbound",
+                        "opens_local": f"{opens:%a %b %-d, %H:%M}"})
         return out
 
     def _next_check(w, u, jobs):
@@ -796,7 +820,9 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history, seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
+                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
+                      flight_trends=trends.flight_trends(wid) if (w["kind"] or "fare") == "fare" else [],
+                      trends_min=trends.MIN_SAMPLES,
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
@@ -826,7 +852,7 @@ def create_app(worker=None, start_worker=True):
         with db.tx() as con:
             con.execute(f"UPDATE watches SET {', '.join(f'{k}=?' for k in w)} WHERE id=? AND user_id=?",
                         (*w.values(), wid, u["id"]))
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+saved")
 
@@ -841,7 +867,7 @@ def create_app(worker=None, start_worker=True):
                 raise Redirect("/?err=" + quote_plus(err))
         with db.tx() as con:
             con.execute("UPDATE watches SET active=? WHERE id=?", (0 if w["active"] else 1, wid))
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         raise Redirect("/?ok=" + ("Watch+paused" if w["active"] else "Watch+resumed"))
 
     @app.post("/watches/{wid}/delete")
@@ -1041,6 +1067,20 @@ def create_app(worker=None, start_worker=True):
         from . import tzcheck
         return render(request, "admin_users.html", u, s, users=users, today=db.today(),
                       worker=app.state.worker, tz=tzcheck.last_result)
+
+    @app.get("/admin/health", response_class=HTMLResponse)
+    def admin_health(request: Request):
+        """How Southwest has been treating each account: searches, seat checks, blocks, challenges
+        and sign-ins per day, and the share of page visits that hit a block or challenge."""
+        u, s = require(request, admin=True)
+        rows = db.site_report(14)
+        tot = {k: sum(r[k] for r in rows) for k in ("searches", *db.SITE_EVENTS)}
+        visits = tot["searches"] + tot["seat_visit"]
+        tot["rate"] = round(100 * (tot["block"] + tot["challenge"]) / visits, 1) if visits else 0.0
+        paused = db.query("SELECT username, blocked_until, blocked_reason FROM users WHERE blocked_until > ?",
+                          (db.now(),))
+        return render(request, "admin_health.html", u, s, rows=rows, tot=tot, events=db.SITE_EVENTS,
+                      paused=paused)
 
     # ---------- admin: settings (.env) ----------
     def _env_view():

@@ -196,11 +196,12 @@ def airport_tz(code):
 _AIRPORTS = None
 
 
-def opens_at(date, time, origin):
-    """When seat selection opens (UTC) for a flight leaving `origin` at local `date` `time`."""
+def opens_at(date, time, origin, hours=OPEN_HOURS):
+    """When seat selection opens (UTC) for a flight leaving `origin` at local `date` `time`
+    (or, with `hours`, that long before departure)."""
     tz = airport_tz(origin)
     if not tz or not date or not time:
         return None
     local = dt.datetime.combine(dt.date.fromisoformat(date), dt.time.fromisoformat(time),
                                 tzinfo=ZoneInfo(tz))
-    return (local - dt.timedelta(hours=OPEN_HOURS)).astimezone(dt.timezone.utc)
+    return (local - dt.timedelta(hours=hours)).astimezone(dt.timezone.utc)

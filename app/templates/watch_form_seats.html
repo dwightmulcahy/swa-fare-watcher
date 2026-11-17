@@ -17,6 +17,7 @@
     </div>
     <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="Spring trip seats"></label>
     <p class="hint">After you save, it looks the booking up on southwest.com and reads the flights, dates and departure times from it.</p>
+    <label class="check"><input type="checkbox" name="checkin_auto" value="1" {{ "checked" if w.checkin_auto }}> Check in automatically when check-in opens (24 hours before each flight) and email the boarding positions</label>
   </fieldset>
   <details class="manual-flights card-ish" {{ "open" if w.booked or w.origin }}>
     <summary>Enter the flights by hand <span class="hint">optional: left blank, they're read from the booking after you save</span></summary>

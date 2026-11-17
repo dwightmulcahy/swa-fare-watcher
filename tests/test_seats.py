@@ -476,3 +476,24 @@ def test_watch_page_shows_the_next_seat_check(client):
     with db.tx() as con:
         con.execute("UPDATE watches SET active=0 WHERE id=?", (wid,))
     assert "Turn the watch back on" in client.get(f"/watches/{wid}").text
+
+
+def test_restart_puts_interrupted_seat_checks_back_in_line(client, worker):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    opens = seats.opens_at(future(10), "13:15", "LIR")
+    job = worker.due_seat_jobs(opens)[0]
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='running' WHERE id=?", (job["id"],))
+    worker.close_interrupted_runs()
+    assert worker.due_seat_jobs(opens)[0]["id"] == job["id"]                  # pending again
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='running', visits=2 WHERE id=?", (job["id"],))
+    worker.close_interrupted_runs()
+    j = db.one("SELECT * FROM seat_jobs WHERE id=?", (job["id"],))
+    assert j["status"] == "watching" and worker.due_seat_jobs(dt.datetime.now(dt.timezone.utc))
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=47.5)).isoformat(timespec="seconds")
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='running', opens_at=? WHERE id=?", (old, job["id"]))
+    worker.close_interrupted_runs()
+    assert db.one("SELECT status FROM seat_jobs WHERE id=?", (job["id"],))["status"] == "failed"

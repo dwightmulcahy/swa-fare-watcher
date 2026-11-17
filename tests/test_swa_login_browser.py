@@ -558,3 +558,22 @@ def test_trip_page_lookup_reads_the_flights(site, monkeypatch, tmp_path):
         legs = seat_picker.parse_trip(b.page.inner_text("body"))
     assert legs == [{"leg": "out", "date": "2026-11-14", "time": "13:15", "from": "LIR", "to": "HOU",
                      "flights": "567"}]
+
+
+def test_checkin_retries_while_too_early_then_reads_the_boarding_group(site, monkeypatch, tmp_path):
+    from app import checkin, swa
+    from app.config import settings
+
+    root = site.replace("/index.html", "")
+    monkeypatch.setattr(checkin, "CHECKIN_URL", root + "/air/check-in/index.html")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    with swa.BrowserSearcher(profile_key="t-checkin", human=False) as b:
+        b.warm_up = lambda: None
+        b.page.goto(root + "/index.html")
+        b.page.evaluate("localStorage.clear(); localStorage.setItem('earlyTries', '1')")
+        sleeps = []
+        got = checkin.CheckIn(b, "ABC123", "Pat", "Lee").run(time.time() + 60, sleep=sleeps.append)
+        assert b.page.evaluate("localStorage.getItem('checkin')") == "ABC123|Pat|Lee"
+        assert b.page.evaluate("localStorage.getItem('checkedIn')") == "1"
+        assert b.page.evaluate("localStorage.getItem('paid')") is None          # never buys EarlyBird
+    assert len(sleeps) == 1 and got == (["Group 3"], ["14A"])

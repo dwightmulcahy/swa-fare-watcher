@@ -1,0 +1,27 @@
+<!doctype html><title>Check In | Southwest Airlines</title>
+<body><h1>Check in and get your boarding pass</h1>
+<!-- shaped like Southwest's check-in form (fields by id, a submit button) -->
+<form novalidate onsubmit="return false">
+  <label for="confirmationNumber">Confirmation number</label>
+  <input id="confirmationNumber" name="confirmationNumber" maxlength="6" type="text">
+  <label for="passengerFirstName">First name</label>
+  <input id="passengerFirstName" name="passengerFirstName" maxlength="30" type="text">
+  <label for="passengerLastName">Last name</label>
+  <input id="passengerLastName" name="passengerLastName" maxlength="30" type="text">
+  <button id="form-mixin--submit-button" type="submit">Check in</button>
+</form>
+<p id="msg" role="alert"></p>
+<script>
+document.getElementById("form-mixin--submit-button").onclick = () => {
+  const v = (id) => document.getElementById(id).value;
+  localStorage.setItem("checkin", [v("confirmationNumber"), v("passengerFirstName"), v("passengerLastName")].join("|"));
+  const early = +(localStorage.getItem("earlyTries") || 0);
+  if (early > 0) {          // check-in hasn't opened yet
+    localStorage.setItem("earlyTries", early - 1);
+    setTimeout(() => document.getElementById("msg").textContent =
+      "Your reservation is not yet eligible for check-in. Check-in is available 24 hours before departure.", 300);
+    return;
+  }
+  setTimeout(() => location.href = "review.html", 300);
+};
+</script>

@@ -17,9 +17,20 @@
       <label>Flight # <span class="hint">optional</span><input name="{{ leg }}_flights" value="{{ b.flights or '' }}" placeholder="502/52" inputmode="numeric"></label>
       <label>Paid per person <span class="hint">USD</span><input name="{{ leg }}_cash" type="number" min="1" value="{{ b.cash or '' }}"></label>
       <label>or points <input name="{{ leg }}_points" data-readable="points" type="number" min="1" value="{{ b.points or '' }}"></label>
+      <label>Departs <span class="hint">local; for check-in</span><input name="{{ leg }}_time" type="time" value="{{ b.time or '' }}"></label>
     </div>
     <p class="hint">Without a flight number, any cheaper flight that day counts.</p>
   </fieldset>{% endfor %}
+  <fieldset>
+    <legend>Automatic check-in <span class="hint">optional</span></legend>
+    <label class="check"><input type="checkbox" name="checkin_auto" value="1" {{ "checked" if w.checkin_auto }}> Check in when check-in opens (24 hours before each flight) and email the boarding positions</label>
+    <div class="row">
+      <label>Confirmation # <input name="booking_conf" value="{{ w.booking_conf or '' }}" maxlength="6" placeholder="ABC123" class="code" autocomplete="off"></label>
+      <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off"></label>
+      <label>Last name <input name="booking_last" value="{{ w.booking_last or '' }}" autocomplete="off"></label>
+    </div>
+    <p class="hint">Needs each flight's departure time above. Also makes the email's Change flight link open your reservation directly.</p>
+  </fieldset>
   <fieldset>
     <legend>Passengers</legend>
     <label>Adults <input name="adults" type="number" min="1" max="8" value="{{ w.adults }}"></label>

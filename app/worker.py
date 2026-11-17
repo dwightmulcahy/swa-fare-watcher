@@ -3,6 +3,7 @@ import datetime as dt
 import hashlib
 import html
 import json
+import os
 import math
 import queue
 import random
@@ -364,6 +365,8 @@ class Visits:
 
 ALERT_LIMIT = 5      # fares per watch in one email
 BEST_KEY = "__best__"   # alerted row holding the cheapest cash and points emailed so far per watch
+CPP_KEY = "__cpp__"     # alerted row whose cash column holds the best ¢/pt seen so far per watch
+CPP_STEP = 0.1          # a points fare is news when its ¢/pt beats that by this much
 
 
 def _beats(r, best):
@@ -374,9 +377,11 @@ def _beats(r, best):
 def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
     """What to email for a watch: on its first emailed search, the cheapest matches; after that,
     only matches cheaper (in cash or in points) than anything already emailed for it.
-    Up to `limit` cheapest by cash, plus the cheapest by points if that's a different one."""
+    Up to `limit` cheapest by cash, plus the cheapest by points if that's a different one, plus
+    the best value per point when that's a new high (see _cpp_alert)."""
     best = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
                        (watch_id, BEST_KEY)).fetchone()
+    all_cands = cands
     if best is not None:
         cands = [c for c in cands if _beats(c["row"], best)]
     cands = sorted(cands, key=lambda c: swa.cheapest_first(c["row"]))
@@ -387,7 +392,26 @@ def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
         out.append(by_points)
     for c in out:   # for the email: how much cheaper than the best already sent
         c["drop"] = price_drop(c["row"], best)
-    return out
+    return out + _cpp_alert(con, watch_id, all_cands, out)
+
+
+def _cpp_alert(con, watch_id, cands, already):
+    """The matching points fare with the best value per point, when it beats the best ¢/pt this
+    watch has seen by CPP_STEP (then a good time to spend points, even if it isn't the cheapest).
+    The first time only sets the baseline."""
+    top = max((c for c in cands if c["row"].get("cpp") is not None and c["row"].get("points") is not None),
+              key=lambda c: c["row"]["cpp"], default=None)
+    if top is None:
+        return []
+    prev = con.execute("SELECT cash FROM alerted WHERE watch_id=? AND key=?", (watch_id, CPP_KEY)).fetchone()
+    cpp = top["row"]["cpp"]
+    if prev is not None and (prev["cash"] is None or cpp < prev["cash"] + CPP_STEP):
+        return []
+    con.execute("INSERT OR REPLACE INTO alerted VALUES (?,?,?,?)", (watch_id, CPP_KEY, cpp, None))
+    if prev is None:
+        return []
+    top["cpp_note"] = f"{cpp:.2f}¢ per point, the best value for points yet (was {prev['cash']:.2f}¢)"
+    return [] if any(top is c for c in already) else [top]
 
 
 def price_drop(row, best):
@@ -471,6 +495,7 @@ class Worker:
         self.running_user = None
         self.progress = {}         # user_id -> what the running search is doing right now
         self.next_window = None    # (start, end) of the next daily window
+        self.heartbeats = {}       # loop name -> time.monotonic() of its last tick
         self.planned = {}          # user_id -> start time within today's window
         self.cancelled = set()     # users who pressed Cancel: stop after the current search, keep results
         self._wake = threading.Event()   # cuts a pause short when the running user cancels
@@ -586,9 +611,41 @@ class Worker:
                         "WHERE last_status='Running…'")
         if n:
             applog.warn(f"Marked {n} unfinished run(s) from before the restart as interrupted", source="run")
+        Worker.resume_seat_jobs()
+
+    @staticmethod
+    def resume_seat_jobs():
+        """A seat check cut off by a restart stays "running" and would never run again: put it back
+        in line (checked again right away), unless its flight is about to leave."""
+        now = dt.datetime.now(dt.timezone.utc)
+        n = 0
+        for j in db.query("SELECT * FROM seat_jobs WHERE status='running'"):
+            departs = dt.datetime.fromisoformat(j["opens_at"]) + dt.timedelta(hours=seats.OPEN_HOURS)
+            with db.tx() as con:
+                if departs - now < dt.timedelta(seconds=Worker.SEAT_STOP_BEFORE):
+                    con.execute("UPDATE seat_jobs SET status=?, note=?, updated=? WHERE id=?",
+                                ("done" if j["log"] not in (None, "[]") else "failed",
+                                 "Interrupted by a restart too close to departure to check again.", db.now(), j["id"]))
+                elif j["visits"]:
+                    con.execute("UPDATE seat_jobs SET status='watching', next_at=?, updated=? WHERE id=?",
+                                (now.isoformat(timespec="seconds"), db.now(), j["id"]))
+                else:
+                    con.execute("UPDATE seat_jobs SET status='pending', updated=? WHERE id=?", (db.now(), j["id"]))
+            n += 1
+        with db.tx() as con:
+            n += con.execute("UPDATE checkin_jobs SET status='pending', next_at=NULL, updated=? "
+                             "WHERE status='running'", (db.now(),)).rowcount
+        if n:
+            applog.warn(f"Put {n} seat check(s) / check-in(s) interrupted by the restart back in line",
+                        source="seats")
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
+        self.beat("seats")
+        self.beat("housekeeping")
+        wd = threading.Thread(target=self._watchdog, name="swa-watchdog", daemon=True)
+        wd.start()
+        self._threads.append(wd)
         t = threading.Thread(target=self._loop, name="swa-worker", daemon=True)
         t.start()
         self._threads.append(t)
@@ -669,10 +726,85 @@ class Worker:
                         "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status='watching' AND j.next_at<=?)) "
                         "AND w.active=1 AND w.seat_auto=1", (soon, now.isoformat(timespec="seconds")))
 
+    CHECKIN_EARLY = 30            # start this many seconds before check-in opens
+    CHECKIN_RETRY_FOR = 20 * 60   # and keep trying while it says "too early" this long after
+    CHECKIN_TRIES = 3             # attempts that fail for other reasons, 3-6 min apart
+
+    def due_checkin_jobs(self, now=None):
+        now = now or dt.datetime.now(dt.timezone.utc)
+        soon = (now + dt.timedelta(seconds=self.CHECKIN_EARLY)).isoformat(timespec="seconds")
+        return db.query("SELECT j.*, w.user_id FROM checkin_jobs j JOIN watches w ON w.id=j.watch_id "
+                        "WHERE j.status='pending' AND COALESCE(j.next_at, j.opens_at)<=? AND w.active=1 "
+                        "AND w.checkin_auto=1", (soon,))
+
+    def run_checkin_job(self, job, browser_factory=None):
+        """Check in to one booked flight as check-in opens, then email the boarding positions."""
+        from . import checkin
+        w = db.one("SELECT * FROM watches WHERE id=?", (job["watch_id"],))
+        user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],)) if w else None
+        if not w or not user:
+            self.seat_busy.discard(job.get("user_id"))
+            return None
+        uid = user["id"]
+        self.seat_busy.add(uid)
+        leg = "return" if job["leg"] == "ret" else "outbound"
+        opens = dt.datetime.fromisoformat(job["opens_at"])
+        tries = (job.get("tries") or 0) + 1
+        positions, seat_list, status, nxt = [], [], "failed", None
+        applog.info(f"{w['name']}: checking in for the {leg} flight", user_id=uid, source="checkin")
+        try:
+            factory = browser_factory or (lambda: self.searcher_factory(
+                None, profile_key=uid if self.running_user != uid else f"{uid}-seats"))
+            with factory() as browser:
+                ci = checkin.CheckIn(browser, w["booking_conf"], w["booking_first"], w["booking_last"], user_id=uid)
+                positions, seat_list = ci.run(max(opens.timestamp(), time.time()) + self.CHECKIN_RETRY_FOR,
+                                              sleep=self.sleep)
+            status = "done"
+            note = "Checked in: " + (", ".join(positions) or "boarding position not shown")
+        except checkin.TooEarly as e:
+            note = f"Southwest still says it's too early to check in ({e}). Check in yourself."
+        except swa.Blocked as e:
+            db.bump_block(uid, e)
+            note = f"Southwest blocked the check-in page ({e}). Check in yourself."
+        except Exception as e:
+            note = f"Couldn't check in ({e.__class__.__name__}: {str(e)[:200]})"
+            if tries < self.CHECKIN_TRIES:
+                status = "pending"
+                nxt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=random.uniform(3, 6))
+                note += f"; trying again at {nxt.astimezone():%H:%M}"
+            else:
+                note += f", {tries} times. Check in yourself."
+        finally:
+            self.seat_busy.discard(uid)
+        with db.tx() as con:
+            con.execute("UPDATE checkin_jobs SET status=?, note=?, tries=?, next_at=?, updated=? WHERE id=?",
+                        (status, note, tries, nxt.isoformat(timespec="seconds") if nxt else None, db.now(), job["id"]))
+        applog.log(f"{w['name']}: check-in ({leg}): {note}", "info" if status != "failed" else "warn",
+                   user_id=uid, source="checkin")
+        if user["email"] and status != "pending":
+            url = checkin.checkin_url(w["booking_conf"], w["booking_first"], w["booking_last"])
+            subject = "SWA checked in" if status == "done" else "SWA check-in needs you"
+            mailer.send(user["email"], f"{subject}: {w['name']} ({leg})",
+                        mailer.render_checkin(f"{w['name']}: {leg} flight", positions, seat_list, note,
+                                              status == "done", url))
+        return status, positions, note
+
     def _seat_loop(self):
         while True:
             try:
+                for job in self.due_checkin_jobs():
+                    if job["user_id"] in self.seat_busy:
+                        continue          # that user's browser is on a seat map: next tick
+                    with db.tx() as con:
+                        if con.execute("UPDATE checkin_jobs SET status='running', updated=? WHERE id=? "
+                                       "AND status='pending'", (db.now(), job["id"])).rowcount != 1:
+                            continue
+                    self.seat_busy.add(job["user_id"])
+                    threading.Thread(target=self.run_checkin_job, args=(dict(job),), name="swa-checkin",
+                                     daemon=True).start()
                 for job in self.due_seat_jobs():
+                    if job["user_id"] in self.seat_busy:
+                        continue
                     with db.tx() as con:   # claim it
                         if con.execute("UPDATE seat_jobs SET status='running', updated=? WHERE id=? "
                                        "AND status=?", (db.now(), job["id"], job["status"])).rowcount != 1:
@@ -681,6 +813,7 @@ class Worker:
                                      daemon=True).start()
             except Exception as e:
                 applog.error(f"Seat scheduler: {e.__class__.__name__}: {e}", source="seats")
+            self.beat("seats")
             time.sleep(20)
 
     def run_seat_job(self, job, picker_factory=None):
@@ -723,6 +856,7 @@ class Worker:
         except seat_picker.NotFree as e:
             stop = f"Stopped before paying anything: {e}. Your seat wasn't changed."
         except swa.Blocked as e:
+            db.bump_block(uid, e)
             stop = f"Southwest blocked the page ({e}). Pick your seat yourself."
         except Exception as e:
             fails += 1
@@ -732,6 +866,7 @@ class Worker:
                 stop = f"{note}, {fails} times in a row. Pick your seat yourself."
         finally:
             self.seat_busy.discard(uid)
+        db.bump(uid, "seat_visit")
         log = json.loads(job.get("log") or "[]") + [list(c) for c in changes]
         now = dt.datetime.now(dt.timezone.utc)
         perfect = bool(report) and all(_seat_fit(r) >= 99.95 for r in report)
@@ -790,6 +925,7 @@ class Worker:
                 picker.open_reservation()
                 legs = seat_picker.parse_trip(picker.page.inner_text("body"))
         except swa.Blocked as e:
+            db.bump_block(uid, e)
             status = f"Southwest blocked the lookup ({e}); enter the flights by hand"
         except Exception as e:
             status = f"Couldn't look up the booking ({e.__class__.__name__}); check the confirmation # and name"
@@ -805,7 +941,7 @@ class Worker:
                             (out["from"], out["to"], "roundtrip" if len(legs) > 1 else "oneway", json.dumps(booked),
                              out["date"], next((x["date"] for x in legs if x["leg"] == "ret"), None),
                              f"Booking read: {len(legs)} flight(s)", watch_id))
-            db.sync_seat_jobs(watch_id)
+            db.sync_jobs(watch_id)
             applog.info(f"{w['name']}: read the booking: " + "; ".join(
                 f"{x['from']}→{x['to']} {x['date']} {x['time']}" for x in legs), user_id=uid, source="seats")
         else:
@@ -822,6 +958,11 @@ class Worker:
                 applog.info(f"Database backed up to {made.relative_to(settings.data_dir)}", source="backup")
         except Exception as e:
             applog.error(f"Database backup failed: {e.__class__.__name__}: {e}", source="backup")
+        try:
+            for f in db.copy_backups():
+                applog.info(f"Backup copied to {f}", source="backup")
+        except Exception as e:
+            applog.error(f"Copying the backup failed: {e.__class__.__name__}: {e}", source="backup")
         try:
             self.send_digests()
         except Exception as e:
@@ -908,9 +1049,30 @@ class Worker:
         db.set_state("format_alert_day", day)
         return True
 
+    HEARTBEAT_LIMITS = {"seats": 600, "housekeeping": 2400}   # seconds a loop may go quiet
+
+    def beat(self, loop):
+        self.heartbeats[loop] = time.monotonic()
+
+    def stuck(self):
+        """Loops that stopped ticking (hung, not dead): {name: seconds since their last tick}."""
+        now = time.monotonic()
+        return {k: round(now - t) for k, t in self.heartbeats.items()
+                if now - t > self.HEARTBEAT_LIMITS.get(k, 600)}
+
     def alive(self):
-        """False if a background thread this worker started has died."""
-        return all(t.is_alive() for t in self._threads)
+        """False if a background thread this worker started has died or one of its loops hung."""
+        return all(t.is_alive() for t in self._threads) and not self.stuck()
+
+    def _watchdog(self, exit=os._exit, sleep=time.sleep):
+        """A hung loop never recovers on its own and Docker doesn't restart an unhealthy container,
+        so exit and let the restart policy (unless-stopped) start a fresh one."""
+        while True:
+            sleep(60)
+            hung = self.stuck()
+            if hung and not self.running_user and not self.seat_busy:
+                applog.error(f"Worker loop hung ({hung}); restarting the app", source="run")
+                exit(70)
 
     def check_stale(self, now=None):
         """Email the admins once when no run has finished for settings.stale_hours while there are
@@ -940,6 +1102,7 @@ class Worker:
     def _housekeeping_loop(self):
         while True:
             self.housekeeping()
+            self.beat("housekeeping")
             time.sleep(600)
 
     def _sleep_until(self, when):
@@ -1428,6 +1591,7 @@ class Worker:
     @staticmethod
     def _pause_after_block(user, e):
         """Stop pushing: pause this user's scheduled runs and tell them, once per block."""
+        db.bump_block(user["id"], e)
         until = (dt.datetime.now() + dt.timedelta(hours=settings.block_pause_hours)).isoformat(timespec="minutes")
         with db.tx() as con:
             con.execute("UPDATE users SET blocked_until=?, blocked_reason=? WHERE id=?",
@@ -1470,6 +1634,8 @@ class Worker:
         res = searcher.ensure_signed_in(creds["username"], creds["password"], allowed=allowed,
                                         code_provider=lambda: self._wait_for_code(user), log=step)
         attempted = res.status not in ("already_signed_in", "skipped")
+        if attempted:
+            db.bump(uid, "signin_ok" if res.ok else "signin_fail")
         now = db.now()
         status, disable, notify = None, False, None
         failures = user["auto_login_failures"]
@@ -1522,6 +1688,7 @@ class Worker:
             con.execute("UPDATE code_requests SET status='expired' WHERE user_id=? AND status='waiting'", (uid,))
             rid = con.execute("INSERT INTO code_requests(user_id, created_at, expires_at) VALUES (?,?,?)",
                               (uid, db.now(), expires)).lastrowid
+        db.bump(uid, "code")
         self.phase(uid, "Waiting for your verification code (enter it on the Verify page)", level="warn")
         mailer.send(user["email"], "Southwest verification code needed",
                     f"<p>Southwest sent you a verification code while the fare watcher was signing in. "

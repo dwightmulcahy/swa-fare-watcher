@@ -159,3 +159,22 @@ def test_rebook_watch_searches_only_the_booked_flight(worker, sent):
     out = worker.run_user(uid)
     assert {str(c[2]) for c in FakeSearcher.calls} == {d} and out["attempts"] == 2
     assert len(sent) == 1 and "booked flight" in sent[0][1]      # only the rebook email, no deal alerts
+
+
+def test_best_value_per_point_is_news():
+    db.init()
+    wid = make_watch(make_user())
+
+    def p(cash, points, cpp):
+        return {"watch_id": wid, "row": {"cash": cash, "points": points, "cpp": cpp}, "watch": "x"}
+    with db.tx() as con:
+        first = pick_alerts(con, wid, [p(200, 15000, 1.2), p(300, 18000, 1.5)], limit=1)
+        assert len(first) == 1                                                # baseline, no note
+        assert not any(x.get("cpp_note") for x in first)
+        record_alerted(con, first)
+        assert pick_alerts(con, wid, [p(300, 18000, 1.55)]) == []          # +0.05: noise
+        out = pick_alerts(con, wid, [p(320, 18000, 1.7)])                    # pricier, better use of points
+        assert len(out) == 1 and "1.70¢ per point" in out[0]["cpp_note"] and "was 1.50¢" in out[0]["cpp_note"]
+        assert pick_alerts(con, wid, [p(320, 18000, 1.7)]) == []            # told once
+    from app import mailer
+    assert "best value for points yet" in mailer._history(out[0])
