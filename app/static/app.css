@@ -391,3 +391,9 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
   padding: .8rem 1.25rem; margin: 0 0 1rem; }
 .watch-form details.manual-flights > summary { cursor: pointer; font-weight: 700; color: var(--accent); }
 .watch-form details.manual-flights > fieldset { box-shadow: none; margin: .8rem 0 0; }
+
+/* price trend per flight */
+.flight-trends .spark { display: block; }
+.flight-trends .spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.good-text { color: var(--good); }
+.bad-text { color: var(--bad); }

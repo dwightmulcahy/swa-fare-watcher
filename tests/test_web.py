@@ -44,6 +44,39 @@ def test_health(client):
     assert r.status_code == 200 and r.json() == {"status": "ok", "last_run_finished": None}
 
 
+
+def test_health_reports_a_hung_loop_and_the_watchdog_restarts(client, worker):
+    import time
+    client.app.state.worker = worker
+    worker.beat("seats")
+    assert client.get("/health").status_code == 200
+    worker.heartbeats["seats"] = time.monotonic() - 900
+    r = client.get("/health")
+    assert r.status_code == 503 and "hung" in r.json()["status"] and "seats" in r.json()["status"]
+    exits = []
+
+    def sleep(_):
+        if exits:
+            raise SystemExit
+    try:
+        worker._watchdog(exit=exits.append, sleep=sleep)
+    except SystemExit:
+        pass
+    assert exits == [70]
+    worker.running_user = 1                   # never mid-search
+    exits.clear()
+    calls = iter([None, SystemExit])
+
+    def sleep2(_):
+        if next(calls):
+            raise SystemExit
+    try:
+        worker._watchdog(exit=exits.append, sleep=sleep2)
+    except SystemExit:
+        pass
+    assert exits == []
+
+
 def test_requires_login_and_bad_password(client):
     assert client.get("/", follow_redirects=False).headers["location"] == "/login"
     assert login(client, "admin", "nope").status_code == 401
@@ -292,3 +325,20 @@ def test_watch_page_shows_the_next_run(client):
     with db.tx() as con:
         con.execute("UPDATE users SET blocked_until='2999-01-01T00:00:00+00:00' WHERE id=?", (uid,))
     assert "After a block page" in client.get(f"/watches/{wid}").text
+
+
+def test_admin_site_health(client):
+    from app import swa
+    token = admin_client(client)
+    uid = db.one("SELECT id FROM users WHERE username='admin'")["id"]
+    with db.tx() as con:
+        db.add_searches(con, uid, 20)
+    db.bump(uid, "seat_visit", 5)
+    db.bump_block(uid, swa.Blocked("search", "HTTP 403", None))
+    db.bump_block(uid, swa.Blocked("search", 'page says "Access denied"', None))
+    db.bump(uid, "signin_ok")
+    r = db.site_report()[0]
+    assert (r["searches"], r["seat_visit"], r["block"], r["challenge"], r["rate"]) == (20, 5, 1, 1, 8.0)
+    page = client.get("/admin/health").text
+    assert "Site health" in page and "8.0%" in page and "25" in page
+    assert token

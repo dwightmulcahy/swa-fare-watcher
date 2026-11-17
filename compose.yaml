@@ -15,6 +15,8 @@ services:
       - ${DATA_DIR:-./data}:/data      # app.db, secret.key, debug/
       # the same .env, so the admin Settings page can edit it (the app's user 1000 needs write access)
       - ${ENV_FILE:-./.env}:/config/.env
+      # Optional off-NAS backup copies (SWA_BACKUP_COPY_DIR=/backup): a USB disk or a synced share
+      # - /share/USBDisk1/swa-backup:/backup
     init: true
     read_only: true
     tmpfs:
