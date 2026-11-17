@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS usage(
   searches INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(user_id, day)
 );
+CREATE TABLE IF NOT EXISTS site_events(      -- per user and day: how Southwest treated us
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,                          -- see SITE_EVENTS
+  n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, day, kind)
+);
 CREATE TABLE IF NOT EXISTS code_requests(
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -415,6 +422,48 @@ def user_can_run(user) -> bool:
 def searches_today(user_id) -> int:
     row = one("SELECT searches FROM usage WHERE user_id=? AND day=?", (user_id, today()))
     return row["searches"] if row else 0
+
+
+SITE_EVENTS = {
+    "seat_visit": "Seat checks", "block": "Blocks (HTTP 403/429)", "challenge": "Challenge pages",
+    "signin_ok": "Sign-ins", "signin_fail": "Failed sign-ins", "code": "Codes asked",
+}
+
+
+def bump(user_id, kind, n=1, con=None):
+    """Count a site event (a block, a challenge, a sign-in ...) for today."""
+    sql = ("INSERT INTO site_events(user_id, day, kind, n) VALUES (?,?,?,?) "
+           "ON CONFLICT(user_id, day, kind) DO UPDATE SET n = n + excluded.n")
+    if con is not None:
+        con.execute(sql, (user_id, today(), kind, n))
+    else:
+        with tx() as c:
+            c.execute(sql, (user_id, today(), kind, n))
+
+
+def bump_block(user_id, e):
+    bump(user_id, "block" if str(getattr(e, "reason", "")).startswith("HTTP") else "challenge")
+
+
+def site_report(days=14):
+    """[{day, user, searches, <event>: n ..., rate}] newest first: searches from usage, the rest
+    from site_events; rate = blocks + challenges per 100 page visits (searches + seat checks)."""
+    since = (dt.date.fromisoformat(today()) - dt.timedelta(days=days - 1)).isoformat()
+    rows = {}
+    for r in query("SELECT g.day, u.username, g.searches FROM usage g JOIN users u ON u.id=g.user_id "
+                   "WHERE g.day>=?", (since,)):
+        rows.setdefault((r["day"], r["username"]), {})["searches"] = r["searches"]
+    for r in query("SELECT e.day, u.username, e.kind, e.n FROM site_events e JOIN users u ON u.id=e.user_id "
+                   "WHERE e.day>=?", (since,)):
+        rows.setdefault((r["day"], r["username"]), {})[r["kind"]] = r["n"]
+    out = []
+    for (day, name), v in sorted(rows.items(), key=lambda kv: (kv[0][0], kv[0][1]), reverse=True):
+        visits = v.get("searches", 0) + v.get("seat_visit", 0)
+        bad = v.get("block", 0) + v.get("challenge", 0)
+        out.append({"day": day, "user": name, "searches": v.get("searches", 0),
+                    **{k: v.get(k, 0) for k in SITE_EVENTS},
+                    "rate": round(100 * bad / visits, 1) if visits else (100.0 if bad else 0.0)})
+    return out
 
 
 def add_searches(con, user_id, n):

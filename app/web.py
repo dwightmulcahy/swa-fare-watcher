@@ -1045,6 +1045,20 @@ def create_app(worker=None, start_worker=True):
         return render(request, "admin_users.html", u, s, users=users, today=db.today(),
                       worker=app.state.worker, tz=tzcheck.last_result)
 
+    @app.get("/admin/health", response_class=HTMLResponse)
+    def admin_health(request: Request):
+        """How Southwest has been treating each account: searches, seat checks, blocks, challenges
+        and sign-ins per day, and the share of page visits that hit a block or challenge."""
+        u, s = require(request, admin=True)
+        rows = db.site_report(14)
+        tot = {k: sum(r[k] for r in rows) for k in ("searches", *db.SITE_EVENTS)}
+        visits = tot["searches"] + tot["seat_visit"]
+        tot["rate"] = round(100 * (tot["block"] + tot["challenge"]) / visits, 1) if visits else 0.0
+        paused = db.query("SELECT username, blocked_until, blocked_reason FROM users WHERE blocked_until > ?",
+                          (db.now(),))
+        return render(request, "admin_health.html", u, s, rows=rows, tot=tot, events=db.SITE_EVENTS,
+                      paused=paused)
+
     # ---------- admin: settings (.env) ----------
     def _env_view():
         values = envfile.read()

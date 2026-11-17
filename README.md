@@ -32,6 +32,7 @@ A small multi-user web app that searches Southwest fares once a day for each use
 - Create users (temporary password shown once), reset passwords, revoke and restore access, delete users.
 - Per-user limits: **max active watches**, **max searches per day**, **account expiry date**. Blank means no limit.
 - See each user's status, usage today, Southwest session health and last sign-in; run everyone's watches now.
+- **Site health**: per user and day, searches, seat checks, blocks, challenge pages, sign-ins and verification codes, with the block rate (blocks + challenges per 100 page visits), to see early whether the human-like browsing holds up.
 
 **Live status and log**
 - While a search runs, every page shows what it's doing right now: starting the browser, opening southwest.com, each sign-in step, waiting for a verification code, which date and fare type is being searched ("search 3 of 8") and pauses between searches. The watch's row shows **Running now**, and the dashboard and watch pages reload with the results when it finishes.

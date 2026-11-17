@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Site health{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/admin">Admin</a> / Site health</p>
+<div class="head"><div><h1>Site health</h1>
+  <p class="muted">How Southwest treated each account over the last 14 days. Block rate = blocks and challenge pages per 100 page visits (searches + seat checks); anything above 0 is worth a look in the Log.</p></div></div>
+{% if paused %}<p class="flash err">{% for p in paused %}<b>{{ p.username }}</b>: scheduled runs paused until {{ p.blocked_until|when }} ({{ p.blocked_reason }}){% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+<div class="stats">
+  <div class="stat"><span class="label">Page visits</span><span class="value">{{ tot.searches + tot.seat_visit }}</span><span class="muted small">{{ tot.searches }} searches · {{ tot.seat_visit }} seat checks</span></div>
+  <div class="stat"><span class="label">Blocks / challenges</span><span class="value">{{ tot.block }} / {{ tot.challenge }}</span><span class="muted small">block rate {{ tot.rate }}%</span></div>
+  <div class="stat"><span class="label">Sign-ins</span><span class="value">{{ tot.signin_ok }} ok · {{ tot.signin_fail }} failed</span><span class="muted small">{{ tot.code }} verification code{{ '' if tot.code == 1 else 's' }} asked</span></div>
+</div>
+{% if rows %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Day</th><th>User</th><th class="num">Searches</th>{% for k, t in events.items() %}<th class="num">{{ t }}</th>{% endfor %}<th class="num">Block rate</th></tr></thead>
+  <tbody>{% for r in rows %}
+    <tr><td>{{ r.day }}</td><td>{{ r.user }}</td><td class="num">{{ r.searches }}</td>{% for k in events %}<td class="num">{{ r[k] or '' }}</td>{% endfor %}
+      <td class="num">{% if r.rate %}<span class="pill bad">{{ r.rate }}%</span>{% else %}0%{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+{% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+{% endblock %}
