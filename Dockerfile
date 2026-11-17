@@ -20,12 +20,13 @@ COPY requirements.txt ./
 # Browser + its OS libraries, and Xvfb so it runs headed (far less likely to be blocked).
 # amd64 gets real Google Chrome (the app prefers it); Chrome has no Linux arm64 build, so
 # arm64 uses Playwright's Chromium. The app starts its own Xvfb display per run.
+# libatomic1: Playwright 1.65+ bundles a Node that needs it.
 # A desktop-sized font set: a near-empty font list is a common sign of a bare server.
 # pip is removed afterwards: the runtime doesn't need it, and its vendored packages trip
 # the vulnerability scan.
 RUN apt-get update \
  && apt-get upgrade -y \
- && apt-get install -y --no-install-recommends xvfb tzdata mesa-vulkan-drivers libvulkan1 \
+ && apt-get install -y --no-install-recommends xvfb tzdata mesa-vulkan-drivers libvulkan1 libatomic1 \
  && pip install -r requirements.txt \
  && retry() { for i in 1 2 3; do "$@" && return 0; echo "retry $i: $*" >&2; sleep $((i * 10)); done; return 1; } \
  && retry playwright install --with-deps chromium \
