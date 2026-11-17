@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa
+from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa, trends
 from . import worker as worker_mod
 from .config import settings
 from .mailer import fmt_dur
@@ -821,6 +821,8 @@ def create_app(worker=None, start_worker=True):
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
                       history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
+                      flight_trends=trends.flight_trends(wid) if (w["kind"] or "fare") == "fare" else [],
+                      trends_min=trends.MIN_SAMPLES,
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,

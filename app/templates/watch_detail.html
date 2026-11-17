@@ -152,6 +152,26 @@
 </section>
 {% endif %}
 
+{% if flight_trends %}
+<section class="card flight-trends">
+  <h2>Price trend per flight</h2>
+  <p class="muted small">Upcoming flights in the latest search: today's cash fare against its own history on this watch.</p>
+  <div class="table-wrap"><table class="list compact">
+    <thead><tr><th>Date</th><th>Flight</th><th class="num">Now</th><th class="num">Low / high</th><th class="num">Above low</th><th class="num">7 days</th><th>Trend</th><th>Outlook</th></tr></thead>
+    <tbody>{% for f in flight_trends %}
+      <tr><td>{{ f.date }}{% if rt %} <span class="muted small">{{ 'back' if f.leg == 'ret' else 'out' }}</span>{% endif %}</td>
+        <td>#{{ f.flights }} <span class="muted small">{{ f.depart }}{% if f.route %} · {{ f.route }}{% endif %}</span></td>
+        <td class="num">{{ f.cash|money }}</td>
+        <td class="num muted">{{ f.low|money }} / {{ f.high|money }}</td>
+        <td class="num">{% if f.above_low < 1 %}<span class="pill good">at its low</span>{% else %}+{{ f.above_low|money }}{% endif %}</td>
+        <td class="num">{% if f.week is none %}<span class="muted">—</span>{% elif f.week <= -1 %}<span class="good-text">↓ {{ (-f.week)|money }}</span>{% elif f.week >= 1 %}<span class="bad-text">↑ {{ f.week|money }}</span>{% else %}={% endif %}</td>
+        <td>{% if f.spark %}<svg class="spark" width="90" height="22" viewBox="0 0 90 22" aria-label="{{ f.seen }} days of prices"><polyline points="{{ f.spark }}"/></svg>{% else %}<span class="muted small">{{ f.seen }} day</span>{% endif %}</td>
+        <td class="small">{{ f.outlook or '' }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% if not flight_trends|selectattr('outlook')|list %}<p class="muted small">An outlook appears once {{ trends_min }} or more of this watch's flights have departed with prices tracked.</p>{% endif %}
+</section>
+{% endif %}
+
 <div class="cols">
   <section>
     <h2>Price history by day</h2>
