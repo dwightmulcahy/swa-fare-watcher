@@ -586,6 +586,29 @@ class Worker:
                         "WHERE last_status='Running…'")
         if n:
             applog.warn(f"Marked {n} unfinished run(s) from before the restart as interrupted", source="run")
+        Worker.resume_seat_jobs()
+
+    @staticmethod
+    def resume_seat_jobs():
+        """A seat check cut off by a restart stays "running" and would never run again: put it back
+        in line (checked again right away), unless its flight is about to leave."""
+        now = dt.datetime.now(dt.timezone.utc)
+        n = 0
+        for j in db.query("SELECT * FROM seat_jobs WHERE status='running'"):
+            departs = dt.datetime.fromisoformat(j["opens_at"]) + dt.timedelta(hours=seats.OPEN_HOURS)
+            with db.tx() as con:
+                if departs - now < dt.timedelta(seconds=Worker.SEAT_STOP_BEFORE):
+                    con.execute("UPDATE seat_jobs SET status=?, note=?, updated=? WHERE id=?",
+                                ("done" if j["log"] not in (None, "[]") else "failed",
+                                 "Interrupted by a restart too close to departure to check again.", db.now(), j["id"]))
+                elif j["visits"]:
+                    con.execute("UPDATE seat_jobs SET status='watching', next_at=?, updated=? WHERE id=?",
+                                (now.isoformat(timespec="seconds"), db.now(), j["id"]))
+                else:
+                    con.execute("UPDATE seat_jobs SET status='pending', updated=? WHERE id=?", (db.now(), j["id"]))
+            n += 1
+        if n:
+            applog.warn(f"Put {n} seat check(s) interrupted by the restart back in line", source="seats")
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
