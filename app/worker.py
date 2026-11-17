@@ -754,6 +754,7 @@ class Worker:
         except seat_picker.NotFree as e:
             stop = f"Stopped before paying anything: {e}. Your seat wasn't changed."
         except swa.Blocked as e:
+            db.bump_block(uid, e)
             stop = f"Southwest blocked the page ({e}). Pick your seat yourself."
         except Exception as e:
             fails += 1
@@ -763,6 +764,7 @@ class Worker:
                 stop = f"{note}, {fails} times in a row. Pick your seat yourself."
         finally:
             self.seat_busy.discard(uid)
+        db.bump(uid, "seat_visit")
         log = json.loads(job.get("log") or "[]") + [list(c) for c in changes]
         now = dt.datetime.now(dt.timezone.utc)
         perfect = bool(report) and all(_seat_fit(r) >= 99.95 for r in report)
@@ -821,6 +823,7 @@ class Worker:
                 picker.open_reservation()
                 legs = seat_picker.parse_trip(picker.page.inner_text("body"))
         except swa.Blocked as e:
+            db.bump_block(uid, e)
             status = f"Southwest blocked the lookup ({e}); enter the flights by hand"
         except Exception as e:
             status = f"Couldn't look up the booking ({e.__class__.__name__}); check the confirmation # and name"
@@ -1486,6 +1489,7 @@ class Worker:
     @staticmethod
     def _pause_after_block(user, e):
         """Stop pushing: pause this user's scheduled runs and tell them, once per block."""
+        db.bump_block(user["id"], e)
         until = (dt.datetime.now() + dt.timedelta(hours=settings.block_pause_hours)).isoformat(timespec="minutes")
         with db.tx() as con:
             con.execute("UPDATE users SET blocked_until=?, blocked_reason=? WHERE id=?",
@@ -1528,6 +1532,8 @@ class Worker:
         res = searcher.ensure_signed_in(creds["username"], creds["password"], allowed=allowed,
                                         code_provider=lambda: self._wait_for_code(user), log=step)
         attempted = res.status not in ("already_signed_in", "skipped")
+        if attempted:
+            db.bump(uid, "signin_ok" if res.ok else "signin_fail")
         now = db.now()
         status, disable, notify = None, False, None
         failures = user["auto_login_failures"]
@@ -1580,6 +1586,7 @@ class Worker:
             con.execute("UPDATE code_requests SET status='expired' WHERE user_id=? AND status='waiting'", (uid,))
             rid = con.execute("INSERT INTO code_requests(user_id, created_at, expires_at) VALUES (?,?,?)",
                               (uid, db.now(), expires)).lastrowid
+        db.bump(uid, "code")
         self.phase(uid, "Waiting for your verification code (enter it on the Verify page)", level="warn")
         mailer.send(user["email"], "Southwest verification code needed",
                     f"<p>Southwest sent you a verification code while the fare watcher was signing in. "
