@@ -197,12 +197,15 @@ def create_app(worker=None, start_worker=True):
     @app.get("/healthz")
     def health():
         """Container health: the database answers and the worker threads are alive (503 if not)."""
-        db.one("SELECT 1")
+        try:
+            last = db.one("SELECT MAX(finished) f FROM runs")["f"]
+        except Exception as e:
+            return JSONResponse({"status": f"database error: {e.__class__.__name__}"}, status_code=503)
         worker = getattr(app.state, "worker", None)
         ok = worker is None or worker.alive()
-        last = db.one("SELECT MAX(finished) f FROM runs")["f"]
-        return JSONResponse({"status": "ok" if ok else "worker stopped", "last_run_finished": last},
-                            status_code=200 if ok else 503)
+        stuck = worker.stuck() if worker is not None else {}
+        status = "ok" if ok else f"worker loop hung: {stuck}" if stuck else "worker stopped"
+        return JSONResponse({"status": status, "last_run_finished": last}, status_code=200 if ok else 503)
 
     @app.get("/api/status")
     def api_status(request: Request):
