@@ -3,6 +3,7 @@ import datetime as dt
 import hashlib
 import html
 import json
+import os
 import math
 import queue
 import random
@@ -471,6 +472,7 @@ class Worker:
         self.running_user = None
         self.progress = {}         # user_id -> what the running search is doing right now
         self.next_window = None    # (start, end) of the next daily window
+        self.heartbeats = {}       # loop name -> time.monotonic() of its last tick
         self.planned = {}          # user_id -> start time within today's window
         self.cancelled = set()     # users who pressed Cancel: stop after the current search, keep results
         self._wake = threading.Event()   # cuts a pause short when the running user cancels
@@ -612,6 +614,11 @@ class Worker:
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
+        self.beat("seats")
+        self.beat("housekeeping")
+        wd = threading.Thread(target=self._watchdog, name="swa-watchdog", daemon=True)
+        wd.start()
+        self._threads.append(wd)
         t = threading.Thread(target=self._loop, name="swa-worker", daemon=True)
         t.start()
         self._threads.append(t)
@@ -704,6 +711,7 @@ class Worker:
                                      daemon=True).start()
             except Exception as e:
                 applog.error(f"Seat scheduler: {e.__class__.__name__}: {e}", source="seats")
+            self.beat("seats")
             time.sleep(20)
 
     def run_seat_job(self, job, picker_factory=None):
@@ -931,9 +939,30 @@ class Worker:
         db.set_state("format_alert_day", day)
         return True
 
+    HEARTBEAT_LIMITS = {"seats": 600, "housekeeping": 2400}   # seconds a loop may go quiet
+
+    def beat(self, loop):
+        self.heartbeats[loop] = time.monotonic()
+
+    def stuck(self):
+        """Loops that stopped ticking (hung, not dead): {name: seconds since their last tick}."""
+        now = time.monotonic()
+        return {k: round(now - t) for k, t in self.heartbeats.items()
+                if now - t > self.HEARTBEAT_LIMITS.get(k, 600)}
+
     def alive(self):
-        """False if a background thread this worker started has died."""
-        return all(t.is_alive() for t in self._threads)
+        """False if a background thread this worker started has died or one of its loops hung."""
+        return all(t.is_alive() for t in self._threads) and not self.stuck()
+
+    def _watchdog(self, exit=os._exit, sleep=time.sleep):
+        """A hung loop never recovers on its own and Docker doesn't restart an unhealthy container,
+        so exit and let the restart policy (unless-stopped) start a fresh one."""
+        while True:
+            sleep(60)
+            hung = self.stuck()
+            if hung and not self.running_user and not self.seat_busy:
+                applog.error(f"Worker loop hung ({hung}); restarting the app", source="run")
+                exit(70)
 
     def check_stale(self, now=None):
         """Email the admins once when no run has finished for settings.stale_hours while there are
@@ -963,6 +992,7 @@ class Worker:
     def _housekeeping_loop(self):
         while True:
             self.housekeeping()
+            self.beat("housekeeping")
             time.sleep(600)
 
     def _sleep_until(self, when):

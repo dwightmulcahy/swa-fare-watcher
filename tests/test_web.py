@@ -44,6 +44,39 @@ def test_health(client):
     assert r.status_code == 200 and r.json() == {"status": "ok", "last_run_finished": None}
 
 
+
+def test_health_reports_a_hung_loop_and_the_watchdog_restarts(client, worker):
+    import time
+    client.app.state.worker = worker
+    worker.beat("seats")
+    assert client.get("/health").status_code == 200
+    worker.heartbeats["seats"] = time.monotonic() - 900
+    r = client.get("/health")
+    assert r.status_code == 503 and "hung" in r.json()["status"] and "seats" in r.json()["status"]
+    exits = []
+
+    def sleep(_):
+        if exits:
+            raise SystemExit
+    try:
+        worker._watchdog(exit=exits.append, sleep=sleep)
+    except SystemExit:
+        pass
+    assert exits == [70]
+    worker.running_user = 1                   # never mid-search
+    exits.clear()
+    calls = iter([None, SystemExit])
+
+    def sleep2(_):
+        if next(calls):
+            raise SystemExit
+    try:
+        worker._watchdog(exit=exits.append, sleep=sleep2)
+    except SystemExit:
+        pass
+    assert exits == []
+
+
 def test_requires_login_and_bad_password(client):
     assert client.get("/", follow_redirects=False).headers["location"] == "/login"
     assert login(client, "admin", "nope").status_code == 401
