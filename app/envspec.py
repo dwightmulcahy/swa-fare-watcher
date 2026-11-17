@@ -103,6 +103,9 @@ GROUPS = [
         Setting("SWA_STALE_HOURS", "26", "Email the admins when no run has finished for this long; 0 = off",
                 "float"),
         Setting("SWA_BACKUP_KEEP", "7", "Daily database backups kept in data/backups; 0 = off", "int"),
+        Setting("SWA_BACKUP_COPY_DIR", "", "Also copy each daily backup to this folder inside the container, "
+                "e.g. /backup mounted from a USB disk or a cloud-synced share (blank = off)"),
+        Setting("SWA_BACKUP_COPY_KEEP", "30", "Backups kept in SWA_BACKUP_COPY_DIR", "int"),
         Setting("SWA_DATA_DIR", "/data", "Where the database, browser profiles and logs live", advanced=True),
     ]),
     ("Docker (read by docker compose; apply with docker compose up -d)", [

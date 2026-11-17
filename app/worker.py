@@ -854,6 +854,11 @@ class Worker:
         except Exception as e:
             applog.error(f"Database backup failed: {e.__class__.__name__}: {e}", source="backup")
         try:
+            for f in db.copy_backups():
+                applog.info(f"Backup copied to {f}", source="backup")
+        except Exception as e:
+            applog.error(f"Copying the backup failed: {e.__class__.__name__}: {e}", source="backup")
+        try:
             self.send_digests()
         except Exception as e:
             applog.error(f"Digest emails failed: {e.__class__.__name__}: {e}", source="digest")
