@@ -365,6 +365,8 @@ class Visits:
 
 ALERT_LIMIT = 5      # fares per watch in one email
 BEST_KEY = "__best__"   # alerted row holding the cheapest cash and points emailed so far per watch
+CPP_KEY = "__cpp__"     # alerted row whose cash column holds the best ¢/pt seen so far per watch
+CPP_STEP = 0.1          # a points fare is news when its ¢/pt beats that by this much
 
 
 def _beats(r, best):
@@ -375,9 +377,11 @@ def _beats(r, best):
 def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
     """What to email for a watch: on its first emailed search, the cheapest matches; after that,
     only matches cheaper (in cash or in points) than anything already emailed for it.
-    Up to `limit` cheapest by cash, plus the cheapest by points if that's a different one."""
+    Up to `limit` cheapest by cash, plus the cheapest by points if that's a different one, plus
+    the best value per point when that's a new high (see _cpp_alert)."""
     best = con.execute("SELECT cash, points FROM alerted WHERE watch_id=? AND key=?",
                        (watch_id, BEST_KEY)).fetchone()
+    all_cands = cands
     if best is not None:
         cands = [c for c in cands if _beats(c["row"], best)]
     cands = sorted(cands, key=lambda c: swa.cheapest_first(c["row"]))
@@ -388,7 +392,26 @@ def pick_alerts(con, watch_id, cands, limit=ALERT_LIMIT):
         out.append(by_points)
     for c in out:   # for the email: how much cheaper than the best already sent
         c["drop"] = price_drop(c["row"], best)
-    return out
+    return out + _cpp_alert(con, watch_id, all_cands, out)
+
+
+def _cpp_alert(con, watch_id, cands, already):
+    """The matching points fare with the best value per point, when it beats the best ¢/pt this
+    watch has seen by CPP_STEP (then a good time to spend points, even if it isn't the cheapest).
+    The first time only sets the baseline."""
+    top = max((c for c in cands if c["row"].get("cpp") is not None and c["row"].get("points") is not None),
+              key=lambda c: c["row"]["cpp"], default=None)
+    if top is None:
+        return []
+    prev = con.execute("SELECT cash FROM alerted WHERE watch_id=? AND key=?", (watch_id, CPP_KEY)).fetchone()
+    cpp = top["row"]["cpp"]
+    if prev is not None and (prev["cash"] is None or cpp < prev["cash"] + CPP_STEP):
+        return []
+    con.execute("INSERT OR REPLACE INTO alerted VALUES (?,?,?,?)", (watch_id, CPP_KEY, cpp, None))
+    if prev is None:
+        return []
+    top["cpp_note"] = f"{cpp:.2f}¢ per point, the best value for points yet (was {prev['cash']:.2f}¢)"
+    return [] if any(top is c for c in already) else [top]
 
 
 def price_drop(row, best):
