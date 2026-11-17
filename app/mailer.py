@@ -97,6 +97,8 @@ def _history(h):
     bits = []
     if h.get("drop"):
         bits.append(f"<b style='color:#1a7f37'>↓ {html.escape(h['drop'])}</b> since your last alert")
+    if h.get("cpp_note"):
+        bits.append(f"<b style='color:#1a7f37'>★ {html.escape(h['cpp_note'])}</b>")
     low = h.get("low")
     if low:
         when = dt.date.fromisoformat(low[1][:10]).strftime("%b %-d")
