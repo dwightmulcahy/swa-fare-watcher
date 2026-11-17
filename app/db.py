@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS site_events(      -- per user and day: how Southwest 
   n INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(user_id, day, kind)
 );
+CREATE TABLE IF NOT EXISTS checkin_jobs(
+  id INTEGER PRIMARY KEY,
+  watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+  leg TEXT NOT NULL,
+  opens_at TEXT NOT NULL,                    -- UTC ISO: 24 h before departure
+  next_at TEXT,                              -- UTC ISO: retry after a failed try
+  status TEXT NOT NULL DEFAULT 'pending',    -- pending | running | done | failed
+  tries INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  updated TEXT
+);
 CREATE TABLE IF NOT EXISTS code_requests(
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -241,6 +252,7 @@ MIGRATIONS = {
         "seat_auto": "INTEGER NOT NULL DEFAULT 0",   # pick seats when selection opens (48 h before)
         "seat_status": "TEXT",                   # seats.STATUSES key
         "seat_prefs": "TEXT",                    # JSON, see seats.DEFAULT_PREFS
+        "checkin_auto": "INTEGER NOT NULL DEFAULT 0",   # check in automatically 24 h before each flight
     },
     "seat_jobs": {
         "next_at": "TEXT",                       # UTC ISO: next check while watching for a better seat
@@ -297,6 +309,11 @@ def _split_booked(con):
     con.commit()
 
 
+def sync_jobs(watch_id, now=None):
+    """Re-plan everything timed off a watch's booked flights."""
+    return sync_seat_jobs(watch_id, now) + sync_checkin_jobs(watch_id, now)
+
+
 def sync_seat_jobs(watch_id, now=None):
     """(Re)plan the seat-selection jobs for a watch from its booked flights; jobs already run are kept."""
     import datetime as dt
@@ -319,6 +336,32 @@ def sync_seat_jobs(watch_id, now=None):
             if departs <= now + dt.timedelta(hours=1):
                 continue                      # too late to matter
             con.execute("INSERT INTO seat_jobs(watch_id, leg, opens_at, updated) VALUES (?,?,?,?)",
+                        (watch_id, b["leg"], opens.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            made.append((b["leg"], opens))
+        return made
+
+
+def sync_checkin_jobs(watch_id, now=None):
+    """(Re)plan automatic check-in for a watch's booked flights (24 h before each departure)."""
+    import datetime as dt
+    import json
+
+    from . import checkin, seats
+    w = one("SELECT * FROM watches WHERE id=?", (watch_id,))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    with tx() as con:
+        con.execute("DELETE FROM checkin_jobs WHERE watch_id=? AND status='pending'", (watch_id,))
+        if not w or not w["checkin_auto"] or not w["active"] or not w["booking_conf"]:
+            return []
+        done = {r["leg"] for r in con.execute("SELECT leg FROM checkin_jobs WHERE watch_id=?", (watch_id,))}
+        made = []
+        for b in json.loads(w["booked"] or "[]"):
+            opens = seats.opens_at(b.get("date"), b.get("time"), b.get("from"), hours=checkin.OPEN_HOURS)
+            if not opens or b["leg"] in done:
+                continue
+            if opens + dt.timedelta(hours=checkin.OPEN_HOURS) <= now + dt.timedelta(minutes=45):
+                continue                      # too late to matter
+            con.execute("INSERT INTO checkin_jobs(watch_id, leg, opens_at, updated) VALUES (?,?,?,?)",
                         (watch_id, b["leg"], opens.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
             made.append((b["leg"], opens))
         return made
