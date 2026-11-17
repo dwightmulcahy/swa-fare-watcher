@@ -609,8 +609,12 @@ class Worker:
                 else:
                     con.execute("UPDATE seat_jobs SET status='pending', updated=? WHERE id=?", (db.now(), j["id"]))
             n += 1
+        with db.tx() as con:
+            n += con.execute("UPDATE checkin_jobs SET status='pending', next_at=NULL, updated=? "
+                             "WHERE status='running'", (db.now(),)).rowcount
         if n:
-            applog.warn(f"Put {n} seat check(s) interrupted by the restart back in line", source="seats")
+            applog.warn(f"Put {n} seat check(s) / check-in(s) interrupted by the restart back in line",
+                        source="seats")
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
@@ -699,10 +703,85 @@ class Worker:
                         "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status='watching' AND j.next_at<=?)) "
                         "AND w.active=1 AND w.seat_auto=1", (soon, now.isoformat(timespec="seconds")))
 
+    CHECKIN_EARLY = 30            # start this many seconds before check-in opens
+    CHECKIN_RETRY_FOR = 20 * 60   # and keep trying while it says "too early" this long after
+    CHECKIN_TRIES = 3             # attempts that fail for other reasons, 3-6 min apart
+
+    def due_checkin_jobs(self, now=None):
+        now = now or dt.datetime.now(dt.timezone.utc)
+        soon = (now + dt.timedelta(seconds=self.CHECKIN_EARLY)).isoformat(timespec="seconds")
+        return db.query("SELECT j.*, w.user_id FROM checkin_jobs j JOIN watches w ON w.id=j.watch_id "
+                        "WHERE j.status='pending' AND COALESCE(j.next_at, j.opens_at)<=? AND w.active=1 "
+                        "AND w.checkin_auto=1", (soon,))
+
+    def run_checkin_job(self, job, browser_factory=None):
+        """Check in to one booked flight as check-in opens, then email the boarding positions."""
+        from . import checkin
+        w = db.one("SELECT * FROM watches WHERE id=?", (job["watch_id"],))
+        user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],)) if w else None
+        if not w or not user:
+            self.seat_busy.discard(job.get("user_id"))
+            return None
+        uid = user["id"]
+        self.seat_busy.add(uid)
+        leg = "return" if job["leg"] == "ret" else "outbound"
+        opens = dt.datetime.fromisoformat(job["opens_at"])
+        tries = (job.get("tries") or 0) + 1
+        positions, seat_list, status, nxt = [], [], "failed", None
+        applog.info(f"{w['name']}: checking in for the {leg} flight", user_id=uid, source="checkin")
+        try:
+            factory = browser_factory or (lambda: self.searcher_factory(
+                None, profile_key=uid if self.running_user != uid else f"{uid}-seats"))
+            with factory() as browser:
+                ci = checkin.CheckIn(browser, w["booking_conf"], w["booking_first"], w["booking_last"], user_id=uid)
+                positions, seat_list = ci.run(max(opens.timestamp(), time.time()) + self.CHECKIN_RETRY_FOR,
+                                              sleep=self.sleep)
+            status = "done"
+            note = "Checked in: " + (", ".join(positions) or "boarding position not shown")
+        except checkin.TooEarly as e:
+            note = f"Southwest still says it's too early to check in ({e}). Check in yourself."
+        except swa.Blocked as e:
+            db.bump_block(uid, e)
+            note = f"Southwest blocked the check-in page ({e}). Check in yourself."
+        except Exception as e:
+            note = f"Couldn't check in ({e.__class__.__name__}: {str(e)[:200]})"
+            if tries < self.CHECKIN_TRIES:
+                status = "pending"
+                nxt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=random.uniform(3, 6))
+                note += f"; trying again at {nxt.astimezone():%H:%M}"
+            else:
+                note += f", {tries} times. Check in yourself."
+        finally:
+            self.seat_busy.discard(uid)
+        with db.tx() as con:
+            con.execute("UPDATE checkin_jobs SET status=?, note=?, tries=?, next_at=?, updated=? WHERE id=?",
+                        (status, note, tries, nxt.isoformat(timespec="seconds") if nxt else None, db.now(), job["id"]))
+        applog.log(f"{w['name']}: check-in ({leg}): {note}", "info" if status != "failed" else "warn",
+                   user_id=uid, source="checkin")
+        if user["email"] and status != "pending":
+            url = checkin.checkin_url(w["booking_conf"], w["booking_first"], w["booking_last"])
+            subject = "SWA checked in" if status == "done" else "SWA check-in needs you"
+            mailer.send(user["email"], f"{subject}: {w['name']} ({leg})",
+                        mailer.render_checkin(f"{w['name']}: {leg} flight", positions, seat_list, note,
+                                              status == "done", url))
+        return status, positions, note
+
     def _seat_loop(self):
         while True:
             try:
+                for job in self.due_checkin_jobs():
+                    if job["user_id"] in self.seat_busy:
+                        continue          # that user's browser is on a seat map: next tick
+                    with db.tx() as con:
+                        if con.execute("UPDATE checkin_jobs SET status='running', updated=? WHERE id=? "
+                                       "AND status='pending'", (db.now(), job["id"])).rowcount != 1:
+                            continue
+                    self.seat_busy.add(job["user_id"])
+                    threading.Thread(target=self.run_checkin_job, args=(dict(job),), name="swa-checkin",
+                                     daemon=True).start()
                 for job in self.due_seat_jobs():
+                    if job["user_id"] in self.seat_busy:
+                        continue
                     with db.tx() as con:   # claim it
                         if con.execute("UPDATE seat_jobs SET status='running', updated=? WHERE id=? "
                                        "AND status=?", (db.now(), job["id"], job["status"])).rowcount != 1:
@@ -839,7 +918,7 @@ class Worker:
                             (out["from"], out["to"], "roundtrip" if len(legs) > 1 else "oneway", json.dumps(booked),
                              out["date"], next((x["date"] for x in legs if x["leg"] == "ret"), None),
                              f"Booking read: {len(legs)} flight(s)", watch_id))
-            db.sync_seat_jobs(watch_id)
+            db.sync_jobs(watch_id)
             applog.info(f"{w['name']}: read the booking: " + "; ".join(
                 f"{x['from']}→{x['to']} {x['date']} {x['time']}" for x in legs), user_id=uid, source="seats")
         else:

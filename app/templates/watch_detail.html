@@ -15,6 +15,17 @@
   </div>
 </div>
 
+{% if checkin_jobs %}
+<section class="card seat-jobs">
+  <h2>Automatic check-in</h2>
+  <ul class="plain">{% for j in checkin_jobs %}
+    <li><b>{{ j.leg_label }}</b>: check-in opens {{ j.opens_local }}
+      <span class="pill {{ 'good' if j.status == 'done' else 'bad' if j.status == 'failed' else '' }}">{{
+        {"pending": "scheduled", "running": "checking in", "done": "checked in", "failed": "needs you"}[j.status] }}</span>
+      {% if j.note %}<span class="muted small">{{ j.note }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% if kind == 'seats' %}{% set sp = seat_prefs(w) %}
 <div class="stats">
   <div class="stat"><span class="label">Booking</span><span class="value small">Conf. {{ w.booking_conf }} · {{ w.booking_first }} {{ w.booking_last }}</span></div>

@@ -559,6 +559,10 @@ def create_app(worker=None, start_worker=True):
                 b["cash"], b["points"] = num(f"{leg}_cash", 1, 100_000), num(f"{leg}_points", 1, 10_000_000)
                 if b["cash"] is None and b["points"] is None:
                     errs.append(f"Enter what you paid per person for the {label} flight (cash or points).")
+                t = str(f.get(f"{leg}_time", "")).strip()
+                b["time"] = t if re.fullmatch(r"\d{2}:\d{2}", t) else None
+                if f.get("checkin_auto") and not b["time"]:
+                    errs.append(f"Enter the {label} flight's departure time to check in automatically.")
             else:
                 b["time"] = str(f.get(f"{leg}_time", "")).strip()
                 if not re.fullmatch(r"\d{2}:\d{2}", b["time"]):
@@ -569,6 +573,15 @@ def create_app(worker=None, start_worker=True):
         w["booked"] = json.dumps(booked) if booked else None
         w["dates"] = ",".join(b["date"] for b in booked if b["leg"] == "out") or None
         w["ret_dates"] = ",".join(b["date"] for b in booked if b["leg"] == "ret") or None
+        w["checkin_auto"] = 1 if f.get("checkin_auto") else 0
+        if kind == "rebook":
+            conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
+            w.update(booking_conf=conf or None,
+                     booking_first=str(f.get("booking_first", "")).strip()[:30] or None,
+                     booking_last=str(f.get("booking_last", "")).strip()[:30] or None)
+            if w["checkin_auto"] and not (len(conf) == 6 and w["booking_first"] and w["booking_last"]):
+                errs.append("To check in automatically, enter the 6-character confirmation number and the first "
+                            "and last name as booked.")
         if kind == "seats":
             conf = re.sub(r"[^A-Za-z0-9]", "", str(f.get("booking_conf", ""))).upper()
             w.update(seat_auto=1, booking_conf=conf or None,
@@ -680,7 +693,7 @@ def create_app(worker=None, start_worker=True):
         if kind not in FORMS:
             return render(request, "watch_kind.html", u, s)
         w = {"kind": kind, "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
-             "seat_auto": 0, "seat_status": "none", "seat_prefs": None,"name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
+             "seat_auto": 0, "seat_status": "none", "seat_prefs": None, "checkin_auto": 0, "name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
              "date_from": None, "date_to": None,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,
@@ -703,7 +716,7 @@ def create_app(worker=None, start_worker=True):
             wid = con.execute(
                 f"INSERT INTO watches(user_id, created_at, {', '.join(cols)}) VALUES (?,?,{','.join('?' * len(cols))})",
                 (u["id"], db.now(), *w.values())).lastrowid
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+created")
 
@@ -715,6 +728,14 @@ def create_app(worker=None, start_worker=True):
             out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}",
                         "next_local": f"{nxt:%a %b %-d, %H:%M}" if nxt else "",
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
+        return out
+
+    def _checkin_jobs(wid):
+        out = []
+        for j in db.query("SELECT * FROM checkin_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
+            opens = dt.datetime.fromisoformat(j["opens_at"]).astimezone()
+            out.append({**dict(j), "leg_label": "Return" if j["leg"] == "ret" else "Outbound",
+                        "opens_local": f"{opens:%a %b %-d, %H:%M}"})
         return out
 
     def _next_check(w, u, jobs):
@@ -799,7 +820,7 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history, seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
+                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
@@ -829,7 +850,7 @@ def create_app(worker=None, start_worker=True):
         with db.tx() as con:
             con.execute(f"UPDATE watches SET {', '.join(f'{k}=?' for k in w)} WHERE id=? AND user_id=?",
                         (*w.values(), wid, u["id"]))
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         _maybe_lookup(wid, w)
         raise Redirect(f"/watches/{wid}?ok=Watch+saved")
 
@@ -844,7 +865,7 @@ def create_app(worker=None, start_worker=True):
                 raise Redirect("/?err=" + quote_plus(err))
         with db.tx() as con:
             con.execute("UPDATE watches SET active=? WHERE id=?", (0 if w["active"] else 1, wid))
-        db.sync_seat_jobs(wid)
+        db.sync_jobs(wid)
         raise Redirect("/?ok=" + ("Watch+paused" if w["active"] else "Watch+resumed"))
 
     @app.post("/watches/{wid}/delete")
