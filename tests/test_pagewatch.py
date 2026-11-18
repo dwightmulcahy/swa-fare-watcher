@@ -53,10 +53,25 @@ def test_structure_change_is_a_heads_up_after_a_baseline(sent_with_files, tmp_pa
     page = FakePage(structure=["form|lookup", "input|conf", "input|first"])
     b = FakeBrowser(page, tmp_path)
     assert pagewatch.check_structure(b, "lookup") is None and not sent_with_files   # first visit: baseline
+    page.structure = ["form|lookup", "input|first"]                                 # once: not yet
+    assert pagewatch.check_structure(b, "lookup") is None and not sent_with_files
+    page.structure = ["form|lookup", "input|conf", "input|first"]                   # back: it was a blip
     assert pagewatch.check_structure(b, "lookup") is None
     page.structure = ["form|lookup", "input|confirmation", "input|first"]
-    gone, new = pagewatch.check_structure(b, "lookup")
+    assert pagewatch.check_structure(b, "lookup") is None and not sent_with_files
+    gone, new = pagewatch.check_structure(b, "lookup")                               # twice in a row
     assert gone == ["input|conf"] and new == ["input|confirmation"] and "structure changed" in sent_with_files[-1][1]
+    assert pagewatch.check_structure(b, "lookup") is None                            # the new normal
+
+
+def test_controls_that_only_appear_are_logged_not_emailed(sent_with_files, tmp_path):
+    _admin()
+    page = FakePage(structure=["form|lookup"])
+    b = FakeBrowser(page, tmp_path)
+    pagewatch.check_structure(b, "lookup")
+    page.structure = ["form|lookup", "div|dialog"]
+    pagewatch.check_structure(b, "lookup")
+    assert pagewatch.check_structure(b, "lookup") == ([], ["div|dialog"]) and not sent_with_files
 
 
 def test_flow_failures_group_by_kind_not_by_seat(sent_with_files, tmp_path):
