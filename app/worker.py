@@ -221,6 +221,20 @@ def mark_hot(con, hits, now=None):
                             (until, h["watch_id"], leg, d))
 
 
+def _seats_now(report, changes):
+    """Per passenger after a check: the seat they have now (the one moved to, if it was changed and
+    confirmed), its score, and the best free seat that was on offer."""
+    out = []
+    for r in report:
+        moved = r.get("picked") and changes
+        seat = next((o for o in r.get("options") or [] if o["seat"] == r["picked"]), None) if moved else r.get("current")
+        others = [o for o in r.get("options") or [] if not seat or o["seat"] != seat["seat"]]
+        out.append({"passenger": r.get("passenger") or "", "flight": r.get("flight") or "",
+                    "seat": seat, "best": others[0] if others else None,
+                    "checked": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
+    return out
+
+
 def _seat_fit(r):
     """A seat report entry's fit after this visit: the seat it moved to, else the one kept."""
     if r.get("picked"):
@@ -920,9 +934,9 @@ class Worker:
                 text = f"Your current seat stayed the best free match. {text}"
         with db.tx() as con:
             con.execute("UPDATE seat_jobs SET status=?, note=?, updated=?, next_at=?, visits=visits+1, fails=?, "
-                        "log=? WHERE id=?",
+                        "log=?, seats_now=COALESCE(?, seats_now) WHERE id=?",
                         (status, text, db.now(), nxt.isoformat(timespec="seconds") if nxt else None, fails,
-                         json.dumps(log), job["id"]))
+                         json.dumps(log), json.dumps(_seats_now(report, changes)) if report else None, job["id"]))
         applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, source="seats")
         if user["email"] and (changes or not nxt):
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])

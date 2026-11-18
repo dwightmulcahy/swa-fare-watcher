@@ -676,7 +676,10 @@ def create_app(worker=None, start_worker=True):
                 if j:
                     when = (f"next {_next_check(w, u, jobs)[0]}" if j["status"] in ("pending", "watching")
                             else j["opens_local"])
-                    seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {when}"}
+                    now_seat = next((p["seat"] for jj in jobs for p in jj["seats_now"] if p.get("seat")), None)
+                    seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {when}",
+                                          "seat": f"{now_seat['seat']} · score {round(now_seat['score'])}"
+                                          if now_seat else ""}
         return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),
@@ -729,7 +732,13 @@ def create_app(worker=None, start_worker=True):
         for j in db.query("SELECT * FROM seat_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
             opens = dt.datetime.fromisoformat(j["opens_at"]).astimezone()
             nxt = dt.datetime.fromisoformat(j["next_at"]).astimezone() if j["next_at"] else None
-            out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}",
+            try:
+                now_seats = json.loads(j["seats_now"] or "[]")
+            except ValueError:
+                now_seats = []
+            for p in now_seats:
+                p["checked_local"] = f"{dt.datetime.fromisoformat(p['checked']).astimezone():%a %b %-d, %H:%M}"
+            out.append({**dict(j), "opens_local": f"{opens:%a %b %-d, %H:%M}", "seats_now": now_seats,
                         "next_local": f"{nxt:%a %b %-d, %H:%M}" if nxt else "",
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
         return out
