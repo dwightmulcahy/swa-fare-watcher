@@ -9,6 +9,29 @@ from . import swa
 from .config import settings
 
 
+def check_login():
+    """Sign in to the SMTP server without sending: (ok, message)."""
+    password = (settings.gmail_password or "").replace(" ", "")
+    errors = []
+    for port in _ports():
+        try:
+            conn = (smtplib.SMTP_SSL(settings.gmail_host, 465, timeout=15) if port == 465 else
+                    smtplib.SMTP(settings.gmail_host, port, timeout=15))
+            with conn as s:
+                if port != 465:
+                    s.ehlo()
+                    s.starttls()
+                    s.ehlo()
+                s.login(settings.gmail_user, password)
+            return True, f"signed in to {settings.gmail_host}:{port} as {settings.gmail_user}"
+        except smtplib.SMTPAuthenticationError as e:
+            return False, (f"Gmail rejected the login ({e.smtp_code}): GMAIL_APP_PASSWORD must be a 16-letter app "
+                           "password for GMAIL_USER")
+        except Exception as e:
+            errors.append(f"port {port}: {e.__class__.__name__}")
+    return False, f"can't reach {settings.gmail_host} ({'; '.join(errors)}): outgoing mail blocked?"
+
+
 def send(to, subject, body_html, attachments=()) -> bool:
     """Email `body_html`, with optional file attachments (paths)."""
     if not to:

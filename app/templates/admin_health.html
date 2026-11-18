@@ -5,6 +5,16 @@
 <div class="head"><div><h1>Site health</h1>
   <p class="muted">How Southwest treated each account over the last 14 days. Block rate = blocks and challenge pages per 100 page visits (searches + seat checks); anything above 0 is worth a look in the Log.</p></div></div>
 {% if paused %}<p class="flash err">{% for p in paused %}<b>{{ p.username }}</b>: scheduled runs paused until {{ p.blocked_until|when }} ({{ p.blocked_reason }}){% if not loop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+{% if checks %}
+<section class="card">
+  <h2>Start-up check</h2>
+  <table class="list compact"><tbody>{% for name, ok, msg in checks %}
+    <tr><td>{% if ok is sameas false %}<span class="pill bad">✗</span>{% elif ok %}<span class="pill good">✓</span>{% else %}<span class="pill">i</span>{% endif %}</td>
+      <td><b>{{ name }}</b></td><td class="small">{{ msg }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p class="muted small">Run when the app starts; also in the Log (source "startup").</p>
+</section>
+{% endif %}
 <div class="stats">
   <div class="stat"><span class="label">Page visits</span><span class="value">{{ tot.searches + tot.seat_visit }}</span><span class="muted small">{{ tot.searches }} searches · {{ tot.seat_visit }} seat checks</span></div>
   <div class="stat"><span class="label">Blocks / challenges</span><span class="value">{{ tot.block }} / {{ tot.challenge }}</span><span class="muted small">block rate {{ tot.rate }}%</span></div>
