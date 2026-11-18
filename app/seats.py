@@ -236,6 +236,44 @@ def international(origin, dest):
     return not all(c in DOMESTIC for c in countries)
 
 
+# ---------- example seat maps for the preference heat map (the watch form) ----------
+# Rows 1-16 follow a real Southwest 737-800 map (types, exit rows 14-15, windows without a view);
+# the rest is Standard. The MAX 8 variant has exit rows 14 and 16 with no window seats in row 15,
+# so its exit-row windows have no seat in front. Your plane may differ: these show the idea.
+_EXTRA_ROWS, _PREF_ROWS, _NO_VIEW = {1, 2, 3, 14, 15}, set(range(4, 14)) | {16}, {10, 11, 12}
+
+
+def _example(rows, exits, skip=()):
+    out = []
+    for r in range(1, rows + 1):
+        for c in "ABCDEF":
+            if (r == 1 and c in "ABC") or f"{r}{c}" in skip:
+                continue
+            f = {"window" if c in "AF" else "aisle" if c in "CD" else "middle"}
+            if r in exits:
+                f.add("exit row")
+            if r == 1:
+                f.add("bulkhead seat")
+            if c in "AF" and r in _NO_VIEW:
+                f.add("window without window view")
+            kind = "extra" if r in _EXTRA_ROWS or r in exits else "preferred" if r in _PREF_ROWS else "standard"
+            out.append({"seat": f"{r}{c}", "row": r, "col": c, "type": kind, "features": f,
+                        "price": 0, "available": True, "selected": False})
+    return annotate(out)
+
+
+def example_maps():
+    """{name: [seat, ...]} with features as sorted lists (JSON for the form's heat map)."""
+    maps = {"Boeing 737-800": _example(29, {14, 15}),
+            "Boeing 737 MAX 8": _example(29, {14, 16}, skip={"15A", "15F"})}
+    return {k: [{**s, "features": sorted(s["features"])} for s in v] for k, v in maps.items()}
+
+
+def status_table():
+    """{status: {"booking": [...], "window": [...]}} free seat types, for the heat map."""
+    return {k: {"booking": sorted(b), "window": sorted(b | w)} for k, (_, b, w) in STATUSES.items()}
+
+
 def opens_at(date, time, origin, hours=OPEN_HOURS):
     """When seat selection opens (UTC) for a flight leaving `origin` at local `date` `time`
     (or, with `hours`, that long before departure)."""

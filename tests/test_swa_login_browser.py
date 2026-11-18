@@ -577,3 +577,35 @@ def test_checkin_retries_while_too_early_then_reads_the_boarding_group(site, mon
         assert b.page.evaluate("localStorage.getItem('checkedIn')") == "1"
         assert b.page.evaluate("localStorage.getItem('paid')") is None          # never buys EarlyBird
     assert len(sleeps) == 1 and got == (["Group 3"], ["14A"])
+
+
+def test_seat_heat_map_matches_the_server_scoring_and_follows_the_ranks(client):
+    from playwright.sync_api import sync_playwright
+
+    from app import seats
+    from tests.test_web import admin_client
+    admin_client(client)
+    html = client.get("/watches/new?kind=seats").text
+    with sync_playwright() as p:
+        kw = {"channel": "chrome"} if shutil.which("google-chrome") or shutil.which("google-chrome-stable") else {}
+        b = p.chromium.launch(**kw)
+        pg = b.new_page()
+        pg.set_content(html)
+
+        def fits():
+            return {e["seat"]: float(e["fit"]) for e in pg.eval_on_selector_all(
+                ".heat-seat", "els => els.map(e => ({seat: e.dataset.seat, fit: e.dataset.fit}))")}
+        maps = seats.example_maps()
+        plane = maps["Boeing 737-800"]
+        default = seats.prefs_of({"seat_prefs": None})
+        got = fits()
+        assert len(got) == len(plane)
+        for s in plane:
+            assert abs(got[s["seat"]] - seats.fit({**s, "features": set(s["features"])}, default)) < 0.01, s["seat"]
+        pg.select_option("[name=rank_extra_legroom]", "")                 # change a rank: map redraws
+        pg.select_option("[name=rank_open_front]", "1")
+        pg.select_option("#heat-plane", "Boeing 737 MAX 8")
+        after = fits()
+        best = pg.eval_on_selector_all(".heat-best", "els => els.map(e => e.dataset.seat)")
+        assert after["16A"] > after["14A"] and set(best) <= {"16A", "16F"} and best
+        b.close()
