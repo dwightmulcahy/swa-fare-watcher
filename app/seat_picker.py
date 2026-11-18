@@ -38,10 +38,9 @@ PASSENGER = '[role=radio][aria-label*="Seat:"]'
 FLIGHT_TAB = '[role=tab][aria-label^="Flight "]'
 SEATS_TOTAL = '[aria-label="Seat pricing summary"]'
 CONTINUE = 'button:has-text("Continue to payment")'
-# The seat details panel's Select, and Ok on its "Please Note! ... no refunds ..." notice: matched
-# by role or exact text, since they needn't be <button>s
-SELECT = ':is(button, a, [role=button]):text-is("Select"):visible'
-NOTE = ':is([role=dialog], [role=alertdialog], [aria-modal=true], div):has-text("no refunds"):visible'
+# The bottom bar's Select and the "Please Note! ... no refunds ..." notice's Ok are <button
+# aria-label=""> with the word in nested <span>s, which :text-is() doesn't match: find them by
+# role and accessible name (from the content) instead.
 NOTE_OK = ':is(button, a, [role=button], input[type=button], span, div):text-is("Ok"):visible'
 CONFIRM = "#confirmSeatChange"
 
@@ -175,6 +174,14 @@ class SeatPicker:
         loc = self.page.locator(NOTE_OK)
         return loc.last if loc.count() else None
 
+    def _select(self):
+        """The bottom bar's enabled Select button, or None."""
+        btn = self.page.get_by_role("button", name=re.compile(r"^\s*select\s*$", re.I))
+        for b in reversed(btn.all()):
+            if b.is_visible() and b.get_attribute("aria-disabled") != "true" and b.is_enabled():
+                return b
+        return None
+
     def confirm_seat(self, pi, code, timeout=15):
         """A seat click opens its details panel: press Select, then Ok on the "no refunds if you
         paid for your original seat" notice, until the passenger shows the seat. Never presses
@@ -196,13 +203,13 @@ class SeatPicker:
                 self.b._beat(1.0, 1.8)
             elif re.search(r"no refunds", self.page.inner_text("body"), re.I):
                 raise RuntimeError(f"seat {code}: the 'no refunds' notice has no Ok button I can find")
-            elif self.page.locator(SELECT).count():
+            elif (select := self._select()) is not None:
                 total = self.page.locator(SEATS_TOTAL)
                 text = total.first.inner_text(timeout=5_000) if total.count() else self.page.inner_text("body")
                 m = re.search(r"Seats total:\s*\$\s*([\d,]+(?:\.\d+)?)", text)
                 if m and money(m.group(1)) != 0:
                     raise NotFree(f"seat {code} would cost ${m.group(1)}")
-                self.b._click(self.page.locator(SELECT).last)
+                self.b._click(select)
                 self.b._beat(0.8, 1.4)
             else:
                 self.b._beat(0.5, 1.0)
