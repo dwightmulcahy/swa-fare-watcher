@@ -106,6 +106,10 @@ def create_app(worker=None, start_worker=True):
         applog.install_python_logging()
         bootstrap_admin()
         if start_worker:
+            import threading
+
+            from . import startup
+            threading.Thread(target=startup.run, name="swa-startup-check", daemon=True).start()
             worker.start(scheduler=settings.scheduler)
         yield
 
@@ -1079,8 +1083,9 @@ def create_app(worker=None, start_worker=True):
         tot["rate"] = round(100 * (tot["block"] + tot["challenge"]) / visits, 1) if visits else 0.0
         paused = db.query("SELECT username, blocked_until, blocked_reason FROM users WHERE blocked_until > ?",
                           (db.now(),))
+        from . import startup
         return render(request, "admin_health.html", u, s, rows=rows, tot=tot, events=db.SITE_EVENTS,
-                      paused=paused)
+                      paused=paused, checks=startup.last)
 
     # ---------- admin: settings (.env) ----------
     def _env_view():
