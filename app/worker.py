@@ -892,6 +892,7 @@ class Worker:
                     changes, note = picker.run(until, sleep=self.sleep)
                 finally:
                     report = getattr(picker, "report", []) or []
+                    db.save_seat_maps(w["id"], list((getattr(picker, "maps", None) or {}).values()))
             fails = 0
         except seat_picker.NotFree as e:
             stop = f"Stopped before paying anything: {e}. Your seat wasn't changed."
@@ -975,6 +976,14 @@ class Worker:
                 browser.warm_up()
                 picker.open_reservation()
                 legs = seat_picker.parse_trip(picker.page.inner_text("body"))
+                if legs:
+                    try:            # the plane and its seat map, for the form's heat map
+                        db.save_seat_maps(watch_id, picker.capture_maps())
+                    except swa.Blocked:
+                        raise
+                    except Exception as e:
+                        applog.info(f"{w['name']}: couldn't read the seat map yet ({e.__class__.__name__})",
+                                    user_id=uid, source="seats")
         except swa.Blocked as e:
             db.bump_block(uid, e)
             status = f"Southwest blocked the lookup ({e}); enter the flights by hand"

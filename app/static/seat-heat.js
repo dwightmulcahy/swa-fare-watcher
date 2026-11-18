@@ -87,7 +87,8 @@
     const status = (form.querySelector("[name=seat_status]") || {}).value || "none";
     const free = new Set(D.status[status][win.checked ? "window" : "booking"]);
     const scored = seats.map((s) => { const [pr, cat] = priority(s, p); return {...s, pr, cat, fit: fit(pr), free: free.has(s.type)}; });
-    const eligible = scored.filter((s) => s.free && (s.pr !== null || p.fallback)).sort((x, y) => cmp(key(x, p), key(y, p)));
+    const eligible = scored.filter((s) => s.free && s.available !== false && (s.pr !== null || p.fallback))
+      .sort((x, y) => cmp(key(x, p), key(y, p)));
     const pick = eligible.length ? eligible[0].seat : null;
     const rows = Math.max(...seats.map((s) => s.row));
     grid.textContent = "";
@@ -103,6 +104,7 @@
         const s = scored.find((x) => x.row === r && x.col === c);
         if (!s) { el.className = "heat-gap"; return el; }
         el.className = "heat-seat" + (s.pr === null ? " heat-offcat" : "") + (s.free ? "" : " heat-locked") +
+          (s.available === false && !s.selected ? " heat-taken" : "") + (s.selected ? " heat-mine" : "") +
           (s.seat === pick ? " heat-best" : "");
         if (s.pr !== null) el.style.backgroundColor = colour(s.fit); else el.dataset.off = "1";
         el.tabIndex = 0;
@@ -113,7 +115,9 @@
         el.dataset.desc = `${kind}, ${s.features.filter((f) => f !== "window without window view" && f !== "limited recline").join(", ")}` +
           (s.features.includes("window without window view") ? ", no window view" : "") +
           (s.features.includes("limited recline") ? ", little or no recline" : "") +
-          (s.free ? "" : " · not free for your status at this time") + (s.seat === pick ? " · the seat it would pick" : "");
+          (s.free ? "" : " · not free for your status at this time") +
+          (s.selected ? " · your seat" : s.available === false ? " · taken" : "") +
+          (s.seat === pick ? " · the seat it would pick" : "");
         el.setAttribute("aria-label", `Seat ${s.seat}: ${el.dataset.label}`);
         return el;
       }));

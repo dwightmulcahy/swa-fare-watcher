@@ -253,6 +253,7 @@ MIGRATIONS = {
         "seat_status": "TEXT",                   # seats.STATUSES key
         "seat_prefs": "TEXT",                    # JSON, see seats.DEFAULT_PREFS
         "checkin_auto": "INTEGER NOT NULL DEFAULT 0",   # check in automatically 24 h before each flight
+        "seat_maps": "TEXT",                     # JSON [{flight, plane, read, seats}] last seen on the seat map
     },
     "seat_jobs": {
         "next_at": "TEXT",                       # UTC ISO: next check while watching for a better seat
@@ -310,6 +311,22 @@ def _split_booked(con):
         con.execute("UPDATE watches SET booked=NULL WHERE id=?", (w["id"],))
     con.execute("INSERT OR REPLACE INTO app_state VALUES ('kinds_split', '1')")
     con.commit()
+
+
+def save_seat_maps(watch_id, maps):
+    """Merge freshly read seat maps (by flight) into the watch's."""
+    import json
+    if not maps:
+        return
+    w = one("SELECT seat_maps FROM watches WHERE id=?", (watch_id,))
+    try:
+        have = {m["flight"]: m for m in json.loads((w["seat_maps"] if w else None) or "[]")}
+    except (ValueError, TypeError, KeyError):
+        have = {}
+    for m in maps:
+        have[m["flight"]] = {**m, "read": now()}
+    with tx() as con:
+        con.execute("UPDATE watches SET seat_maps=? WHERE id=?", (json.dumps(list(have.values())), watch_id))
 
 
 def sync_jobs(watch_id, now=None):

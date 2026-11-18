@@ -81,7 +81,7 @@
     <div class="seat-heat" id="seat-heat">
       <div class="seat-heat-head">
         <span class="label">How seats rank with these priorities</span>
-        <select id="heat-plane" aria-label="Example plane">{% for name in seats.example_maps() %}
+        <select id="heat-plane" aria-label="Seat map">{% set hmaps = seats.heat_maps(w if w.id else none) %}{% for name in hmaps %}
           <option>{{ name }}</option>{% endfor %}</select>
         <label class="check small"><input type="checkbox" id="heat-window" checked> within 48 h of departure</label>
       </div>
@@ -90,10 +90,10 @@
         <div class="heat-tip" id="heat-tip" role="tooltip" hidden></div>
       </div>
       <div class="heat-legend" aria-hidden="true"><span>Priority {{ seats.MAX_PRIORITY }}</span><span class="heat-scale"></span><span>Priority 1</span><span class="heat-off"></span><span>Off</span></div>
-      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. Layouts of Southwest's planes (737-700 and -800 approximate); the real seat map is what counts.</p>
+      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. "Your flight" maps are this booking's real seat map as last seen (faded = taken, ringed = your seat); the others are Southwest's plane layouts (737-700 and -800 approximate).</p>
     </div>
   </fieldset>
-  <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
+  <script type="application/json" id="heat-data">{{ {"maps": seats.heat_maps(w if w.id else none), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
   <script src="{{ asset('seat-prio.js') }}" defer></script>
   <script src="{{ asset('seat-heat.js') }}" defer></script>
   {% set active_label = "Active" %}{% include "_watch_foot.html" %}

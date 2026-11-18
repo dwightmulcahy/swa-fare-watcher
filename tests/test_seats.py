@@ -349,17 +349,26 @@ def test_lookup_booking_fills_the_watch_and_plans_seats(client, worker):
         def __exit__(self, *a): pass
         def warm_up(self): pass
     import app.seat_picker as sp
-    real = sp.SeatPicker.open_reservation
+    real, real_cap = sp.SeatPicker.open_reservation, sp.SeatPicker.capture_maps
     sp.SeatPicker.open_reservation = lambda self: None
+    sp.SeatPicker.capture_maps = lambda self: [{"flight": "Flight 1 of 2 LIR to HOU", "plane": "Boeing 737 MAX 8",
+                                                "seats": seats.example_maps()["Boeing 737 MAX 8"][:12]}]
     try:
         legs = Worker.lookup_booking(worker, wid, browser_factory=Browser)
     finally:
-        sp.SeatPicker.open_reservation = real
+        sp.SeatPicker.open_reservation, sp.SeatPicker.capture_maps = real, real_cap
     assert [x["leg"] for x in legs] == ["out", "ret"]
     w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
     assert (w["origin"], w["destination"], w["trip_type"]) == ("LIR", "HOU", "roundtrip")
     assert len(db.query("SELECT * FROM seat_jobs WHERE watch_id=?", (wid,))) == 2
     assert w["last_status"] == "Booking read: 2 flight(s)"
+    maps = json.loads(w["seat_maps"])                                   # the plane, read at creation
+    assert maps[0]["plane"] == "Boeing 737 MAX 8" and maps[0]["read"] and len(maps[0]["seats"]) == 12
+    edit = client.get(f"/watches/{wid}/edit").text
+    assert "Your flight: Flight 1 of 2 LIR to HOU · Boeing 737 MAX 8" in edit
+    db.save_seat_maps(wid, [{"flight": "Flight 1 of 2 LIR to HOU", "plane": "Boeing 737-800", "seats": []}])
+    assert [m["plane"] for m in json.loads(db.one("SELECT seat_maps FROM watches WHERE id=?", (wid,))["seat_maps"])] \
+        == ["Boeing 737-800"]                                             # merged by flight: the newer one
 
 
 def test_manage_link_prefills_the_lookup():
