@@ -9,11 +9,12 @@
 <button type="button" id="go">Continue to payment</button>
 <!-- clicking a seat opens its details with a Select button (as on southwest.com); Select then
      shows the "Please Note!" no-refund notice, and its Ok assigns the seat -->
-<section id="details" hidden><h2 id="dtitle"></h2><button type="button" id="dclose" aria-label="Close">X</button>
-  <button type="button" id="select">Select</button></section>
+<section id="details" hidden><h2 id="dtitle"></h2><button type="button" id="dclose" aria-label="Close">X</button></section>
+<!-- the bottom bar's Select (stays visible behind the notice, as on southwest.com) -->
+<div id="bar" hidden><button type="button" id="select">Select</button></div>
 <div id="note" role="dialog" hidden><h2>Please Note!</h2>
   <p>You may select this seat, but no refunds will be given if you paid for your original seat.</p>
-  <button type="button" id="ok">Ok</button></div>
+  <div class="button-primary" id="ok" tabindex="0"><span>Ok</span></div></div>
 <script>
 const loads = Number(sessionStorage.getItem("seatLoads") || 0) + 1;
 sessionStorage.setItem("seatLoads", loads);
@@ -21,8 +22,9 @@ const price = loads >= 2 ? 0 : 39;
 let current = localStorage.getItem("seat") || "11F", chosen = current, pending = null;
 document.getElementById("select").onclick = () => { document.getElementById("details").hidden = true;
   document.getElementById("note").hidden = false; };
+document.getElementById("ok").onkeydown = (e) => { if (e.key === "Enter") document.getElementById("ok").click(); };
 document.getElementById("ok").onclick = () => { document.getElementById("note").hidden = true;
-  chosen = pending; setPax();
+  document.getElementById("bar").hidden = true; chosen = pending; setPax();
   document.getElementById("total").textContent = `Seats total: $${chosen === current ? 0 : price}`; };
 const pax = document.createElement("button");
 pax.setAttribute("role", "radio"); pax.setAttribute("aria-checked", "true");
@@ -40,7 +42,7 @@ fetch("../labels.txt").then((r) => r.text()).then((text) => {
     b.setAttribute("aria-label", l); b.textContent = code;
     if (!free) b.disabled = true;
     b.onclick = () => { pending = code; document.getElementById("dtitle").textContent = `Seat ${code}`;
-      document.getElementById("details").hidden = false; };
+      document.getElementById("details").hidden = false; document.getElementById("bar").hidden = false; };
     map.append(b);
   });
 });

@@ -38,8 +38,11 @@ PASSENGER = '[role=radio][aria-label*="Seat:"]'
 FLIGHT_TAB = '[role=tab][aria-label^="Flight "]'
 SEATS_TOTAL = '[aria-label="Seat pricing summary"]'
 CONTINUE = 'button:has-text("Continue to payment")'
-SELECT = 'button:text-is("Select"):visible'          # in the seat details panel after a seat click
-NOTE_OK = 'button:text-is("Ok"):visible'             # "Please Note! ... no refunds ..." notice
+# The seat details panel's Select, and Ok on its "Please Note! ... no refunds ..." notice: matched
+# by role or exact text, since they needn't be <button>s
+SELECT = ':is(button, a, [role=button]):text-is("Select"):visible'
+NOTE = ':is([role=dialog], [role=alertdialog], [aria-modal=true], div):has-text("no refunds"):visible'
+NOTE_OK = ':is(button, a, [role=button], input[type=button], span, div):text-is("Ok"):visible'
 CONFIRM = "#confirmSeatChange"
 
 
@@ -162,30 +165,48 @@ class SeatPicker:
         if money(total) != 0:
             raise NotFree(f"the seat map's total is {total.strip()}")
 
+    def _note_ok(self):
+        """The Ok of the no-refund notice if it's showing (innermost match), else None."""
+        if not re.search(r"no refunds", self.page.inner_text("body"), re.I):
+            return None
+        btn = self.page.get_by_role("button", name=re.compile(r"^\s*ok\s*$", re.I))
+        if btn.count():
+            return btn.last
+        loc = self.page.locator(NOTE_OK)
+        return loc.last if loc.count() else None
+
     def confirm_seat(self, pi, code, timeout=15):
         """A seat click opens its details panel: press Select, then Ok on the "no refunds if you
         paid for your original seat" notice, until the passenger shows the seat. Never presses
-        Select while the bar's seats total isn't $0."""
+        Select while the bar's seats total isn't $0, and never again while the notice is up."""
         end = time.monotonic() + timeout
+        oks = 0
         while True:
             got = self.current_seat(self.passengers()[pi].get_attribute("aria-label"))
             if got == code:
                 return
-            note = self.page.locator(NOTE_OK)
-            select = self.page.locator(SELECT)
-            if note.count() and re.search(r"no refunds", self.page.inner_text("body"), re.I):
-                self.b._click(note.first)
-            elif select.count():
+            ok = self._note_ok()
+            if ok is not None:
+                oks += 1
+                if oks > 1 and self.page.keyboard:            # a click that didn't take: try the keyboard
+                    ok.focus()
+                    self.page.keyboard.press("Enter")
+                else:
+                    self.b._click(ok)
+                self.b._beat(1.0, 1.8)
+            elif re.search(r"no refunds", self.page.inner_text("body"), re.I):
+                raise RuntimeError(f"seat {code}: the 'no refunds' notice has no Ok button I can find")
+            elif self.page.locator(SELECT).count():
                 total = self.page.locator(SEATS_TOTAL)
                 text = total.first.inner_text(timeout=5_000) if total.count() else self.page.inner_text("body")
                 m = re.search(r"Seats total:\s*\$\s*([\d,]+(?:\.\d+)?)", text)
                 if m and money(m.group(1)) != 0:
                     raise NotFree(f"seat {code} would cost ${m.group(1)}")
-                self.b._click(select.first)
-            elif time.monotonic() > end:
-                raise RuntimeError(f"seat {code} didn't stick (shows {got})")
-            self.b._beat(0.6, 1.2)
-            if time.monotonic() > end + 10:
+                self.b._click(self.page.locator(SELECT).last)
+                self.b._beat(0.8, 1.4)
+            else:
+                self.b._beat(0.5, 1.0)
+            if time.monotonic() > end:
                 raise RuntimeError(f"seat {code} didn't stick (shows {got})")
 
     def checkout(self):
@@ -223,7 +244,23 @@ class SeatPicker:
         except Exception as e:
             if not getattr(e, "screenshot", None) and hasattr(self.b, "capture"):
                 e.screenshot = self.b.capture("seat-error")
+            self._save_page()
             raise
+
+    def _save_page(self):
+        """The page's HTML next to the screenshots (stays on this server), to see what a control
+        that couldn't be found really is."""
+        try:
+            import datetime as dt
+
+            from .config import settings
+            d = settings.debug_dir / "pages"
+            d.mkdir(parents=True, exist_ok=True)
+            p = d / f"{dt.datetime.now():%Y%m%d-%H%M%S}-seat-error.html"
+            p.write_text(self.page.content())
+            self.log(f"Seat map page saved for debugging: {p}", "warn")
+        except Exception:
+            pass
 
     def _run(self, until, poll, sleep, stop):
         self.b.warm_up()
