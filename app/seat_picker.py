@@ -57,6 +57,7 @@ class SeatPicker:
         self.window = window     # within 48 h of departure: the status's upgrade seats count too
         self.rng = browser.human.rng if browser.human else random
         self.report = []     # per flight and passenger: current seat and the best free seats, scored
+        self.plane = None    # e.g. "Boeing 737 MAX 8", read from the seat map
 
     def log(self, msg, level="info", **kw):
         getattr(applog, level)(msg, source="seats", user_id=self.uid, **kw)
@@ -88,6 +89,7 @@ class SeatPicker:
         self.page.locator(SEAT_BUTTON).first.wait_for(state="attached", timeout=45_000)
         self.b.check_blocked("seat map")
         self.b._beat(1.0, 2.5)
+        self.read_plane()
         pagewatch.check_elements(self.b, "seat map", {"seat buttons": SEAT_BUTTON, "passengers": PASSENGER,
                                                       "seats total": SEATS_TOTAL}, self.uid)
         pagewatch.check_structure(self.b, "seat map", self.uid)
@@ -96,12 +98,21 @@ class SeatPicker:
         self.page.reload(wait_until="domcontentloaded", timeout=60_000)
         self.page.locator(SEAT_BUTTON).first.wait_for(state="attached", timeout=45_000)
         self.b.check_blocked("seat map")
+        self.read_plane()
         self.b._beat(0.8, 2.0)
 
     # ----- reading the map
     def seat_map(self):
         labels = self.page.eval_on_selector_all(SEAT_BUTTON, "els => els.map(e => e.getAttribute('aria-label'))")
-        return seats.annotate([s for s in map(seats.parse_seat, labels) if s])
+        return seats.add_plane_facts(seats.annotate([s for s in map(seats.parse_seat, labels) if s]), self.plane)
+
+    def read_plane(self):
+        """The plane the seat map is for ('Boeing 737 MAX8 (subject to change)'), or None."""
+        try:
+            self.plane = seats.plane_name(self.page.inner_text("body"))
+        except Exception:
+            self.plane = None
+        return self.plane
 
     def passengers(self):
         return self.page.locator(PASSENGER).all()

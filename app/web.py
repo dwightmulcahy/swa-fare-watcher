@@ -616,6 +616,7 @@ def create_app(worker=None, start_worker=True):
         return seats.normalize({
             "position": str(f.get("seat_position", "window")), "priorities": pri,
             "tiebreak": [k for k in order if f.get(f"tb_{k}")],
+            "tiebreak_v2": True,
             "fallback": bool(f.get("seat_fallback")), "explain": bool(f.get("seat_explain"))})
 
     def _maybe_lookup(wid, w):

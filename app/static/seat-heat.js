@@ -12,13 +12,15 @@
     const f = new Set(s.features);
     const pos = ["window", "aisle", "middle"].find((x) => f.has(x)) || null;
     return {pos, exit: f.has("exit row"), extra: s.type === "extra", open: f.has("no seat in front"),
+            bulk: f.has("bulkhead seat"), recline: f.has("limited recline") ? false : null,
             view: pos !== "window" ? null : !f.has("window without window view")};
   };
   const matches = (a, cat) => {
-    const std = !a.extra && !a.exit;
+    const extra = a.extra && !a.bulk, std = !a.extra && !a.exit && !a.bulk;
     return {exit_window_open: a.exit && a.pos === "window" && a.open, exit_window: a.exit && a.pos === "window",
-            extra_window: a.extra && a.pos === "window", exit_aisle: a.exit && a.pos === "aisle",
-            extra_aisle: a.extra && a.pos === "aisle", std_window: std && a.pos === "window",
+            extra_window: extra && a.pos === "window", bulkhead_window: a.bulk && a.pos === "window",
+            exit_aisle: a.exit && a.pos === "aisle", extra_aisle: extra && a.pos === "aisle",
+            bulkhead_aisle: a.bulk && a.pos === "aisle", std_window: std && a.pos === "window",
             std_aisle: std && a.pos === "aisle", middle: a.pos === "middle"}[cat];
   };
   const prefs = () => {
@@ -39,7 +41,7 @@
     const a = attrs(s);
     return p.tie.map((k) => k === "position" ? ((p.pos !== "window" && p.pos !== "aisle") || a.pos === p.pos ? 0 : 1)
       : k === "legroom" ? (a.extra || a.open ? 0 : 1) : k === "forward" ? Math.floor((s.row - 1) / 10)
-      : k === "view" ? (a.view === false ? 1 : 0) : 0);
+      : k === "view" ? (a.view === false ? 1 : 0) : k === "recline" ? (a.recline === false ? 1 : 0) : 0);
   };
   const key = (s, p) => [priority(s, p)[0] ?? D.max + 1, ...tiebreak(s, p), s.row, s.col];
   const cmp = (x, y) => { for (let i = 0; i < x.length; i++) { if (x[i] < y[i]) return -1; if (x[i] > y[i]) return 1; } return 0; };
@@ -108,8 +110,9 @@
         el.dataset.label = s.pr === null ? (p.fallback ? "not in your priorities (fallback only)" : "not in your priorities")
           : `Priority ${s.pr} · ${D.categories[s.cat]}`;
         const kind = {extra: "Extra Legroom", preferred: "Preferred", standard: "Standard"}[s.type];
-        el.dataset.desc = `${kind}, ${s.features.filter((f) => f !== "window without window view").join(", ")}` +
+        el.dataset.desc = `${kind}, ${s.features.filter((f) => f !== "window without window view" && f !== "limited recline").join(", ")}` +
           (s.features.includes("window without window view") ? ", no window view" : "") +
+          (s.features.includes("limited recline") ? ", little or no recline" : "") +
           (s.free ? "" : " · not free for your status at this time") + (s.seat === pick ? " · the seat it would pick" : "");
         el.setAttribute("aria-label", `Seat ${s.seat}: ${el.dataset.label}`);
         return el;

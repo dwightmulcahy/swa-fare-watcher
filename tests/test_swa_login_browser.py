@@ -628,7 +628,9 @@ def test_seat_heat_map_matches_the_server_ranking_and_follows_the_priorities(cli
                 assert abs(got[s["seat"]]["fit"] - seats.fit(s, prefs)) < 0.06, s["seat"]
             pick = seats.choose([{**s, "features": set(s["features"])} for s in seats.example_maps()[plane]], prefs)
             assert pg.eval_on_selector_all(".heat-best", "els => els.map(e => e.dataset.seat)") == [pick["seat"]]
-        check(seats.normalize({}), "Boeing 737-800")
+        check(seats.normalize({}), "Boeing 737 MAX 8")
+        pg.select_option("#heat-plane", "Boeing 737-700")
+        check(seats.normalize({}), "Boeing 737-700")
         pg.select_option("[name=prio_extra_window]", "")                     # change priorities: map redraws
         pg.select_option("[name=prio_middle]", "")
         pg.select_option("#heat-plane", "Boeing 737 MAX 8")
@@ -656,16 +658,16 @@ def test_priorities_ui_reorders_restores_and_autosaves(client):
         order = lambda: pg.eval_on_selector_all("#prio-list > li", "els => els.map(e => e.dataset.key)")  # noqa: E731
         assert order() == list(seats.CATEGORIES)
         pg.click('#prio-list li[data-key="std_window"] [data-move="-1"]')          # ↑: renumbers in order
-        assert order().index("std_window") == 4
-        assert pg.input_value("[name=prio_std_window]") == "5" and pg.input_value("[name=prio_extra_aisle]") == "6"
+        assert order().index("std_window") == 6
+        assert pg.input_value("[name=prio_std_window]") == "7" and pg.input_value("[name=prio_bulkhead_aisle]") == "8"
         pg.select_option("[name=prio_middle]", "1")                                 # select: row moves up
         assert order().index("middle") <= 1
         expect(pg.locator("#prio-saved")).to_have_text("Saved")
         saved = seats.prefs_of(db.one("SELECT * FROM watches WHERE id=?", (wid,)))
-        assert saved["priorities"]["middle"] == 1 and saved["priorities"]["std_window"] == 5
+        assert saved["priorities"]["middle"] == 1 and saved["priorities"]["std_window"] == 7
         assert any(x.endswith("/seat-prefs") for x in posts)
         pg.click("#prio-defaults")
-        assert order() == list(seats.CATEGORIES) and pg.input_value("[name=prio_middle]") == "8"
+        assert order() == list(seats.CATEGORIES) and pg.input_value("[name=prio_middle]") == "10"
         expect(pg.locator("#prio-saved")).to_have_text("Saved")
         assert seats.prefs_of(db.one("SELECT * FROM watches WHERE id=?", (wid,)))["priorities"] == seats.DEFAULT_PRIORITIES
         assert not errors, errors

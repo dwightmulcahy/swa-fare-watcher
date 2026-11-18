@@ -21,8 +21,10 @@ EXAMPLES = {
     "exit_window_open": seat("16A", "standard", "window", "exit row", seats.OPEN_FRONT),
     "exit_window": seat("14F", "standard", "window", "exit row"),
     "extra_window": seat("3A", "extra", "window"),
+    "bulkhead_window": seat("1F", "extra", "window", "bulkhead seat"),
     "exit_aisle": seat("14C", "standard", "aisle", "exit row"),
     "extra_aisle": seat("2C", "extra", "aisle"),
+    "bulkhead_aisle": seat("1D", "extra", "aisle", "bulkhead seat"),
     "std_window": seat("4A", "preferred", "window"),
     "std_aisle": seat("4C", "preferred", "aisle"),
     "middle": seat("2B", "extra", "middle"),
@@ -64,7 +66,8 @@ def test_never_assumed():
     exit_std = seat("14A", "standard", "window", "exit row")
     assert not seats.matches(exit_std, "extra_window")                   # exit row is not extra legroom
     bulk = seat("1D", "standard", "aisle", "bulkhead seat")
-    assert seats.priority(bulk, D)[1] == "std_aisle"                      # bulkhead is not extra legroom
+    assert seats.priority(bulk, D)[1] == "bulkhead_aisle"                 # bulkhead is its own seat type
+    assert not seats.matches(bulk, "extra_aisle") and not seats.attributes(bulk)["extra"]   # not assumed extra
     unknown = seat("5A", "standard")                                      # map doesn't say the position
     assert seats.priority(unknown, D) == (None, None) and seats.attributes(unknown)["position"] is None
     assert seats.attributes(seat("5C", "standard", "aisle"))["view"] is None     # view only known for windows
@@ -112,6 +115,47 @@ def test_explanation():
     text = seats.explain(pick, D)
     assert text.startswith("Selected: 3A. Matched Priority 3: Extra-legroom window.")
     assert "Higher-ranked Exit-row window, no seat in front, Exit-row window seats were unavailable." in text
+
+
+def test_bulkhead_can_be_ranked_or_switched_off():
+    no_bulk = seats.normalize({"priorities": {**seats.DEFAULT_PRIORITIES, "bulkhead_window": None,
+                                              "bulkhead_aisle": None}})
+    pool = [EXAMPLES["bulkhead_window"], EXAMPLES["std_window"]]
+    assert seats.choose(pool, D) is EXAMPLES["bulkhead_window"]          # default: above standard
+    assert seats.choose(pool, no_bulk) is EXAMPLES["std_window"]         # Off: never the bulkhead
+    first = seats.normalize({"priorities": {**seats.DEFAULT_PRIORITIES, "bulkhead_window": 1, "exit_window_open": 2}})
+    assert seats.choose([EXAMPLES["exit_window_open"], EXAMPLES["bulkhead_window"]], first) is EXAMPLES["bulkhead_window"]
+
+
+def test_watches_saved_before_bulkhead_keep_treating_it_as_extra_legroom():
+    old = {"version": 2, "priorities": {"exit_window_open": 1, "exit_window": 2, "extra_window": 3, "exit_aisle": 4,
+                                        "extra_aisle": None, "std_window": 6, "std_aisle": 7, "middle": None},
+           "tiebreak": ["position", "legroom"]}
+    p = seats.normalize(old)
+    assert p["priorities"]["bulkhead_window"] == 3 and p["priorities"]["bulkhead_aisle"] is None
+    assert p["tiebreak"] == ["position", "legroom", "recline"]           # new tie-breaker on for old lists
+    again = seats.normalize(json.loads(seats.to_json({**p, "tiebreak": ["position"]})))
+    assert again["tiebreak"] == ["position"]                              # ... but removing it sticks
+
+
+def test_planes_and_recline():
+    assert seats.plane_name("Boeing 737 MAX8 (subject to change)*") == "Boeing 737 MAX 8"
+    assert seats.plane_name("Boeing 737-700") == "Boeing 737-700" and seats.plane_name("Airbus") is None
+    maps = seats.example_maps()
+    max8 = {s["seat"]: s for s in maps["Boeing 737 MAX 8"]}
+    assert len(max8) == 175 and "15A" not in max8 and "1A" not in max8
+    assert {k for k, s in max8.items() if seats.OPEN_FRONT in s["features"]} == {"16A", "16F"}
+    assert "window without window view" in max8["10A"]["features"] and max8["6A"]["type"] == "extra"
+    assert max8["6D"]["type"] == "preferred" and max8["17A"]["type"] == "standard"
+    assert seats.LIMITED_RECLINE in max8["30C"]["features"] and seats.LIMITED_RECLINE in max8["13A"]["features"]
+    assert seats.LIMITED_RECLINE not in max8["12A"]["features"]
+    p = seats.normalize({"priorities": {"std_window": 1}, "tiebreak": ["recline"]})
+    s12, s13 = (seat("12A", "standard", "window"), dict(seat("13A", "standard", "window"),
+                                                        features={"window", seats.LIMITED_RECLINE}))
+    assert seats.choose([s13, s12], p) is s12                             # tie: the one that reclines
+    plain = [seat("9A", "standard", "window"), seat("20A", "standard", "window")]
+    seats.add_plane_facts(plain, None)
+    assert seats.LIMITED_RECLINE in plain[1]["features"]                  # last row on the map, any plane
 
 
 def test_status_still_decides_what_is_free():
