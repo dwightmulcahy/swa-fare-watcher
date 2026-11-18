@@ -46,10 +46,11 @@ class NotFree(Exception):
 
 
 class SeatPicker:
-    def __init__(self, browser, conf, first, last, prefs, status, user_id=None):
+    def __init__(self, browser, conf, first, last, prefs, status, user_id=None, window=True):
         self.b, self.page = browser, browser.page
         self.conf, self.first, self.last = conf, first, last
         self.prefs, self.status, self.uid = prefs, status, user_id
+        self.window = window     # within 48 h of departure: the status's upgrade seats count too
         self.rng = browser.human.rng if browser.human else random
         self.report = []     # per flight and passenger: current seat and the best free seats, scored
 
@@ -123,7 +124,7 @@ class SeatPicker:
                 smap = self.seat_map()
                 cur_code = self.current_seat(pax.get_attribute("aria-label"))
                 cur = next((s for s in smap if s["seat"] == cur_code), None)
-                options = seats.ranked(smap, self.prefs, self.status, taken)
+                options = seats.ranked(smap, self.prefs, self.status, taken, self.window)
                 new = options[0] if options else None
                 report.append({
                     "flight": (tab.get_attribute("aria-label") or "").split(" hours")[0] if tab is not None else "",

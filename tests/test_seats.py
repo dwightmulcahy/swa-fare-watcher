@@ -30,7 +30,7 @@ def test_choose_by_preferences_and_status():
     legroom_any = {"position": "any", "order": ["extra_legroom", "front"]}
     pick = seats.choose(MAP, legroom_any, "priority")
     assert pick["type"] == "extra" and pick["seat"] == "1E"            # front-most Extra Legroom
-    assert seats.choose(MAP, legroom_any, "plus_premier")["type"] != "extra"   # not free for that card
+    assert seats.choose(MAP, legroom_any, "premier")["type"] != "extra"   # not free for that card
     assert seats.choose(MAP, legroom_any, "priority", taken={"1E"})["seat"] != "1E"
     paid = [{**x, "price": 39.0} for x in MAP]
     assert seats.choose(paid, window, "priority") is None             # never anything that costs
@@ -80,7 +80,7 @@ def test_ranked_lists_free_seats_best_first():
     assert all(x["price"] == 0 and x["available"] for x in r)
     sc = [seats.score(x, prefs) for x in r]
     assert sc == sorted(sc, reverse=True)
-    assert all(x["type"] != "extra" for x in seats.ranked(MAP, prefs, "plus_premier"))
+    assert all(x["type"] != "extra" for x in seats.ranked(MAP, prefs, "premier"))
 
 
 def test_seat_email_shows_scored_options_even_when_unchanged():
@@ -140,13 +140,13 @@ def test_seat_watch_form_saves_preferences(client):
     assert "confirmation number" in client.post("/watches", data={**data, "booking_conf": ""}).text
 
 
-def _seat_watch(client, date, time_="13:15", origin="LIR"):
+def _seat_watch(client, date, time_="13:15", origin="LIR", status="premier"):
     from app import db
     from tests.test_web import admin_client
     t = admin_client(client)
     data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
             "origin": origin, "destination": "HOU", "trip_type": "oneway", "out_date": date, "out_time": time_,
-            "seat_status": "priority", "seat_position": "window", "active": "1"}
+            "seat_status": status, "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     with db.tx() as con:
         con.execute("UPDATE users SET email='pat@example.com' WHERE username='admin'")
@@ -180,8 +180,8 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
         human, page, humanize = None, None, False
 
     class Picker:
-        def __init__(self, b, conf, first, last, prefs, status, user_id=None):
-            assert (conf, first, last, status) == ("ABC123", "Pat", "Lee", "priority")
+        def __init__(self, b, conf, first, last, prefs, status, user_id=None, window=True):
+            assert (conf, first, last, status, window) == ("ABC123", "Pat", "Lee", "premier", True)
         report = [{"flight": "", "passenger": "Pat Lee", "current": None, "picked": "9A",
                    "options": [{"seat": "9A", "describe": "9A (Preferred, Window)", "price": 0, "score": 21.0}]}]
         def run(self, until, sleep=None, **kw):
@@ -327,7 +327,7 @@ def test_seat_watch_with_just_the_booking_looks_it_up(client, worker, monkeypatc
     started = []
     monkeypatch.setattr(worker, "lookup_booking", lambda wid: started.append(wid))
     data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
-            "seat_status": "priority", "seat_position": "window", "active": "1"}
+            "seat_status": "premier", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     wid = int(loc.rstrip("/").split("/")[-1])
     import time as _t
@@ -346,7 +346,7 @@ def test_lookup_booking_fills_the_watch_and_plans_seats(client, worker):
     t = admin_client(client)
     worker.lookup_booking = lambda wid: None          # don't start one from the web request
     data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
-            "seat_status": "priority", "seat_position": "window", "active": "1"}
+            "seat_status": "premier", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     wid = int(loc.rstrip("/").split("/")[-1])
     from app import db
@@ -426,7 +426,10 @@ def _run_visit(worker, job, run, report):
 def test_seat_watch_keeps_checking_until_perfect_then_sends_a_summary(client, worker, sent):
     from tests.conftest import future
     wid, db = _seat_watch(client, future(10))
-    job = worker.due_seat_jobs(seats.opens_at(future(10), "13:15", "LIR"))[0]
+    opened = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+    with db.tx() as con:                       # selection opened a minute ago
+        con.execute("UPDATE seat_jobs SET opens_at=? WHERE watch_id=?", (opened, wid))
+    job = worker.due_seat_jobs()[0]
     meh = [{"current": {"seat": "11F", "describe": "11F", "price": 0, "score": 40.0}, "options": [], "picked": None}]
     untils = []
     status, _, note = _run_visit(worker, job, lambda u: (untils.append(u), ([], "no better"))[1], meh)
@@ -497,3 +500,83 @@ def test_restart_puts_interrupted_seat_checks_back_in_line(client, worker):
         con.execute("UPDATE seat_jobs SET status='running', opens_at=? WHERE id=?", (old, job["id"]))
     worker.close_interrupted_runs()
     assert db.one("SELECT status FROM seat_jobs WHERE id=?", (job["id"],))["status"] == "failed"
+
+
+
+def test_status_decides_what_is_free_when():
+    assert seats.allowed("a_list_preferred", window=False) == {"extra", "preferred", "standard"}
+    assert seats.allowed("a_list", window=False) == {"preferred", "standard"}
+    assert seats.allowed("a_list") == {"extra", "preferred", "standard"}
+    assert seats.allowed("plus") == {"standard"} and seats.allowed("plus", window=False) == set()
+    assert seats.allowed("plus_premier") == {"preferred", "standard"}          # old setting = Premier
+    assert seats.free_early("a_list_preferred") and not seats.window_gain("a_list_preferred")
+    assert seats.free_early("a_list") and seats.window_gain("a_list") == {"extra"}
+    assert not seats.free_early("premier") and not seats.free_early("none")
+    legroom = {"position": "any", "order": ["extra_legroom", "front"]}
+    early = seats.choose(MAP, legroom, "a_list", window=False)
+    assert early["type"] != "extra" and seats.choose(MAP, legroom, "a_list")["type"] == "extra"
+
+
+def test_a_list_preferred_watch_checks_right_away_and_about_daily(client, worker):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(20), status="a_list_preferred")
+    now = dt.datetime.now(dt.timezone.utc)
+    j = db.one("SELECT * FROM seat_jobs WHERE watch_id=?", (wid,))
+    assert j["status"] == "watching" and worker.due_seat_jobs(now + dt.timedelta(seconds=5))
+    meh = [{"current": {"seat": "11F", "describe": "11F", "price": 0, "score": 40.0}, "options": [], "picked": None}]
+    untils, windows = [], []
+    import app.seat_picker as sp
+    real = sp.SeatPicker
+
+    class Picker:
+        def __init__(self, *a, window=True, **k):
+            windows.append(window)
+            self.report = meh
+        def run(self, until, **k):
+            untils.append(until)
+            return [], "no better"
+
+    class Browser:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    sp.SeatPicker = Picker
+    try:
+        job = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?", (j["id"],))
+        status, _, note = worker.run_seat_job(dict(job), picker_factory=Browser)
+    finally:
+        sp.SeatPicker = real
+    assert status == "watching" and untils == [0] and windows == [False]        # one look, booking seats
+    nxt = dt.datetime.fromisoformat(db.one("SELECT next_at FROM seat_jobs WHERE id=?", (j["id"],))["next_at"])
+    assert nxt - now >= dt.timedelta(hours=15)                                   # about a day later
+
+
+def test_a_list_never_skips_the_48_hour_opening(worker):
+    import random
+    departs = dt.datetime(2027, 1, 10, 18, 0, tzinfo=dt.timezone.utc)
+    opens = departs - dt.timedelta(hours=48, seconds=worker.SEAT_EARLY)
+    now = opens - dt.timedelta(hours=10)
+    assert worker.next_seat_visit(now, departs, random.Random(3), gain=True) == opens
+    assert worker.next_seat_visit(now, departs, random.Random(3), gain=False) != opens
+
+
+
+def test_international_flights_stop_earlier(worker):
+    import random
+    assert seats.international("LIR", "HOU") and not seats.international("AUS", "SJU")
+    departs = dt.datetime(2027, 1, 10, 18, 0, tzinfo=dt.timezone.utc)
+    now = departs - dt.timedelta(hours=3)
+    worker.SEAT_QUIET = (24, 0)
+    for seed in range(30):
+        n = worker.next_seat_visit(now, departs, random.Random(seed), stop_before=worker.SEAT_STOP_BEFORE_INTL)
+        assert n is None or departs - n > dt.timedelta(minutes=90)
+
+
+
+def test_restart_replans_waiting_seat_jobs_for_new_rules(client, worker):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(20))
+    with db.tx() as con:
+        con.execute("UPDATE watches SET seat_status='a_list_preferred' WHERE id=?", (wid,))
+    assert db.one("SELECT status FROM seat_jobs WHERE watch_id=?", (wid,))["status"] == "pending"
+    worker.close_interrupted_runs()
+    assert db.one("SELECT status FROM seat_jobs WHERE watch_id=?", (wid,))["status"] == "watching"

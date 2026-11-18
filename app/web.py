@@ -592,7 +592,7 @@ def create_app(worker=None, start_worker=True):
             if lookup and not w["name"]:
                 w["name"] = f"Seats {conf}"
             status = str(f.get("seat_status", "none"))
-            w["seat_status"] = status if status in seats.STATUSES else "none"
+            w["seat_status"] = seats.status_of(status)
             pos = str(f.get("seat_position", "window"))
             ranks = []
             for i, k in enumerate(seats.CRITERIA):

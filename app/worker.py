@@ -638,6 +638,11 @@ class Worker:
         if n:
             applog.warn(f"Put {n} seat check(s) / check-in(s) interrupted by the restart back in line",
                         source="seats")
+        # re-plan waiting seat jobs, so a new version's timing rules (e.g. statuses that get free
+        # seats at booking) apply to watches saved before it
+        for r in db.query("SELECT DISTINCT j.watch_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
+                          "WHERE j.status='pending' AND w.active=1 AND w.seat_auto=1"):
+            db.sync_seat_jobs(r["watch_id"])
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
@@ -693,18 +698,25 @@ class Worker:
     SEAT_EARLY = 150          # be on the seat map this many seconds before selection opens
     SEAT_WINDOW = 25 * 60     # and keep checking for this long after
     SEAT_STOP_BEFORE = 3600   # then come back now and then until this long before departure
+    SEAT_STOP_BEFORE_INTL = 7200   # international: Southwest stops online changes 90 min out
     SEAT_GAP = (2.0, 6.0)     # hours between checks
     SEAT_GAP_LATE = (0.75, 2.0)   # ... in the last SEAT_LATE_HOURS
     SEAT_LATE_HOURS = 12
     SEAT_QUIET = (23.0, 6.5)  # no checks between these local hours (asleep)
     SEAT_MAX_FAILS = 3
 
-    def next_seat_visit(self, now, departs, rng=random):
-        """When to look at the seat map again (UTC), like a person checking back: every few hours,
-        more often in the last 12, never at night. None once it's too close to departure."""
+    SEAT_GAP_EARLY = (16.0, 30.0)   # hours between checks before the 48-hour window
+
+    def next_seat_visit(self, now, departs, rng=random, gain=False, stop_before=None):
+        """When to look at the seat map again (UTC), like a person checking back: about once a day
+        until the 48-hour window, every few hours in it, more often in the last 12, never at night.
+        With `gain` (the window frees more seat types for this status) the check as it opens is
+        never skipped. None once it's too close to departure."""
         left = (departs - now).total_seconds() / 3600
-        nxt = now + dt.timedelta(hours=rng.uniform(*(self.SEAT_GAP_LATE if left <= self.SEAT_LATE_HOURS
-                                                     else self.SEAT_GAP)))
+        opens = departs - dt.timedelta(hours=seats.OPEN_HOURS) - dt.timedelta(seconds=self.SEAT_EARLY)
+        gap = (self.SEAT_GAP_LATE if left <= self.SEAT_LATE_HOURS else
+               self.SEAT_GAP if now >= opens else self.SEAT_GAP_EARLY)
+        nxt = now + dt.timedelta(hours=rng.uniform(*gap))
         local = nxt.astimezone()
         h = local.hour + local.minute / 60
         night, morning = self.SEAT_QUIET
@@ -712,7 +724,9 @@ class Worker:
             day = local.date() + dt.timedelta(days=1 if h >= night else 0)
             wake = dt.datetime.combine(day, dt.time(int(morning), int(morning % 1 * 60)), tzinfo=local.tzinfo)
             nxt = (wake + dt.timedelta(minutes=rng.uniform(0, 50))).astimezone(dt.timezone.utc)
-        deadline = departs - dt.timedelta(seconds=self.SEAT_STOP_BEFORE)
+        if gain and now < opens <= nxt:
+            return opens
+        deadline = departs - dt.timedelta(seconds=stop_before or self.SEAT_STOP_BEFORE)
         if nxt >= deadline:
             if deadline - now < dt.timedelta(minutes=30):
                 return None
@@ -833,9 +847,16 @@ class Worker:
         leg = "return" if job["leg"] == "ret" else "outbound"
         opens = dt.datetime.fromisoformat(job["opens_at"])
         departs = opens + dt.timedelta(hours=seats.OPEN_HOURS)
-        first = not job.get("visits")
+        status_key = seats.status_of(w["seat_status"])
+        gain = bool(seats.window_gain(status_key))
+        now0 = dt.datetime.now(dt.timezone.utc)
+        # the visit planned for the 48-hour window opening waits on the map for the new free seats
+        planned = dt.datetime.fromisoformat(job["next_at"]) if job.get("next_at") else None
+        opening = gain and (job["status"] == "pending" or (
+            planned is not None and abs((planned - opens).total_seconds()) <= self.SEAT_EARLY + 60))
+        window = opening or now0 >= opens - dt.timedelta(seconds=self.SEAT_EARLY + 60)
         applog.info(f"{w['name']}: " + (f"seat selection for the {leg} flight opens at {opens.astimezone():%H:%M}; "
-                                        "opening the booking" if first else
+                                        "opening the booking" if opening else
                                         f"checking the {leg} flight's seat map for a better seat"),
                     user_id=uid, source="seats")
         changes, note, report, stop, fails = [], "", [], None, job.get("fails") or 0
@@ -846,8 +867,8 @@ class Worker:
                 None, profile_key=uid if same_profile else f"{uid}-seats"))
             with factory() as browser:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
-                                                seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
-                until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if first else 0
+                                                seats.prefs_of(w), status_key, user_id=uid, window=window)
+                until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if opening else 0
                 try:
                     changes, note = picker.run(until, sleep=self.sleep)
                 finally:
@@ -870,7 +891,12 @@ class Worker:
         log = json.loads(job.get("log") or "[]") + [list(c) for c in changes]
         now = dt.datetime.now(dt.timezone.utc)
         perfect = bool(report) and all(_seat_fit(r) >= 99.95 for r in report)
-        nxt = None if stop or perfect else self.next_seat_visit(now, departs)
+        # before the window a perfect seat may still be beaten once Extra Legroom frees up
+        perfect = perfect and (window or not gain)
+        b = next((x for x in json.loads(w["booked"] or "[]") if x.get("leg") == job["leg"]), {})
+        stop_before = self.SEAT_STOP_BEFORE_INTL if seats.international(b.get("from"), b.get("to")) \
+            else self.SEAT_STOP_BEFORE
+        nxt = None if stop or perfect else self.next_seat_visit(now, departs, gain=gain, stop_before=stop_before)
         if nxt:
             status = "watching"
             text = (f"Seat change {note}. " if changes else "") + \
@@ -878,7 +904,7 @@ class Worker:
         else:
             status = "failed" if stop else "done" if log else "unchanged"
             text = stop or ("Everyone has a seat that meets all your preferences." if perfect else
-                            "Stopped an hour before departure.")
+                            f"Stopped {stop_before // 60} minutes before departure (Southwest closes online seat changes at 60 min, 90 min for international flights).")
             if log and not stop:
                 text = f"Done: {len(log)} seat change{'s' if len(log) != 1 else ''}. {text}"
             elif not log and not stop:

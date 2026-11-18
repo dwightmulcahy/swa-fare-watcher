@@ -4,7 +4,7 @@
 {% set bk = booked_of(w) %}{% set rt = w.trip_type == 'roundtrip' %}{% set sp = seat_prefs(w) %}
 <p class="crumbs"><a href="/">Watches</a>{% if not new %} / <a href="/watches/{{ w.id }}">{{ w.name }}</a>{% endif %}</p>
 <h1>{{ 'New seat watch' if new else 'Edit seat watch' }}</h1>
-<p class="muted">When seat selection opens, 48 hours before each flight, it looks your booking up and moves every passenger to the best free seat that beats the one they have. It never pays: anything that costs money is left alone and you get an email instead.</p>
+<p class="muted">It looks your booking up and moves every passenger to the best free seat that beats the one they have: right away and about daily when your status gets free seats at booking (A-List, A-List Preferred, Priority card), then as the 48-hour window opens and every few hours until departure. It never pays: anything that costs money is left alone and you get an email instead.</p>
 <form method="post" action="{{ '/watches' if new else '/watches/' ~ w.id }}" class="card form-grid watch-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="kind" value="seats">
@@ -35,7 +35,7 @@
     <legend>Seat preferences</legend>
     <div class="row">
       <label>Your status
-        <select name="seat_status">{% for k, (t, _) in seats.STATUSES.items() %}
+        <select name="seat_status">{% for k, (t, _, _) in seats.STATUSES.items() %}
           <option value="{{ k }}" {{ "selected" if (w.seat_status or "none") == k }}>{{ t }}</option>{% endfor %}
         </select></label>
       <div class="field"><span class="label">Seat</span>
