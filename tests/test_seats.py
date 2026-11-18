@@ -580,3 +580,21 @@ def test_restart_replans_waiting_seat_jobs_for_new_rules(client, worker):
     assert db.one("SELECT status FROM seat_jobs WHERE watch_id=?", (wid,))["status"] == "pending"
     worker.close_interrupted_runs()
     assert db.one("SELECT status FROM seat_jobs WHERE watch_id=?", (wid,))["status"] == "watching"
+
+
+
+def test_broken_seat_check_retries_soon_and_right_after_a_restart(client, worker):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(20), status="a_list_preferred")
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE w.id=?", (wid,))
+
+    def boom(u):
+        raise RuntimeError("seat 3A didn't stick (shows 7A)")
+    now = dt.datetime.now(dt.timezone.utc)
+    status, _, _ = _run_visit(worker, j, boom, [])
+    nxt = dt.datetime.fromisoformat(db.one("SELECT next_at FROM seat_jobs WHERE id=?", (j["id"],))["next_at"])
+    assert status == "watching" and nxt - now <= dt.timedelta(minutes=41)
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET next_at='2099-01-01T00:00:00+00:00' WHERE id=?", (j["id"],))
+    worker.close_interrupted_runs()
+    assert worker.due_seat_jobs(dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=5))

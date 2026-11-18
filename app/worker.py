@@ -643,6 +643,10 @@ class Worker:
         for r in db.query("SELECT DISTINCT j.watch_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
                           "WHERE j.status='pending' AND w.active=1 AND w.seat_auto=1"):
             db.sync_seat_jobs(r["watch_id"])
+        # a check that broke last time runs again right away: the restart may be the fix
+        with db.tx() as con:
+            con.execute("UPDATE seat_jobs SET next_at=? WHERE status='watching' AND fails>0",
+                        (now.isoformat(timespec="seconds"),))
 
     def start(self, scheduler=True):
         self.close_interrupted_runs()
@@ -704,6 +708,7 @@ class Worker:
     SEAT_LATE_HOURS = 12
     SEAT_QUIET = (23.0, 6.5)  # no checks between these local hours (asleep)
     SEAT_MAX_FAILS = 3
+    SEAT_RETRY_MINUTES = (15, 40)   # after a check that couldn't finish
 
     SEAT_GAP_EARLY = (16.0, 30.0)   # hours between checks before the 48-hour window
 
@@ -898,6 +903,9 @@ class Worker:
         stop_before = self.SEAT_STOP_BEFORE_INTL if seats.international(b.get("from"), b.get("to")) \
             else self.SEAT_STOP_BEFORE
         nxt = None if stop or perfect else self.next_seat_visit(now, departs, gain=gain, stop_before=stop_before)
+        if nxt and fails:      # a check that broke: try again soon rather than after the usual gap
+            soon = now + dt.timedelta(minutes=random.uniform(*self.SEAT_RETRY_MINUTES))
+            nxt = min(nxt, soon) if soon < departs - dt.timedelta(seconds=stop_before) else nxt
         if nxt:
             status = "watching"
             text = (f"Seat change {note}. " if changes else "") + \
