@@ -51,6 +51,89 @@
         <option value="{{ i }}" {{ "selected" if r == i }}>{{ i }}</option>{% endfor %}
       </select> {{ seats.CRITERIA[k] }}</label>{% endfor %}
     </div>
+    <div class="seat-heat" id="seat-heat">
+      <div class="seat-heat-head">
+        <span class="label">How seats score for these preferences</span>
+        <select id="heat-plane" aria-label="Example plane">{% for name in seats.example_maps() %}
+          <option>{{ name }}</option>{% endfor %}</select>
+        <label class="check small"><input type="checkbox" id="heat-window" checked> within 48 h of departure</label>
+      </div>
+      <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by preference score"></div>
+      <p class="hint">Darker = better match on this plane (hover for the 0-100 score; outlined = the best free seat). Hatched seats aren't free for the status chosen, at that time. An example layout: your plane's map may differ.</p>
+    </div>
   </fieldset>
+  <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "criteria": seats.CRITERIA|list, "base": seats._BASE}|tojson }}</script>
+  <script>
+  (() => {
+    const D = JSON.parse(document.getElementById("heat-data").textContent);
+    const form = document.getElementById("seat-heat").closest("form");
+    const grid = document.getElementById("heat-grid"), plane = document.getElementById("heat-plane"),
+          win = document.getElementById("heat-window");
+    // same scoring as app/seats.py: value of each criterion 0..1, rank i of n weighs base^(n-1-i)
+    const value = (s, k, pos) => {
+      const f = new Set(s.features);
+      switch (k) {
+        case "seat_type": return (pos === "window" || pos === "aisle") && f.has(pos) ? 1 : 0;
+        case "no_middle": return f.has("middle") ? 0 : 1;
+        case "extra_legroom": return {extra: 1, preferred: 0.5, standard: 0}[s.type];
+        case "exit_row": return f.has("exit row") ? 1 : 0;
+        case "open_front": return f.has("no seat in front") ? 1 : 0;
+        case "bulkhead": return f.has("bulkhead seat") ? 1 : 0;
+        case "window_view": return f.has("window without window view") ? 0 : 1;
+        case "front": return Math.max(0, 1 - (s.row - 1) / 40);
+      }
+      return 0;
+    };
+    const prefs = () => {
+      const pos = (form.querySelector("input[name=seat_position]:checked") || {}).value || "any";
+      const ranked = D.criteria.map((k, i) => [Number(form.querySelector(`[name=rank_${k}]`)?.value || 0), i, k])
+        .filter(([r]) => r > 0).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([, , k]) => k)
+        .filter((k) => !(k === "seat_type" && pos === "any"));
+      return {pos, order: ranked};
+    };
+    const fit = (s, p) => {
+      const n = p.order.length;
+      let tot = 0, got = 0;
+      p.order.forEach((k, i) => { const w = D.base ** (n - 1 - i); tot += w; got += value(s, k, p.pos) * w; });
+      return tot ? 100 * got / tot : 0;
+    };
+    const draw = () => {
+      const p = prefs(), seats = D.maps[plane.value];
+      const status = (form.querySelector("[name=seat_status]") || {}).value || "none";
+      const free = new Set(D.status[status][win.checked ? "window" : "booking"]);
+      const scored = seats.map((s) => ({...s, fit: fit(s, p), free: free.has(s.type)}));
+      const best = Math.max(...scored.filter((s) => s.free).map((s) => s.fit), -1);
+      // colour by place between this plane's worst and best seat, so small differences show
+      const lo = Math.min(...scored.map((s) => s.fit)), hi = Math.max(...scored.map((s) => s.fit));
+      const rows = Math.max(...seats.map((s) => s.row));
+      grid.textContent = "";
+      const head = document.createElement("div"); head.className = "heat-row heat-cols";
+      head.innerHTML = "<span></span>" + "ABC".split("").map((c) => `<span>${c}</span>`).join("") +
+        "<span></span>" + "DEF".split("").map((c) => `<span>${c}</span>`).join("");
+      grid.append(head);
+      for (let r = 1; r <= rows; r++) {
+        const row = document.createElement("div"); row.className = "heat-row";
+        const cells = ["num", ..."ABC", "num", ..."DEF"].map((c, i) => {
+          const el = document.createElement("span");
+          if (c === "num") { el.className = "heat-num"; el.textContent = i ? "" : r; return el; }
+          const s = scored.find((x) => x.row === r && x.col === c);
+          if (!s) { el.className = "heat-gap"; return el; }
+          el.className = "heat-seat" + (s.free ? "" : " heat-locked") + (s.free && Math.abs(s.fit - best) < 1e-6 && best > 0 ? " heat-best" : "");
+          el.style.setProperty("--fit", (hi > lo ? 0.08 + 0.92 * ((s.fit - lo) / (hi - lo)) ** 1.5 : 0.5).toFixed(3));
+          el.dataset.seat = s.seat; el.dataset.fit = s.fit.toFixed(2);
+          const kind = {extra: "Extra Legroom", preferred: "Preferred", standard: "Standard"}[s.type];
+          el.title = `${s.seat} · ${kind}, ${s.features.filter((f) => f !== "window without window view").join(", ")}` +
+            (s.features.includes("window without window view") ? ", no window view" : "") +
+            ` · score ${Math.round(s.fit)}${s.free ? "" : " · not free for this status now"}`;
+          return el;
+        });
+        row.append(...cells); grid.append(row);
+      }
+    };
+    form.addEventListener("change", draw);
+    plane.addEventListener("change", draw);
+    draw();
+  })();
+  </script>
   {% set active_label = "Active" %}{% include "_watch_foot.html" %}
 {% endblock %}
