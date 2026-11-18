@@ -418,3 +418,18 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .heat-best { outline: 2px solid #111B40; outline-offset: 1px; }
 .heat-gap { height: 1.6rem; }
 .seat-now { margin: .25rem 0 0 .2rem; }
+
+/* seat selection priorities */
+.prio-title { margin: 1rem 0 .25rem; font-size: 1rem; }
+.prio-list { list-style: none; padding: 0; margin: .5rem 0; display: grid; gap: .35rem; }
+.prio-item { display: flex; align-items: center; gap: .6rem; padding: .3rem .5rem; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--surface); }
+.prio-item.dragging { opacity: .5; }
+.prio-handle { cursor: grab; color: var(--muted); user-select: none; }
+.prio-item select { width: 4.5rem; flex: none; }
+.prio-name { flex: 1; }
+.prio-move button { padding: 0 .3rem; font-size: 1rem; }
+.prio-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.2rem; margin: .5rem 0; }
+.prio-ties { margin: .5rem 0 1rem; }
+.heat-offcat { background-color: #9AA3B2; opacity: .55; }
+.heat-off { width: 1rem; height: .6rem; border-radius: 3px; background: #9AA3B2; opacity: .55; }

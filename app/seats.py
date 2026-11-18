@@ -48,23 +48,31 @@ def window_gain(status):
 
 POSITIONS = {"window": "Window", "aisle": "Aisle", "any": "No preference"}
 
-# What can matter about a seat (key -> label). The user ranks the ones they care about; a higher
-# ranked wish always beats everything ranked below it.
-CRITERIA = {
-    "no_middle": "Not a middle seat",
-    "seat_type": "My seat position (window / aisle above)",
-    "extra_legroom": "Extra Legroom (Preferred counts half)",
-    "exit_row": "Exit row",
-    "open_front": "Exit-row window with no seat in front (extra legroom)",
-    "bulkhead": "Bulkhead (front row of a cabin)",
-    "window_view": "A window that has a view",
-    "front": "As far forward as possible",
+# Seat selection priorities: complete combinations of seat type and position, each given a
+# priority 1-8 (equal allowed) or Off. A seat takes the best priority of the categories it matches,
+# and a lower-priority seat never beats a higher-priority one, whatever else it has going for it.
+CATEGORIES = {
+    "exit_window_open": "Exit-row window, no seat in front",
+    "exit_window": "Exit-row window",
+    "extra_window": "Extra-legroom window",
+    "exit_aisle": "Exit-row aisle",
+    "extra_aisle": "Extra-legroom aisle",
+    "std_window": "Standard window",
+    "std_aisle": "Standard aisle",
+    "middle": "Middle seat",
 }
-WISHES = CRITERIA                       # older name
-
-DEFAULT_ORDER = ["no_middle", "extra_legroom", "seat_type", "window_view", "front"]
-DEFAULT_PREFS = {"position": "window", "order": DEFAULT_ORDER}
-_BASE = 4                               # each rank weighs 4x the next: beats all lower ranks together
+DEFAULT_PRIORITIES = {k: i + 1 for i, k in enumerate(CATEGORIES)}
+MAX_PRIORITY = len(CATEGORIES)
+# Only between seats of the same priority, in the order the user sets (seat number is always last)
+TIEBREAKS = {
+    "position": "Your window / aisle choice",
+    "legroom": "More legroom (Extra Legroom, no seat in front)",
+    "forward": "Further forward in the cabin",
+    "view": "A window with a view",
+}
+DEFAULT_TIEBREAK = list(TIEBREAKS)
+DEFAULT_PREFS = {"version": 2, "position": "window", "priorities": dict(DEFAULT_PRIORITIES),
+                 "tiebreak": list(DEFAULT_TIEBREAK), "fallback": False, "explain": True}
 
 OPEN_HOURS = 48          # seat selection (free upgrades) opens this long before departure
 
@@ -110,90 +118,214 @@ def annotate(seat_map):
 
 
 def prefs_of(w):
-    """A watch's seat preferences: {"position", "order": [criteria, best first], <criterion>: bool}.
-    Older watches stored a flag per wish; those become an order in the old priority."""
+    """A watch's seat selection priorities (see DEFAULT_PREFS). Watches saved before priorities
+    existed are converted from their ranked wishes (see _migrate); "migrated" marks that."""
     import json
     try:
         p = json.loads((w["seat_prefs"] if "seat_prefs" in w.keys() else None) or "{}")
     except (ValueError, TypeError, AttributeError):
         p = {}
     p = p if isinstance(p, dict) else {}
+    if p and p.get("version") != 2:
+        p = _migrate(p)
+    return normalize(p)
+
+
+def normalize(p):
+    """Fill in and clean a priorities dict."""
     pos = p.get("position") if p.get("position") in POSITIONS else DEFAULT_PREFS["position"]
-    if isinstance(p.get("order"), list):
-        order = [k for k in dict.fromkeys(p["order"]) if k in CRITERIA]
-    elif p:
-        old = ["no_middle", "extra_legroom", "seat_type", "exit_row", "window_view", "bulkhead", "front"]
-        order = [k for k in old if k == "seat_type" or p.get(k)]
-    else:
-        order = list(DEFAULT_ORDER)
-    return normalize(pos, order)
+    pri = {}
+    given = p.get("priorities") if isinstance(p.get("priorities"), dict) else DEFAULT_PRIORITIES
+    for k in CATEGORIES:
+        v = given.get(k)
+        pri[k] = v if isinstance(v, int) and 1 <= v <= MAX_PRIORITY else None
+    tb = [k for k in dict.fromkeys(p.get("tiebreak") if isinstance(p.get("tiebreak"), list) else DEFAULT_TIEBREAK)
+          if k in TIEBREAKS]
+    out = {"version": 2, "position": pos, "priorities": pri, "tiebreak": tb,
+           "fallback": bool(p.get("fallback", False)), "explain": bool(p.get("explain", True))}
+    if p.get("migrated"):
+        out["migrated"] = True
+    return out
 
 
-def normalize(position, order):
-    order = [k for k in order if k in CRITERIA and not (k == "seat_type" and position == "any")]
-    return {"position": position, "order": order, **{k: k in order for k in CRITERIA}}
+def to_json(p):
+    import json
+    return json.dumps({k: v for k, v in normalize(p).items() if k != "migrated"})
 
 
-def _value(seat, key, prefs):
-    """0..1: how well a seat meets one criterion."""
+# ---------- classification ----------
+def position_of(seat):
+    """window / aisle / middle, or None when the map doesn't say (never guessed)."""
     f = seat["features"]
-    if key == "seat_type":
-        pos = prefs.get("position", "any")
-        return 1.0 if pos in ("window", "aisle") and pos in f else 0.0
-    if key == "no_middle":
-        return 0.0 if "middle" in f else 1.0
-    if key == "extra_legroom":
-        return {"extra": 1.0, "preferred": 0.5, "standard": 0.0}[seat["type"]]
-    if key == "open_front":
-        return 1.0 if OPEN_FRONT in f else 0.0
-    if key == "exit_row":
-        return 1.0 if "exit row" in f else 0.0
-    if key == "bulkhead":
-        return 1.0 if "bulkhead seat" in f else 0.0
-    if key == "window_view":
-        return 0.0 if "window without window view" in f else 1.0
-    if key == "front":
-        return max(0.0, 1.0 - (seat["row"] - 1) / 40)
-    return 0.0
+    return next((x for x in ("window", "aisle", "middle") if x in f), None)
 
 
-def _weights(prefs):
-    order = prefs.get("order") or []
-    return [(k, _BASE ** (len(order) - 1 - i)) for i, k in enumerate(order)]
+def attributes(seat):
+    """What's known about a seat; anything the map doesn't state is left out."""
+    f = seat["features"]
+    pos = position_of(seat)
+    out = {"position": pos, "exit": "exit row" in f, "extra": seat["type"] == "extra",
+           "open_front": OPEN_FRONT in f, "bulkhead": "bulkhead seat" in f}
+    out["view"] = None if pos != "window" else "window without window view" not in f
+    return out
+
+
+def matches(seat, cat):
+    a = attributes(seat)
+    pos, std = a["position"], not a["extra"] and not a["exit"]
+    return {
+        "exit_window_open": a["exit"] and pos == "window" and a["open_front"],
+        "exit_window": a["exit"] and pos == "window",
+        "extra_window": a["extra"] and pos == "window",
+        "exit_aisle": a["exit"] and pos == "aisle",
+        "extra_aisle": a["extra"] and pos == "aisle",
+        "std_window": std and pos == "window",
+        "std_aisle": std and pos == "aisle",
+        "middle": pos == "middle",
+    }[cat]
+
+
+def priority(seat, prefs):
+    """(priority, category) of the best enabled category the seat matches, or (None, None)."""
+    best = (None, None)
+    for cat, p in prefs["priorities"].items():
+        if p is not None and matches(seat, cat) and (best[0] is None or p < best[0]):
+            best = (p, cat)
+    return best
+
+
+def _tiebreak(seat, prefs):
+    a, out = attributes(seat), []
+    for k in prefs.get("tiebreak") or []:
+        if k == "position":
+            want = prefs.get("position")
+            out.append(0 if want not in ("window", "aisle") or a["position"] == want else 1)
+        elif k == "legroom":
+            out.append(0 if a["extra"] or a["open_front"] else 1)
+        elif k == "forward":
+            out.append((seat["row"] - 1) // 10)       # front / middle / back of the cabin, not row by row
+        elif k == "view":
+            out.append(1 if a["view"] is False else 0)
+    return tuple(out)
+
+
+def key(seat, prefs):
+    """Sort key, lower is better: priority (unmatched last), then the tie-breakers, then seat."""
+    p, _ = priority(seat, prefs)
+    return (p if p is not None else MAX_PRIORITY + 1, *_tiebreak(seat, prefs), seat["row"], seat["col"])
 
 
 def fit(seat, prefs):
-    """How well a seat matches the ranked preferences, 0-100."""
-    w = _weights(prefs)
-    total = sum(x for _, x in w)
-    return 100.0 * sum(_value(seat, k, prefs) * x for k, x in w) / total if total else 0.0
+    """0-100 for colours and lists: priority 1 = 100 ... priority 8 = 0; unmatched = 0."""
+    p, _ = priority(seat, prefs)
+    return 0.0 if p is None else round(100.0 * (MAX_PRIORITY - p) / (MAX_PRIORITY - 1), 1)
 
 
-def score(seat, prefs):
-    """Ranking key (higher is better): the fit, then forward rows break ties."""
-    return fit(seat, prefs) - seat["row"] * 1e-4
+score = fit
+
+
+def ranked(seats, prefs, status="none", taken=(), window=True):
+    """Free (price 0) available seats this status can get now, best first. Seats matching none of
+    the enabled priorities only with prefs["fallback"]."""
+    kinds = allowed(status, window)
+    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in kinds
+          and s["seat"] not in taken and (prefs.get("fallback") or priority(s, prefs)[0] is not None)]
+    return sorted(ok, key=lambda s: key(s, prefs))
 
 
 def choose(seats, prefs, status="none", taken=(), window=True):
-    """The best free (price 0) available seat this status can get, or None."""
+    """The best free seat this status can get, or None."""
     ok = ranked(seats, prefs, status, taken, window)
     return ok[0] if ok else None
 
 
-def ranked(seats, prefs, status="none", taken=(), window=True):
-    """Free (price 0) available seats this status can get now, best first."""
-    kinds = allowed(status, window)
-    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in kinds
-          and s["seat"] not in taken]
-    return sorted(ok, key=lambda s: -score(s, prefs))
-
-
 def better(new, current, prefs):
-    """Is moving from `current` (None = no seat yet) to `new` an improvement on what's ranked
-    (not just a row or two further forward when "front" isn't asked for)?"""
+    """Is moving from `current` (None = no seat yet) to `new` an improvement? A better priority,
+    or the same priority and a better tie-breaker (never just another seat number)."""
     if new is None:
         return False
-    return current is None or fit(new, prefs) > fit(current, prefs) + 1e-6
+    if current is None:
+        return True
+    pn, pc = priority(new, prefs)[0], priority(current, prefs)[0]
+    if pn is None:
+        return False if pc is not None else bool(prefs.get("fallback")) and _tiebreak(new, prefs) < _tiebreak(current, prefs)
+    if pc is None or pn < pc:
+        return True
+    return pn == pc and _tiebreak(new, prefs) < _tiebreak(current, prefs)
+
+
+def label(seat, prefs):
+    """'Priority 3: Extra-legroom window', or why it matches none."""
+    p, cat = priority(seat, prefs)
+    if p is None:
+        return "Not in your priorities"
+    return f"Priority {p}: {CATEGORIES[cat]}"
+
+
+def explain(chosen, prefs, fallback=None):
+    """Why this seat: 'Selected: 21A. Matched Priority 3: Extra-legroom window. Higher-ranked
+    Exit-row window seats were unavailable.'"""
+    p, cat = priority(chosen, prefs)
+    if p is None:
+        off = [CATEGORIES[c] for c, v in prefs["priorities"].items() if v is None and matches(chosen, c)]
+        why = f" ({', '.join(off)} is Off)" if off else ""
+        return (f"Selected: {chosen['seat']} as a fallback: it matches none of your priorities{why}. "
+                "Taken because Allow fallback seats is on.")
+    higher = [CATEGORIES[c] for c, v in sorted(prefs["priorities"].items(), key=lambda kv: kv[1] or 99)
+              if v is not None and v < p]
+    text = f"Selected: {chosen['seat']}. Matched Priority {p}: {CATEGORIES[cat]}."
+    if higher:
+        text += f" Higher-ranked {', '.join(higher)} seats were unavailable."
+    return text
+
+
+def best_priority(prefs):
+    """The best (lowest) enabled priority number, or None."""
+    vals = [v for v in prefs["priorities"].values() if v is not None]
+    return min(vals) if vals else None
+
+
+# ---------- converting the earlier ranked wishes ----------
+def _legacy_fit(seat, old):
+    """The scoring before priorities existed: each ranked wish outweighs everything below it."""
+    order = [k for k in (old.get("order") or []) if k != "seat_type" or old.get("position") in ("window", "aisle")]
+    f = seat["features"]
+
+    def value(k):
+        return {"seat_type": 1.0 if old.get("position") in f else 0.0,
+                "no_middle": 0.0 if "middle" in f else 1.0,
+                "extra_legroom": {"extra": 1.0, "preferred": 0.5, "standard": 0.0}[seat["type"]],
+                "exit_row": 1.0 if "exit row" in f else 0.0,
+                "open_front": 1.0 if OPEN_FRONT in f else 0.0,
+                "bulkhead": 1.0 if "bulkhead seat" in f else 0.0,
+                "window_view": 0.0 if "window without window view" in f else 1.0,
+                "front": 0.0}.get(k, 0.0)
+    return sum(value(k) * 4 ** (len(order) - 1 - i) for i, k in enumerate(order))
+
+
+def _migrate(old):
+    """Priorities from the earlier ranked wishes: each category ranked by how a typical seat of it
+    scored under them (equal scores share a priority). "Never a middle seat" turns Middle seat Off,
+    as it said; nothing else is switched off. Kept marked so the form can say so."""
+    if "order" not in old:      # the first version: a flag per wish
+        legacy = ["no_middle", "extra_legroom", "seat_type", "exit_row", "window_view", "bulkhead", "front"]
+        old = {"position": old.get("position", "window"),
+               "order": [k for k in legacy if k == "seat_type" or old.get(k)]}
+    reps = {
+        "exit_window_open": ("extra", {"window", "exit row", OPEN_FRONT}),
+        "exit_window": ("extra", {"window", "exit row"}), "extra_window": ("extra", {"window"}),
+        "exit_aisle": ("extra", {"aisle", "exit row"}), "extra_aisle": ("extra", {"aisle"}),
+        "std_window": ("standard", {"window"}), "std_aisle": ("standard", {"aisle"}),
+        "middle": ("standard", {"middle"}),
+    }
+    scores = {c: _legacy_fit({"type": t, "features": f, "row": 10}, old) for c, (t, f) in reps.items()}
+    levels = sorted(set(scores.values()), reverse=True)
+    pri = {c: levels.index(v) + 1 for c, v in scores.items()}
+    if "no_middle" in (old.get("order") or []):
+        pri["middle"] = None
+    tb = (["position"] if old.get("position") in ("window", "aisle") else []) + ["legroom", "forward", "view"]
+    return {"version": 2, "position": old.get("position", "window"), "priorities": pri, "tiebreak": tb,
+            "fallback": False, "explain": True, "migrated": True}
 
 
 def describe(seat):

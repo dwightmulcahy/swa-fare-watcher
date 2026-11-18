@@ -63,6 +63,8 @@ templates.env.globals["asset"] = _asset
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["seats"] = seats
 templates.env.globals["seat_prefs"] = seats.prefs_of
+templates.env.globals["prio_rows"] = lambda p: sorted(
+    p["priorities"].items(), key=lambda kv: (kv[1] is None, kv[1] or 0, list(seats.CATEGORIES).index(kv[0])))
 templates.env.globals["max_dates"] = settings.max_dates_per_watch
 templates.env.filters["days_ahead"] = lambda n: (dt.date.today() + dt.timedelta(days=int(n))).isoformat()
 templates.env.filters["airports"] = lambda v: "/".join(swa.airports(v))
@@ -597,15 +599,24 @@ def create_app(worker=None, start_worker=True):
                 w["name"] = f"Seats {conf}"
             status = str(f.get("seat_status", "none"))
             w["seat_status"] = seats.status_of(status)
-            pos = str(f.get("seat_position", "window"))
-            ranks = []
-            for i, k in enumerate(seats.CRITERIA):
-                r = str(f.get(f"rank_{k}", "") or ("99" if f.get(f"seat_{k}") else ""))
-                if r.isdigit():
-                    ranks.append((int(r), i, k))
-            p = seats.normalize(pos if pos in seats.POSITIONS else "any", [k for *_, k in sorted(ranks)])
-            w["seat_prefs"] = json.dumps({"position": p["position"], "order": p["order"]})
+            w["seat_prefs"] = seats.to_json(parse_seat_prefs(f))
         return w, errs
+
+    def parse_seat_prefs(f):
+        """Seat selection priorities from the form: prio_<category> = 1-8 or blank (Off), the
+        tie-breakers in tiebreak_order with tb_<name> ticked, seat_position, fallback, explain."""
+        if not any(f"prio_{k}" in f for k in seats.CATEGORIES):     # a form without the list: defaults
+            return seats.normalize({"position": str(f.get("seat_position", "window"))})
+        pri = {}
+        for k in seats.CATEGORIES:
+            v = str(f.get(f"prio_{k}", "")).strip()
+            pri[k] = int(v) if v.isdigit() and 1 <= int(v) <= seats.MAX_PRIORITY else None
+        order = [k for k in str(f.get("tiebreak_order", "")).split(",") if k in seats.TIEBREAKS] or seats.DEFAULT_TIEBREAK
+        order += [k for k in seats.TIEBREAKS if k not in order]
+        return seats.normalize({
+            "position": str(f.get("seat_position", "window")), "priorities": pri,
+            "tiebreak": [k for k in order if f.get(f"tb_{k}")],
+            "fallback": bool(f.get("seat_fallback")), "explain": bool(f.get("seat_explain"))})
 
     def _maybe_lookup(wid, w):
         """A seat watch saved without its flights: read them from the booking in the background."""
@@ -615,6 +626,21 @@ def create_app(worker=None, start_worker=True):
                             ("Looking up the booking on southwest.com…", wid))
             threading.Thread(target=app.state.worker.lookup_booking, args=(wid,), name="swa-lookup",
                              daemon=True).start()
+
+    @app.post("/watches/{wid}/seat-prefs")
+    async def save_seat_prefs(request: Request, wid: int):
+        """Auto-save from the seat watch form: just the seat selection priorities."""
+        u, s = require(request)
+        f = await request.form()
+        if not hmac.compare_digest(str(f.get("csrf", "")), s["csrf"]):
+            return JSONResponse({"ok": False, "error": "form expired"}, status_code=403)
+        w = watch_or_404(u, wid)
+        if w["kind"] != "seats":
+            return JSONResponse({"ok": False, "error": "not a seat watch"}, status_code=400)
+        p = parse_seat_prefs(f)
+        with db.tx() as con:
+            con.execute("UPDATE watches SET seat_prefs=? WHERE id=?", (seats.to_json(p), wid))
+        return JSONResponse({"ok": True, "saved": db.now()})
 
     @app.post("/watches/{wid}/lookup")
     async def relookup(request: Request, wid: int):
@@ -678,7 +704,10 @@ def create_app(worker=None, start_worker=True):
                             else j["opens_local"])
                     now_seat = next((p["seat"] for jj in jobs for p in jj["seats_now"] if p.get("seat")), None)
                     seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {when}",
-                                          "seat": f"{now_seat['seat']} · score {round(now_seat['score'])}"
+                                          "seat": f"{now_seat['seat']} · " + (
+                                              f"P{now_seat['priority']}" if now_seat.get("priority")
+                                              else "not in priorities" if "priority" in now_seat
+                                              else f"score {round(now_seat['score'])}")
                                           if now_seat else ""}
         return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},

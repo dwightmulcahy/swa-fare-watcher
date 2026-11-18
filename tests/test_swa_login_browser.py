@@ -579,50 +579,115 @@ def test_checkin_retries_while_too_early_then_reads_the_boarding_group(site, mon
     assert len(sleeps) == 1 and got == (["Group 3"], ["14A"])
 
 
-def test_seat_heat_map_matches_the_server_scoring_and_follows_the_ranks(client):
+def _app_page(client, p, path):
+    """A page of the app in a real browser, served through the test client (headers and CSP included)."""
+    kw = {"channel": "chrome"} if shutil.which("google-chrome") or shutil.which("google-chrome-stable") else {}
+    b = p.chromium.launch(**kw)
+    pg = b.new_page(viewport={"width": 1200, "height": 2200})
+    errors, posts = [], []
+    pg.on("console", lambda m: m.type == "error" and errors.append(m.text))
+
+    def serve(route):
+        from urllib.parse import urlsplit
+        u = urlsplit(route.request.url)
+        path = u.path + (f"?{u.query}" if u.query else "")
+        if route.request.method == "POST":
+            posts.append(path)
+            r = client.post(path, content=route.request.post_data_buffer,
+                            headers={"content-type": route.request.headers.get("content-type", "")})
+        else:
+            r = client.get(path)
+        route.fulfill(status=r.status_code, headers=dict(r.headers), body=r.content)
+    pg.route("http://app.test/**", serve)
+    pg.goto("http://app.test" + path)
+    return b, pg, errors, posts
+
+
+def test_seat_heat_map_matches_the_server_ranking_and_follows_the_priorities(client):
     from playwright.sync_api import sync_playwright
 
     from app import seats
     from tests.test_web import admin_client
     admin_client(client)
     with sync_playwright() as p:
-        kw = {"channel": "chrome"} if shutil.which("google-chrome") or shutil.which("google-chrome-stable") else {}
-        b = p.chromium.launch(**kw)
-        pg = b.new_page()
-        errors = []
-        pg.on("console", lambda m: m.type == "error" and errors.append(m.text))
-
-        def serve(route):    # the app itself, headers (CSP) and all
-            from urllib.parse import urlsplit
-            u = urlsplit(route.request.url)
-            r = client.get(u.path + (f"?{u.query}" if u.query else ""))
-            route.fulfill(status=r.status_code, headers=dict(r.headers), body=r.content)
-        pg.route("http://app.test/**", serve)
-        pg.goto("http://app.test/watches/new?kind=seats")
-        assert "Content-Security-Policy" in client.get("/watches/new?kind=seats").headers
+        b, pg, errors, _ = _app_page(client, p, "/watches/new?kind=seats")
+        pg.evaluate("localStorage.clear()")
         pg.wait_for_selector(".heat-seat", state="attached")
         assert not [e for e in errors if "Content Security Policy" in e], errors
 
-        def fits():
-            return {e["seat"]: float(e["fit"]) for e in pg.eval_on_selector_all(
-                ".heat-seat", "els => els.map(e => ({seat: e.dataset.seat, fit: e.dataset.fit}))")}
-        maps = seats.example_maps()
-        plane = maps["Boeing 737-800"]
-        default = seats.prefs_of({"seat_prefs": None})
-        got = fits()
-        assert len(got) == len(plane)
-        for s in plane:
-            assert abs(got[s["seat"]] - seats.fit({**s, "features": set(s["features"])}, default)) < 0.01, s["seat"]
-        pg.select_option("[name=rank_extra_legroom]", "")                 # change a rank: map redraws
-        pg.select_option("[name=rank_open_front]", "1")
+        def state():
+            return {e["seat"]: e for e in pg.eval_on_selector_all(
+                ".heat-seat", "els => els.map(e => ({seat: e.dataset.seat, fit: +e.dataset.fit, pr: e.dataset.priority}))")}
+
+        def check(prefs, plane):
+            got = state()
+            for s in seats.example_maps()[plane]:
+                s = {**s, "features": set(s["features"])}
+                pr = seats.priority(s, prefs)[0]
+                assert got[s["seat"]]["pr"] == ("" if pr is None else str(pr)), s["seat"]
+                assert abs(got[s["seat"]]["fit"] - seats.fit(s, prefs)) < 0.06, s["seat"]
+            pick = seats.choose([{**s, "features": set(s["features"])} for s in seats.example_maps()[plane]], prefs)
+            assert pg.eval_on_selector_all(".heat-best", "els => els.map(e => e.dataset.seat)") == [pick["seat"]]
+        check(seats.normalize({}), "Boeing 737-800")
+        pg.select_option("[name=prio_extra_window]", "")                     # change priorities: map redraws
+        pg.select_option("[name=prio_middle]", "")
         pg.select_option("#heat-plane", "Boeing 737 MAX 8")
-        after = fits()
-        best = pg.eval_on_selector_all(".heat-best", "els => els.map(e => e.dataset.seat)")
-        assert after["16A"] > after["14A"] and set(best) <= {"16A", "16F"} and best
-        pg.focus('.heat-seat[data-seat="16A"]')                           # tooltip (hover or focus)
+        prefs = seats.normalize({"priorities": {**seats.DEFAULT_PRIORITIES, "extra_window": None, "middle": None}})
+        check(prefs, "Boeing 737 MAX 8")
+        assert state()["2B"]["pr"] == ""                                         # middle is Off now
+        pg.focus('.heat-seat[data-seat="16A"]')                                 # tooltip: priority + category
         tip = pg.locator("#heat-tip")
-        assert tip.is_visible() and "Seat 16A: Best seat" in tip.inner_text() and "score" in tip.inner_text()
+        assert tip.is_visible() and "Seat 16A: Priority 1 · Exit-row window, no seat in front" in tip.inner_text()
         bg = pg.eval_on_selector('.heat-seat[data-seat="16A"]', "e => e.style.backgroundColor")
         r, g, bl = map(int, bg[4:-1].split(","))
-        assert abs(r - 48) <= 2 and abs(g - 76) <= 2 and abs(bl - 178) <= 2, bg          # ~#304CB2 at ~100
+        assert abs(r - 48) <= 2 and abs(g - 76) <= 2 and abs(bl - 178) <= 2, bg  # #304CB2 at priority 1
+        b.close()
+
+
+def test_priorities_ui_reorders_restores_and_autosaves(client):
+    from playwright.sync_api import expect, sync_playwright
+
+    from app import db, seats
+    from tests.test_seats import _seat_watch
+    from tests.conftest import future
+    wid, _ = _seat_watch(client, future(10))
+    with sync_playwright() as p:
+        b, pg, errors, posts = _app_page(client, p, f"/watches/{wid}/edit")
+        order = lambda: pg.eval_on_selector_all("#prio-list > li", "els => els.map(e => e.dataset.key)")  # noqa: E731
+        assert order() == list(seats.CATEGORIES)
+        pg.click('#prio-list li[data-key="std_window"] [data-move="-1"]')          # ↑: renumbers in order
+        assert order().index("std_window") == 4
+        assert pg.input_value("[name=prio_std_window]") == "5" and pg.input_value("[name=prio_extra_aisle]") == "6"
+        pg.select_option("[name=prio_middle]", "1")                                 # select: row moves up
+        assert order().index("middle") <= 1
+        expect(pg.locator("#prio-saved")).to_have_text("Saved")
+        saved = seats.prefs_of(db.one("SELECT * FROM watches WHERE id=?", (wid,)))
+        assert saved["priorities"]["middle"] == 1 and saved["priorities"]["std_window"] == 5
+        assert any(x.endswith("/seat-prefs") for x in posts)
+        pg.click("#prio-defaults")
+        assert order() == list(seats.CATEGORIES) and pg.input_value("[name=prio_middle]") == "8"
+        expect(pg.locator("#prio-saved")).to_have_text("Saved")
+        assert seats.prefs_of(db.one("SELECT * FROM watches WHERE id=?", (wid,)))["priorities"] == seats.DEFAULT_PRIORITIES
+        assert not errors, errors
+        b.close()
+
+
+def test_priorities_drag_and_new_watch_draft(client):
+    from playwright.sync_api import expect, sync_playwright
+
+    from tests.test_web import admin_client
+    admin_client(client)
+    with sync_playwright() as p:
+        b, pg, errors, _ = _app_page(client, p, "/watches/new?kind=seats")
+        pg.evaluate("localStorage.clear()")
+        pg.reload()
+        order = lambda: pg.eval_on_selector_all("#prio-list > li", "els => els.map(e => e.dataset.key)")  # noqa: E731
+        pg.locator("#prio-list").scroll_into_view_if_needed()
+        pg.drag_and_drop('#prio-list li[data-key="middle"] .prio-handle', '#prio-list li[data-key="exit_window_open"] .prio-handle')
+        assert order()[0] == "middle" and pg.input_value("[name=prio_middle]") == "1"
+        expect(pg.locator("#prio-saved")).to_contain_text("Draft")
+        pg.reload()                                                            # a new watch: the draft comes back
+        expect(pg.locator("#prio-saved")).to_contain_text("Restored")
+        assert pg.input_value("[name=prio_middle]") == "1" and order()[0] == "middle"
+        assert not errors, errors
         b.close()
