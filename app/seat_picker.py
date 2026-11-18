@@ -12,7 +12,7 @@ import random
 import re
 import time
 
-from . import applog, seats
+from . import applog, pagewatch, seats
 
 MANAGE_URL = "https://www.southwest.com/air/manage-reservation/"
 LOOKUP = {
@@ -69,6 +69,8 @@ class SeatPicker:
         self.b.check_blocked("manage reservation", resp)
         self.b._dismiss_cookie_banner()
         page.locator(LOOKUP["conf"]).wait_for(state="visible", timeout=30_000)
+        pagewatch.check_elements(self.b, "manage reservation lookup", LOOKUP, self.uid)
+        pagewatch.check_structure(self.b, "manage reservation lookup", self.uid)
         for key, value in (("conf", self.conf), ("first", self.first), ("last", self.last)):
             el = page.locator(LOOKUP[key]).first
             self.b._click(el)
@@ -86,6 +88,9 @@ class SeatPicker:
         self.page.locator(SEAT_BUTTON).first.wait_for(state="attached", timeout=45_000)
         self.b.check_blocked("seat map")
         self.b._beat(1.0, 2.5)
+        pagewatch.check_elements(self.b, "seat map", {"seat buttons": SEAT_BUTTON, "passengers": PASSENGER,
+                                                      "seats total": SEATS_TOTAL}, self.uid)
+        pagewatch.check_structure(self.b, "seat map", self.uid)
 
     def reload_seat_map(self):
         self.page.reload(wait_until="domcontentloaded", timeout=60_000)
@@ -252,6 +257,8 @@ class SeatPicker:
             if not getattr(e, "screenshot", None) and hasattr(self.b, "capture"):
                 e.screenshot = self.b.capture("seat-error")
             self._save_page()
+            if not isinstance(e, NotFree) and e.__class__.__name__ != "Blocked":
+                pagewatch.flow_failed("seat selection", e, self.b, self.uid)
             raise
 
     def _save_page(self):
