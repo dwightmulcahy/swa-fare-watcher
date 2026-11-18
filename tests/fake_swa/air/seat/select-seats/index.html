@@ -7,11 +7,23 @@
 <div id="pax"></div><div id="map"></div>
 <div aria-label="Seat pricing summary" role="status" id="total">Seats total: $0</div>
 <button type="button" id="go">Continue to payment</button>
+<!-- clicking a seat opens its details with a Select button (as on southwest.com); Select then
+     shows the "Please Note!" no-refund notice, and its Ok assigns the seat -->
+<section id="details" hidden><h2 id="dtitle"></h2><button type="button" id="dclose" aria-label="Close">X</button>
+  <button type="button" id="select">Select</button></section>
+<div id="note" role="dialog" hidden><h2>Please Note!</h2>
+  <p>You may select this seat, but no refunds will be given if you paid for your original seat.</p>
+  <button type="button" id="ok">Ok</button></div>
 <script>
 const loads = Number(sessionStorage.getItem("seatLoads") || 0) + 1;
 sessionStorage.setItem("seatLoads", loads);
 const price = loads >= 2 ? 0 : 39;
-let current = localStorage.getItem("seat") || "11F", chosen = current;
+let current = localStorage.getItem("seat") || "11F", chosen = current, pending = null;
+document.getElementById("select").onclick = () => { document.getElementById("details").hidden = true;
+  document.getElementById("note").hidden = false; };
+document.getElementById("ok").onclick = () => { document.getElementById("note").hidden = true;
+  chosen = pending; setPax();
+  document.getElementById("total").textContent = `Seats total: $${chosen === current ? 0 : price}`; };
 const pax = document.createElement("button");
 pax.setAttribute("role", "radio"); pax.setAttribute("aria-checked", "true");
 document.getElementById("pax").append(pax);
@@ -27,8 +39,8 @@ fetch("../labels.txt").then((r) => r.text()).then((text) => {
     const b = document.createElement("button");
     b.setAttribute("aria-label", l); b.textContent = code;
     if (!free) b.disabled = true;
-    b.onclick = () => { chosen = code; setPax();
-      document.getElementById("total").textContent = `Seats total: $${code === current ? 0 : price}`; };
+    b.onclick = () => { pending = code; document.getElementById("dtitle").textContent = `Seat ${code}`;
+      document.getElementById("details").hidden = false; };
     map.append(b);
   });
 });

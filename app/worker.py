@@ -882,7 +882,8 @@ class Worker:
         except Exception as e:
             fails += 1
             note = f"Couldn't finish ({e.__class__.__name__}: {str(e)[:200]})"
-            applog.warn(f"{w['name']}: seat check ({leg}): {note}", user_id=uid, source="seats")
+            applog.warn(f"{w['name']}: seat check ({leg}): {note}", user_id=uid, source="seats",
+                        attachment=getattr(e, "screenshot", None))
             if fails >= self.SEAT_MAX_FAILS:
                 stop = f"{note}, {fails} times in a row. Pick your seat yourself."
         finally:

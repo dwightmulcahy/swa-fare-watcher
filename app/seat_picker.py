@@ -38,6 +38,8 @@ PASSENGER = '[role=radio][aria-label*="Seat:"]'
 FLIGHT_TAB = '[role=tab][aria-label^="Flight "]'
 SEATS_TOTAL = '[aria-label="Seat pricing summary"]'
 CONTINUE = 'button:has-text("Continue to payment")'
+SELECT = 'button:text-is("Select"):visible'          # in the seat details panel after a seat click
+NOTE_OK = 'button:text-is("Ok"):visible'             # "Please Note! ... no refunds ..." notice
 CONFIRM = "#confirmSeatChange"
 
 
@@ -155,12 +157,36 @@ class SeatPicker:
             btn = self.page.locator(f'{SEAT_BUTTON}[aria-label^="Seat {new["seat"]} "]').first
             self.b._click(btn)
             self.b._beat(0.8, 1.6)
-            got = self.current_seat(self.passengers()[pi].get_attribute("aria-label"))
-            if got != new["seat"]:
-                raise RuntimeError(f"seat {new['seat']} didn't stick (shows {got})")
+            self.confirm_seat(pi, new["seat"])
         total = self.page.locator(SEATS_TOTAL).first.inner_text(timeout=10_000)
         if money(total) != 0:
             raise NotFree(f"the seat map's total is {total.strip()}")
+
+    def confirm_seat(self, pi, code, timeout=15):
+        """A seat click opens its details panel: press Select, then Ok on the "no refunds if you
+        paid for your original seat" notice, until the passenger shows the seat. Never presses
+        Select while the bar's seats total isn't $0."""
+        end = time.monotonic() + timeout
+        while True:
+            got = self.current_seat(self.passengers()[pi].get_attribute("aria-label"))
+            if got == code:
+                return
+            note = self.page.locator(NOTE_OK)
+            select = self.page.locator(SELECT)
+            if note.count() and re.search(r"no refunds", self.page.inner_text("body"), re.I):
+                self.b._click(note.first)
+            elif select.count():
+                total = self.page.locator(SEATS_TOTAL)
+                text = total.first.inner_text(timeout=5_000) if total.count() else self.page.inner_text("body")
+                m = re.search(r"Seats total:\s*\$\s*([\d,]+(?:\.\d+)?)", text)
+                if m and money(m.group(1)) != 0:
+                    raise NotFree(f"seat {code} would cost ${m.group(1)}")
+                self.b._click(select.first)
+            elif time.monotonic() > end:
+                raise RuntimeError(f"seat {code} didn't stick (shows {got})")
+            self.b._beat(0.6, 1.2)
+            if time.monotonic() > end + 10:
+                raise RuntimeError(f"seat {code} didn't stick (shows {got})")
 
     def checkout(self):
         """Continue to the review page and confirm only if the amount due is 0.00."""
@@ -190,7 +216,16 @@ class SeatPicker:
     # ----- the whole job
     def run(self, until, poll=(45, 90), sleep=time.sleep, stop=lambda: False):
         """Open the booking, then keep checking the seat map until a better free seat shows up
-        (selection opening) or `until` (epoch seconds). Returns (changes, note)."""
+        (selection opening) or `until` (epoch seconds). Returns (changes, note). A failure carries
+        a screenshot of the page (e.screenshot) for the log."""
+        try:
+            return self._run(until, poll, sleep, stop)
+        except Exception as e:
+            if not getattr(e, "screenshot", None) and hasattr(self.b, "capture"):
+                e.screenshot = self.b.capture("seat-error")
+            raise
+
+    def _run(self, until, poll, sleep, stop):
         self.b.warm_up()
         self.open_reservation()
         self.open_seat_map()
