@@ -114,7 +114,8 @@ def test_seat_watch_form_saves_preferences(client):
     assert (w["kind"], w["seat_auto"], w["booking_conf"], w["seat_status"]) == ("seats", 1, "ABC123", "priority")
     p = json.loads(w["seat_prefs"])
     assert p["priorities"] == {"exit_window_open": None, "exit_window": None, "extra_window": None,
-                               "exit_aisle": 1, "extra_aisle": 1, "std_window": 3, "std_aisle": 2, "middle": None}
+                               "bulkhead_window": None, "exit_aisle": 1, "extra_aisle": 1, "bulkhead_aisle": None,
+                               "std_window": 3, "std_aisle": 2, "middle": None}
     assert p["tiebreak"] == ["view", "legroom"] and p["explain"] and not p["fallback"] and p["version"] == 2
     b = json.loads(w["booked"])[0]
     assert b["time"] == "13:15" and b["from"] == "LIR"

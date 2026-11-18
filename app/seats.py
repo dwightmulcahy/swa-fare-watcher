@@ -51,12 +51,16 @@ POSITIONS = {"window": "Window", "aisle": "Aisle", "any": "No preference"}
 # Seat selection priorities: complete combinations of seat type and position, each given a
 # priority 1-8 (equal allowed) or Off. A seat takes the best priority of the categories it matches,
 # and a lower-priority seat never beats a higher-priority one, whatever else it has going for it.
+# A bulkhead seat (front row of the cabin: nothing to stow under the seat ahead) counts as its own
+# seat type, so it can be ranked or switched off apart from other Extra Legroom seats.
 CATEGORIES = {
     "exit_window_open": "Exit-row window, no seat in front",
     "exit_window": "Exit-row window",
     "extra_window": "Extra-legroom window",
+    "bulkhead_window": "Bulkhead window",
     "exit_aisle": "Exit-row aisle",
     "extra_aisle": "Extra-legroom aisle",
+    "bulkhead_aisle": "Bulkhead aisle",
     "std_window": "Standard window",
     "std_aisle": "Standard aisle",
     "middle": "Middle seat",
@@ -69,7 +73,9 @@ TIEBREAKS = {
     "legroom": "More legroom (Extra Legroom, no seat in front)",
     "forward": "Further forward in the cabin",
     "view": "A window with a view",
+    "recline": "A seat that reclines",
 }
+LIMITED_RECLINE = "limited recline"
 DEFAULT_TIEBREAK = list(TIEBREAKS)
 DEFAULT_PREFS = {"version": 2, "position": "window", "priorities": dict(DEFAULT_PRIORITIES),
                  "tiebreak": list(DEFAULT_TIEBREAK), "fallback": False, "explain": True}
@@ -135,13 +141,19 @@ def normalize(p):
     """Fill in and clean a priorities dict."""
     pos = p.get("position") if p.get("position") in POSITIONS else DEFAULT_PREFS["position"]
     pri = {}
-    given = p.get("priorities") if isinstance(p.get("priorities"), dict) else DEFAULT_PRIORITIES
+    given = dict(p.get("priorities")) if isinstance(p.get("priorities"), dict) else dict(DEFAULT_PRIORITIES)
+    # saved before bulkhead had its own categories: those seats counted as Extra-legroom, so keep that
+    for bulk, extra in (("bulkhead_window", "extra_window"), ("bulkhead_aisle", "extra_aisle")):
+        if bulk not in given:
+            given[bulk] = given.get(extra)
     for k in CATEGORIES:
         v = given.get(k)
         pri[k] = v if isinstance(v, int) and 1 <= v <= MAX_PRIORITY else None
     tb = [k for k in dict.fromkeys(p.get("tiebreak") if isinstance(p.get("tiebreak"), list) else DEFAULT_TIEBREAK)
           if k in TIEBREAKS]
-    out = {"version": 2, "position": pos, "priorities": pri, "tiebreak": tb,
+    if isinstance(p.get("tiebreak"), list) and "recline" not in p["tiebreak"] and not p.get("tiebreak_v2"):
+        tb.append("recline")           # added later: on for lists saved before it existed
+    out = {"version": 2, "tiebreak_v2": True, "position": pos, "priorities": pri, "tiebreak": tb,
            "fallback": bool(p.get("fallback", False)), "explain": bool(p.get("explain", True))}
     if p.get("migrated"):
         out["migrated"] = True
@@ -167,18 +179,23 @@ def attributes(seat):
     out = {"position": pos, "exit": "exit row" in f, "extra": seat["type"] == "extra",
            "open_front": OPEN_FRONT in f, "bulkhead": "bulkhead seat" in f}
     out["view"] = None if pos != "window" else "window without window view" not in f
+    out["recline"] = False if LIMITED_RECLINE in f else None      # only known when it doesn't
     return out
 
 
 def matches(seat, cat):
     a = attributes(seat)
-    pos, std = a["position"], not a["extra"] and not a["exit"]
+    pos, bulk = a["position"], a["bulkhead"]
+    extra = a["extra"] and not bulk
+    std = not a["extra"] and not a["exit"] and not bulk
     return {
         "exit_window_open": a["exit"] and pos == "window" and a["open_front"],
         "exit_window": a["exit"] and pos == "window",
-        "extra_window": a["extra"] and pos == "window",
+        "extra_window": extra and pos == "window",
+        "bulkhead_window": bulk and pos == "window",
         "exit_aisle": a["exit"] and pos == "aisle",
-        "extra_aisle": a["extra"] and pos == "aisle",
+        "extra_aisle": extra and pos == "aisle",
+        "bulkhead_aisle": bulk and pos == "aisle",
         "std_window": std and pos == "window",
         "std_aisle": std and pos == "aisle",
         "middle": pos == "middle",
@@ -206,6 +223,8 @@ def _tiebreak(seat, prefs):
             out.append((seat["row"] - 1) // 10)       # front / middle / back of the cabin, not row by row
         elif k == "view":
             out.append(1 if a["view"] is False else 0)
+        elif k == "recline":
+            out.append(1 if a["recline"] is False else 0)
     return tuple(out)
 
 
@@ -315,6 +334,7 @@ def _migrate(old):
         "exit_window_open": ("extra", {"window", "exit row", OPEN_FRONT}),
         "exit_window": ("extra", {"window", "exit row"}), "extra_window": ("extra", {"window"}),
         "exit_aisle": ("extra", {"aisle", "exit row"}), "extra_aisle": ("extra", {"aisle"}),
+        "bulkhead_window": ("extra", {"window", "bulkhead seat"}), "bulkhead_aisle": ("extra", {"aisle", "bulkhead seat"}),
         "std_window": ("standard", {"window"}), "std_aisle": ("standard", {"aisle"}),
         "middle": ("standard", {"middle"}),
     }
@@ -323,7 +343,7 @@ def _migrate(old):
     pri = {c: levels.index(v) + 1 for c, v in scores.items()}
     if "no_middle" in (old.get("order") or []):
         pri["middle"] = None
-    tb = (["position"] if old.get("position") in ("window", "aisle") else []) + ["legroom", "forward", "view"]
+    tb = (["position"] if old.get("position") in ("window", "aisle") else []) + ["legroom", "forward", "view", "recline"]
     return {"version": 2, "position": old.get("position", "window"), "priorities": pri, "tiebreak": tb,
             "fallback": False, "explain": True, "migrated": True}
 
@@ -368,37 +388,77 @@ def international(origin, dest):
     return not all(c in DOMESTIC for c in countries)
 
 
-# ---------- example seat maps for the preference heat map (the watch form) ----------
-# Rows 1-16 follow a real Southwest 737-800 map (types, exit rows 14-15, windows without a view);
-# the rest is Standard. The MAX 8 variant has exit rows 14 and 16 with no window seats in row 15,
-# so its exit-row windows have no seat in front. Your plane may differ: these show the idea.
-_EXTRA_ROWS, _PREF_ROWS, _NO_VIEW = {1, 2, 3, 14, 15}, set(range(4, 14)) | {16}, {10, 11, 12}
+# ---------- Southwest's planes ----------
+# Cabin layouts under assigned seating (Upgraded Points, Feb 2026; seatmaps.com; the seat maps
+# users saved): seat types by row, exit rows, seats left out, windows without a view, and rows
+# that recline little or not at all. Seat maps don't say which seats recline, so it's added from
+# here when the map names the plane. Layouts can change: the map's own labels always win.
+PLANES = {
+    "Boeing 737 MAX 8": {
+        "rows": 30, "extra": set(range(1, 6)) | {14, 15, 16}, "extra_seats": {"6A", "6B", "6C"},
+        "preferred": set(range(7, 14)) | {6}, "exits": {14, 15, 16}, "skip": {"15A", "15F"},
+        "no_view": {"10A", "11A", "11F"}, "no_recline": {13, 14, 15, 30},
+    },
+    "Boeing 737-800": {
+        "rows": 30, "extra": set(range(1, 6)) | {14, 15, 16}, "extra_seats": {"6A", "6B", "6C"},
+        "preferred": set(range(7, 14)) | {6}, "exits": {14, 15}, "skip": set(),
+        "no_view": {"10A", "11A", "11F"}, "no_recline": {13, 14, 15, 30},
+    },
+    "Boeing 737-700": {
+        "rows": 27, "extra": set(range(1, 7)) | {15}, "extra_seats": set(),
+        "preferred": set(range(7, 15)), "exits": {14, 15}, "skip": {"14A"},
+        "no_view": {"8F"}, "no_recline": {14, 15, 27},
+    },
+}
+PLANES["Boeing 737 MAX 7"] = PLANES["Boeing 737-700"]          # replacing the -700s, same cabin for now
+
+_PLANE_NAME = re.compile(r"Boeing\s*737[\s-]*(MAX\s*([78])|([78]00))", re.I)
 
 
-def _example(rows, exits, skip=()):
-    out = []
-    for r in range(1, rows + 1):
+def plane_name(text):
+    """'Boeing 737 MAX 8' etc. from page text such as 'Boeing 737 MAX8 (subject to change)'."""
+    m = _PLANE_NAME.search(text or "")
+    if not m:
+        return None
+    return f"Boeing 737 MAX {m.group(2)}" if m.group(2) else f"Boeing 737-{m.group(3)}"
+
+
+def add_plane_facts(seat_map, plane):
+    """Mark the rows that recline little or not at all (known per plane; the last row always)."""
+    if not seat_map:
+        return seat_map
+    rows = PLANES.get(plane, {}).get("no_recline", set()) | {max(s["row"] for s in seat_map)}
+    for s in seat_map:
+        if s["row"] in rows:
+            s["features"].add(LIMITED_RECLINE)
+    return seat_map
+
+
+def _example(plane):
+    L, out = PLANES[plane], []
+    for r in range(1, L["rows"] + 1):
         for c in "ABCDEF":
-            if (r == 1 and c in "ABC") or f"{r}{c}" in skip:
+            code = f"{r}{c}"
+            if (r == 1 and c in "ABC") or code in L["skip"]:
                 continue
             f = {"window" if c in "AF" else "aisle" if c in "CD" else "middle"}
-            if r in exits:
+            if r in L["exits"]:
                 f.add("exit row")
             if r == 1:
                 f.add("bulkhead seat")
-            if c in "AF" and r in _NO_VIEW:
+            if code in L["no_view"]:
                 f.add("window without window view")
-            kind = "extra" if r in _EXTRA_ROWS or r in exits else "preferred" if r in _PREF_ROWS else "standard"
-            out.append({"seat": f"{r}{c}", "row": r, "col": c, "type": kind, "features": f,
+            kind = ("extra" if r in L["extra"] or code in L["extra_seats"] else
+                    "preferred" if r in L["preferred"] else "standard")
+            out.append({"seat": code, "row": r, "col": c, "type": kind, "features": f,
                         "price": 0, "available": True, "selected": False})
-    return annotate(out)
+    return add_plane_facts(annotate(out), plane)
 
 
 def example_maps():
-    """{name: [seat, ...]} with features as sorted lists (JSON for the form's heat map)."""
-    maps = {"Boeing 737-800": _example(29, {14, 15}),
-            "Boeing 737 MAX 8": _example(29, {14, 16}, skip={"15A", "15F"})}
-    return {k: [{**s, "features": sorted(s["features"])} for s in v] for k, v in maps.items()}
+    """{plane: [seat, ...]} with features as sorted lists (JSON for the form's heat map)."""
+    names = ["Boeing 737 MAX 8", "Boeing 737-800", "Boeing 737-700"]
+    return {k: [{**s, "features": sorted(s["features"])} for s in _example(k)] for k in names}
 
 
 def status_table():

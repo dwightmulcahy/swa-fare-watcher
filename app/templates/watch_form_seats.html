@@ -90,7 +90,7 @@
         <div class="heat-tip" id="heat-tip" role="tooltip" hidden></div>
       </div>
       <div class="heat-legend" aria-hidden="true"><span>Priority {{ seats.MAX_PRIORITY }}</span><span class="heat-scale"></span><span>Priority 1</span><span class="heat-off"></span><span>Off</span></div>
-      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. An example layout: your plane's map may differ.</p>
+      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. Layouts of Southwest's planes (737-700 and -800 approximate); the real seat map is what counts.</p>
     </div>
   </fieldset>
   <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
