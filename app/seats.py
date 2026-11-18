@@ -10,14 +10,41 @@ import datetime as dt
 import re
 from zoneinfo import ZoneInfo
 
-# Rapid Rewards status / card: which seat types its holder can get free when selection opens
+# Rapid Rewards status / card: (label, seat types free at booking, seat types free within 48 h
+# of departure), per southwest.com/seats. The map's $0 price is what finally decides; these keep
+# it from taking a seat the status shouldn't get.
+_ALL = {"extra", "preferred", "standard"}
 STATUSES = {
-    "none": ("No status or card", {"extra", "preferred", "standard"}),
-    "plus_premier": ("Rapid Rewards Plus or Premier card", {"preferred", "standard"}),
-    "priority": ("Priority or Performance Business card", {"extra", "preferred", "standard"}),
-    "a_list": ("A-List", {"extra", "preferred", "standard"}),
-    "a_list_preferred": ("A-List Preferred", {"extra", "preferred", "standard"}),
+    "none": ("No status or card (seats your fare includes)", set(), _ALL),
+    "plus": ("Rapid Rewards Plus or Plus Business card", set(), {"standard"}),
+    "premier": ("Rapid Rewards Premier or Premier Business card", set(), {"preferred", "standard"}),
+    "priority": ("Priority or Performance Business card", {"preferred", "standard"}, _ALL),
+    "a_list": ("A-List", {"preferred", "standard"}, _ALL),
+    "a_list_preferred": ("A-List Preferred", _ALL, _ALL),
 }
+OLD_STATUSES = {"plus_premier": "premier"}
+
+
+def status_of(status):
+    status = OLD_STATUSES.get(status, status)
+    return status if status in STATUSES else "none"
+
+
+def allowed(status, window=True):
+    """Seat types this status gets free now: at booking, or (window) within 48 h of departure."""
+    _, booking, late = STATUSES[status_of(status)]
+    return booking | late if window else booking
+
+
+def free_early(status):
+    """Does this status get free seats before the 48-hour window (worth checking right away)?"""
+    return bool(STATUSES[status_of(status)][1])
+
+
+def window_gain(status):
+    """Seat types the 48-hour window adds for this status (worth being there as it opens)."""
+    _, booking, late = STATUSES[status_of(status)]
+    return late - booking
 
 POSITIONS = {"window": "Window", "aisle": "Aisle", "any": "No preference"}
 
@@ -147,18 +174,16 @@ def score(seat, prefs):
     return fit(seat, prefs) - seat["row"] * 1e-4
 
 
-def choose(seats, prefs, status="none", taken=()):
+def choose(seats, prefs, status="none", taken=(), window=True):
     """The best free (price 0) available seat this status can get, or None."""
-    allowed = STATUSES.get(status, STATUSES["none"])[1]
-    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in allowed
-          and s["seat"] not in taken]
-    return max(ok, key=lambda s: score(s, prefs), default=None)
+    ok = ranked(seats, prefs, status, taken, window)
+    return ok[0] if ok else None
 
 
-def ranked(seats, prefs, status="none", taken=()):
-    """Free (price 0) available seats this status can get, best first."""
-    allowed = STATUSES.get(status, STATUSES["none"])[1]
-    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in allowed
+def ranked(seats, prefs, status="none", taken=(), window=True):
+    """Free (price 0) available seats this status can get now, best first."""
+    kinds = allowed(status, window)
+    ok = [s for s in seats if s["available"] and s["price"] == 0 and s["type"] in kinds
           and s["seat"] not in taken]
     return sorted(ok, key=lambda s: -score(s, prefs))
 
@@ -194,6 +219,21 @@ def airport_tz(code):
 
 
 _AIRPORTS = None
+DOMESTIC = {"US", "PR", "VI", "GU", "AS", "MP"}
+
+
+def international(origin, dest):
+    """Does a flight leave or reach a country other than the US (and its territories)? Unknown
+    airports count as international, the safer guess for Southwest's earlier change cut-off."""
+    try:
+        import airportsdata
+    except ImportError:
+        return True
+    global _AIRPORTS
+    if _AIRPORTS is None:
+        _AIRPORTS = airportsdata.load("IATA")
+    countries = [(_AIRPORTS.get((c or "").upper()) or {}).get("country") for c in (origin, dest)]
+    return not all(c in DOMESTIC for c in countries)
 
 
 def opens_at(date, time, origin, hours=OPEN_HOURS):

@@ -283,6 +283,8 @@ def init():
                 if name not in have:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
         _split_booked(con)
+        con.execute("UPDATE watches SET seat_status='premier' WHERE seat_status='plus_premier'")
+        con.commit()
     finally:
         con.close()
 
@@ -335,8 +337,11 @@ def sync_seat_jobs(watch_id, now=None):
             departs = opens + dt.timedelta(hours=seats.OPEN_HOURS)
             if departs <= now + dt.timedelta(hours=1):
                 continue                      # too late to matter
-            con.execute("INSERT INTO seat_jobs(watch_id, leg, opens_at, updated) VALUES (?,?,?,?)",
-                        (watch_id, b["leg"], opens.isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            early = seats.free_early(w["seat_status"]) and now < opens
+            # a status with free seats at booking is checked right away, then about daily
+            con.execute("INSERT INTO seat_jobs(watch_id, leg, opens_at, status, next_at, updated) VALUES (?,?,?,?,?,?)",
+                        (watch_id, b["leg"], opens.isoformat(timespec="seconds"), "watching" if early else "pending",
+                         now.isoformat(timespec="seconds") if early else None, now.isoformat(timespec="seconds")))
             made.append((b["leg"], opens))
         return made
 
