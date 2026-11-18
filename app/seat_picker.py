@@ -58,6 +58,7 @@ class SeatPicker:
         self.rng = browser.human.rng if browser.human else random
         self.report = []     # per flight and passenger: current seat and the best free seats, scored
         self.plane = None    # e.g. "Boeing 737 MAX 8", read from the seat map
+        self.maps = {}       # flight tab label -> {"flight", "plane", "seats"} as last seen (no personal data)
 
     def log(self, msg, level="info", **kw):
         getattr(applog, level)(msg, source="seats", user_id=self.uid, **kw)
@@ -106,6 +107,26 @@ class SeatPicker:
         labels = self.page.eval_on_selector_all(SEAT_BUTTON, "els => els.map(e => e.getAttribute('aria-label'))")
         return seats.add_plane_facts(seats.annotate([s for s in map(seats.parse_seat, labels) if s]), self.plane)
 
+    def remember_map(self, tab, smap):
+        """Keep the flight's seat map (plane, seat types, features, which are taken) for the form's heat map."""
+        label = (tab.get_attribute("aria-label") or "").split(" hours")[0] if tab is not None else "Flight"
+        label = re.sub(r"\s+\d+$", "", label).strip() or "Flight"
+        self.maps[label] = {"flight": label, "plane": self.plane, "seats": [
+            {"seat": s["seat"], "row": s["row"], "col": s["col"], "type": s["type"],
+             "features": sorted(s["features"]), "available": s["available"], "selected": s["selected"]}
+            for s in smap]}
+
+    def capture_maps(self):
+        """Open the seat map from the trip page and remember every flight's map (no seat is clicked)."""
+        self.open_seat_map()
+        for tab in self.flights():
+            if tab is not None and tab.get_attribute("aria-selected") != "true":
+                self.b._click(tab)
+                self.b._beat(0.8, 1.8)
+            self.read_plane()
+            self.remember_map(tab, self.seat_map())
+        return list(self.maps.values())
+
     def read_plane(self):
         """The plane the seat map is for ('Boeing 737 MAX8 (subject to change)'), or None."""
         try:
@@ -141,7 +162,11 @@ class SeatPicker:
                 if pax.get_attribute("aria-checked") != "true":
                     self.b._click(pax)
                     self.b._beat(0.4, 1.0)
+                if pi == 0:
+                    self.read_plane()
                 smap = self.seat_map()
+                if pi == 0:
+                    self.remember_map(tab, smap)
                 cur_code = self.current_seat(pax.get_attribute("aria-label"))
                 cur = next((s for s in smap if s["seat"] == cur_code), None)
                 options = seats.ranked(smap, self.prefs, self.status, taken, self.window)

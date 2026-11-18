@@ -461,6 +461,22 @@ def example_maps():
     return {k: [{**s, "features": sorted(s["features"])} for s in _example(k)] for k in names}
 
 
+def heat_maps(w=None):
+    """Maps for the form's heat map: this watch's real seat maps first (as last seen), then the
+    plane layouts. {name: [seat, ...]}"""
+    import json
+    out = {}
+    try:
+        real = json.loads((w["seat_maps"] if w is not None and "seat_maps" in w.keys() else None) or "[]")
+    except (ValueError, TypeError, AttributeError):
+        real = []
+    for m in real:
+        when = (m.get("read") or "")[:10]
+        name = f"Your flight: {m['flight']} · {m.get('plane') or 'plane not named'}" + (f" (seen {when})" if when else "")
+        out[name] = m["seats"]
+    return {**out, **example_maps()}
+
+
 def status_table():
     """{status: {"booking": [...], "window": [...]}} free seat types, for the heat map."""
     return {k: {"booking": sorted(b), "window": sorted(b | w)} for k, (_, b, w) in STATUSES.items()}

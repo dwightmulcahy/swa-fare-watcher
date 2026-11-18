@@ -4,6 +4,7 @@ the container smoke test covers the browser itself."""
 import functools
 import http.server
 import os
+import json
 import shutil
 import threading
 import time
@@ -523,6 +524,9 @@ def test_seat_picker_waits_for_free_seats_then_confirms(site, monkeypatch, tmp_p
         assert b.page.evaluate("localStorage.getItem('lookup')") == "ABC123|Pat|Lee"
     assert note == "confirmed" and changes == [("11F", "9A (Preferred, Window)")]
     rep = picker.report[0]
+    m = list(picker.maps.values())[0]                                   # the flight's map, for the heat map
+    assert m["plane"] == "Boeing 737 MAX 8" and m["flight"].startswith("Flight 1 of 1") and len(m["seats"]) > 100
+    assert not any("PAT" in json.dumps(x) or "Lee" in json.dumps(x) for x in m["seats"])    # no personal data
     assert rep["current"]["seat"] == "11F" and rep["picked"] == "9A" and rep["options"][0]["seat"] == "9A"
 
 
