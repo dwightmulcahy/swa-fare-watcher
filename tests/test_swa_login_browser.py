@@ -585,12 +585,23 @@ def test_seat_heat_map_matches_the_server_scoring_and_follows_the_ranks(client):
     from app import seats
     from tests.test_web import admin_client
     admin_client(client)
-    html = client.get("/watches/new?kind=seats").text
     with sync_playwright() as p:
         kw = {"channel": "chrome"} if shutil.which("google-chrome") or shutil.which("google-chrome-stable") else {}
         b = p.chromium.launch(**kw)
         pg = b.new_page()
-        pg.set_content(html)
+        errors = []
+        pg.on("console", lambda m: m.type == "error" and errors.append(m.text))
+
+        def serve(route):    # the app itself, headers (CSP) and all
+            from urllib.parse import urlsplit
+            u = urlsplit(route.request.url)
+            r = client.get(u.path + (f"?{u.query}" if u.query else ""))
+            route.fulfill(status=r.status_code, headers=dict(r.headers), body=r.content)
+        pg.route("http://app.test/**", serve)
+        pg.goto("http://app.test/watches/new?kind=seats")
+        assert "Content-Security-Policy" in client.get("/watches/new?kind=seats").headers
+        pg.wait_for_selector(".heat-seat", state="attached")
+        assert not [e for e in errors if "Content Security Policy" in e], errors
 
         def fits():
             return {e["seat"]: float(e["fit"]) for e in pg.eval_on_selector_all(
