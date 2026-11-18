@@ -4,9 +4,10 @@ Three kinds of signal, each emailed once per distinct change (again after a week
 with a screenshot and the page HTML attached, whatever SWA_EMAIL_WARNINGS says:
 - missing elements: a page the app works on lacks an element it relies on (form fields, the seat
   map's seat buttons, the trip page's seat link ...);
-- structure: the set of form controls/landmarks on a page differs from the last time it worked
-  (ids, names, roles, data-test; digits and CSS-module hashes ignored), an early heads-up for a
-  redesign even while the app still copes;
+- structure: form controls/landmarks the page had are gone (ids, names, roles, data-test; digits
+  and CSS-module hashes ignored), an early heads-up for a redesign even while the app still copes.
+  Pop-ups (dialogs, the cookie banner) don't count, a difference must show on two visits in a row
+  before it counts, and controls that only appeared are logged, not emailed;
 - broken flow: a step that ran into something unexpected (a seat that didn't stick, no boarding
   position, fare data the parser doesn't know).
 The page HTML stays on this server (data/debug/pages) and goes only to the admins.
@@ -24,7 +25,9 @@ RESEND_DAYS = 7
 STRUCTURE_JS = """() => {
   const keep = (v) => (v || "").replace(/[0-9]+/g, "#").replace(/__[A-Za-z0-9]{5}\\b/g, "");
   const out = new Set();
-  document.querySelectorAll("form, input, select, textarea, button, [role=dialog], [role=radio], [role=tab], [data-test], main, nav").forEach((e) => {
+  const popup = "[role=dialog], [role=alertdialog], [aria-modal=true], dialog, [id^=onetrust], #onetrust-consent-sdk";
+  document.querySelectorAll("form, input, select, textarea, button, [role=radio], [role=tab], [data-test], main, nav").forEach((e) => {
+    if (e.closest(popup)) return;             // pop-ups come and go: not the page's structure
     const t = e.tagName.toLowerCase(), role = e.getAttribute("role") || "", id = keep(e.id),
           name = keep(e.getAttribute("name")), test = keep(e.getAttribute("data-test"));
     if (t === "button" && !id && !name && !test) return;      // plain buttons: too many, too varied
@@ -107,18 +110,28 @@ def check_structure(browser, page_name, user_id=None):
         now = set(browser.page.evaluate(STRUCTURE_JS))
     except Exception:
         return None
-    key = f"pageshape:{page_name}"
+    key, pend_key = f"pageshape:{page_name}", f"pageshape-pending:{page_name}"
     prev = db.get_state(key)
-    db.set_state(key, json.dumps(sorted(now)))
     if prev is None:
+        db.set_state(key, json.dumps(sorted(now)))
         return None
     prev = set(json.loads(prev))
     gone, new = sorted(prev - now), sorted(now - prev)
     if not gone and not new:
+        db.set_state(pend_key, "")
         return None
+    sig = json.dumps(sorted(now))
+    if db.get_state(pend_key) != sig:          # first sighting: wait for the next visit to confirm
+        db.set_state(pend_key, sig)
+        return None
+    db.set_state(key, sig)                     # seen twice in a row: the new normal
+    db.set_state(pend_key, "")
     details = "; ".join(x for x in (f"gone: {', '.join(gone[:12])}" if gone else "",
                                     f"new: {', '.join(new[:12])}" if new else "") if x)
-    report(page_name, "the page's structure changed", details, browser, user_id=user_id)
+    if gone:
+        report(page_name, "the page's structure changed", details, browser, user_id=user_id)
+    else:
+        applog.info(f"Southwest page ({page_name}) gained controls: {details}", source="pagewatch", user_id=user_id)
     return gone, new
 
 
