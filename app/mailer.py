@@ -203,8 +203,8 @@ def render_hits(hits):
 
 
 def _seat_report(report):
-    """Per flight and passenger: their seat and the best free seats, with scores (higher = better
-    for your preferences)."""
+    """Per flight and passenger: their seat and the best free seats, with the priority each matches,
+    and why the chosen one was chosen."""
     e = html.escape
     out = ""
     for r in report or []:
@@ -213,20 +213,29 @@ def _seat_report(report):
         rows = ""
         if cur:
             rows += (f"<tr style='background:#FFF4D6'><td style='padding:4px 8px'><b>{e(cur['describe'])}</b> "
-                     f"<span style='color:#636363'>(your seat)</span></td><td style='padding:4px 8px;text-align:right'>"
-                     f"{cur['score']}</td></tr>")
+                     f"<span style='color:#636363'>(your seat)</span></td><td style='padding:4px 8px'>"
+                     f"{e(_prio(cur))}</td></tr>")
         for o in r.get("options") or []:
             mark = " ✓ chosen" if o["seat"] == r.get("picked") else ""
             rows += (f"<tr><td style='padding:4px 8px'>{e(o['describe'])}<b style='color:#1a7f37'>{mark}</b></td>"
-                     f"<td style='padding:4px 8px;text-align:right'>{o['score']}</td></tr>")
+                     f"<td style='padding:4px 8px'>{e(_prio(o))}</td></tr>")
         if not r.get("options"):
             rows += "<tr><td colspan='2' style='padding:4px 8px;color:#636363'>No free seats you can get were open.</td></tr>"
         out += (f"<p style='{FONT};font-size:13px;color:{NAVY};margin:14px 0 4px'><b>{e(head or 'Seats')}</b></p>"
                 f"<table role='presentation' cellpadding='0' cellspacing='0' style='{FONT};font-size:13px;color:{NAVY};"
                 f"border:1px solid {SILVER};border-collapse:collapse;width:100%'>"
                 f"<tr style='background:#F2F2F2'><th style='padding:4px 8px;text-align:left'>Free seats you can get</th>"
-                f"<th style='padding:4px 8px;text-align:right'>Score</th></tr>{rows}</table>")
+                f"<th style='padding:4px 8px;text-align:left'>Priority</th></tr>{rows}</table>")
+        if r.get("explanation"):
+            out += f"<p style='{FONT};font-size:13px;color:{NAVY};margin:6px 0 0'>{e(r['explanation'])}</p>"
     return out
+
+
+def _prio(o):
+    """'3 · Extra-legroom window' (or a score, for reports from before priorities)."""
+    if "label" in o:
+        return o["label"].replace("Priority ", "").replace(": ", " · ", 1)
+    return f"score {o.get('score', '')}"
 
 
 def render_notice(title, paragraphs, url, button="Open the log"):
@@ -279,7 +288,7 @@ def render_seat_result(title, changes, note, ok, manage_url, report=None):
     <span style="{FONT};font-size:18px;font-weight:bold;color:#fff">{e(title)}</span></td></tr>
   <tr><td style="padding:14px 16px">{body}
     <p style="{FONT};font-size:14px;color:{colour}">{e(note)}</p>{_seat_report(report)}
-    <p style="{FONT};font-size:12px;color:#636363">Score = how well a seat matches your ranked preferences (100 = all of them); only seats priced $0 for you are listed.</p>
+    <p style="{FONT};font-size:12px;color:#636363">Priority = the best of your seat selection priorities each seat matches (1 = first choice); only seats priced $0 for you are listed.</p>
     <a href="{e(manage_url)}" style="{FONT};background:{YELLOW};color:{NAVY};font-weight:bold;font-size:14px;
        padding:8px 16px;border-radius:4px;text-decoration:none;display:inline-block">Open my reservation</a></td></tr>
 </table></td></tr></table></body></html>"""

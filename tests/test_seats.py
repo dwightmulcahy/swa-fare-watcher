@@ -21,33 +21,16 @@ def test_parse_real_seat_labels():
     assert sum(x["available"] for x in MAP) == 34
 
 
-def test_choose_by_preferences_and_status():
+def test_choose_by_priorities_and_status():
     cur = next(x for x in MAP if x["selected"])
-    window = dict(seats.DEFAULT_PREFS)
-    best = seats.choose(MAP, window, "priority")
-    assert best["seat"] == "9A" or "window" in best["features"]      # a real window, never a middle
-    assert "middle" not in best["features"] and seats.better(best, cur, window)
-    legroom_any = {"position": "any", "order": ["extra_legroom", "front"]}
-    pick = seats.choose(MAP, legroom_any, "priority")
-    assert pick["type"] == "extra" and pick["seat"] == "1E"            # front-most Extra Legroom
-    assert seats.choose(MAP, legroom_any, "premier")["type"] != "extra"   # not free for that card
-    assert seats.choose(MAP, legroom_any, "priority", taken={"1E"})["seat"] != "1E"
+    prefs = seats.normalize({})
+    best = seats.choose(MAP, prefs, "priority")
+    assert "middle" not in best["features"] and seats.better(best, cur, prefs)
+    assert seats.priority(best, prefs)[0] == min(seats.priority(x, prefs)[0] for x in seats.ranked(MAP, prefs, "priority"))
+    assert seats.choose(MAP, prefs, "premier")["type"] != "extra"          # not free for that card
+    assert seats.choose(MAP, prefs, "priority", taken={best["seat"]})["seat"] != best["seat"]
     paid = [{**x, "price": 39.0} for x in MAP]
-    assert seats.choose(paid, window, "priority") is None             # never anything that costs
-
-
-def test_order_decides_which_wish_wins():
-    legroom_first = {"position": "window", "order": ["extra_legroom", "seat_type", "front"]}
-    window_first = {"position": "window", "order": ["seat_type", "extra_legroom", "front"]}
-    a = seats.choose(MAP, legroom_first, "priority")
-    b = seats.choose(MAP, window_first, "priority")
-    assert a["type"] == "extra" and "window" in b["features"]
-    assert seats.fit(a, legroom_first) > seats.fit(b, legroom_first)
-    assert seats.fit(b, window_first) > seats.fit(a, window_first)
-    perfect = {"seat": "1F", "row": 1, "type": "extra", "features": {"window", "exit row"}, "price": 0}
-    assert round(seats.fit(perfect, window_first)) == 100
-    far = {**perfect, "seat": "3F", "row": 3}
-    assert not seats.better(far, perfect, {"position": "window", "order": ["seat_type"]})  # rows alone don't move
+    assert seats.choose(paid, prefs, "priority") is None                    # never anything that costs
 
 
 def test_exit_window_with_no_seat_in_front():
@@ -58,19 +41,20 @@ def test_exit_window_with_no_seat_in_front():
     assert not any(seats.OPEN_FRONT in x["features"] for x in seats.annotate(copy.deepcopy(MAP)))
     s15 = next(x for x in plane if x["seat"] == "15A")
     assert "no seat in front" in seats.describe(s15)
-    prefs = {"position": "window", "order": ["open_front", "seat_type", "front"]}
     free = [{**x, "available": True, "price": 0} if x["seat"] in ("15A", "2A") else x for x in plane]
-    assert seats.choose(free, prefs, "priority")["seat"] == "15A"
+    assert seats.choose(free, seats.normalize({}), "priority")["seat"] == "15A"
 
 
-def test_old_preferences_become_an_order():
-    old = {"seat_prefs": json.dumps({"position": "aisle", "extra_legroom": True, "front": False, "no_middle": True,
-                                     "window_view": False, "exit_row": True, "bulkhead": False})}
+def test_old_preferences_become_priorities():
+    old = {"seat_prefs": json.dumps({"position": "aisle", "order": ["no_middle", "extra_legroom", "seat_type"]})}
     p = seats.prefs_of(old)
-    assert p["order"] == ["no_middle", "extra_legroom", "seat_type", "exit_row"] and p["exit_row"] and not p["front"]
-    assert seats.prefs_of({"seat_prefs": None})["order"] == seats.DEFAULT_ORDER
-    anyp = seats.prefs_of({"seat_prefs": json.dumps({"position": "any", "order": ["seat_type", "front", "bogus"]})})
-    assert anyp["order"] == ["front"]
+    assert p["migrated"] and p["priorities"]["middle"] is None              # "never a middle" kept
+    pri = p["priorities"]
+    assert pri["extra_aisle"] < pri["extra_window"] < pri["std_aisle"] < pri["std_window"]
+    flags = seats.prefs_of({"seat_prefs": json.dumps({"position": "window", "extra_legroom": True, "no_middle": False,
+                                                      "exit_row": False})})
+    assert flags["migrated"] and flags["priorities"]["middle"] is not None   # wasn't excluded: not switched off
+    assert seats.prefs_of({"seat_prefs": None})["priorities"] == seats.DEFAULT_PRIORITIES
 
 
 def test_ranked_lists_free_seats_best_first():
@@ -78,8 +62,8 @@ def test_ranked_lists_free_seats_best_first():
     r = seats.ranked(MAP, prefs, "priority")
     assert r[0] == seats.choose(MAP, prefs, "priority") and len(r) > 6
     assert all(x["price"] == 0 and x["available"] for x in r)
-    sc = [seats.score(x, prefs) for x in r]
-    assert sc == sorted(sc, reverse=True)
+    keys = [seats.key(x, prefs) for x in r]
+    assert keys == sorted(keys)
     assert all(x["type"] != "extra" for x in seats.ranked(MAP, prefs, "premier"))
 
 
@@ -122,20 +106,22 @@ def test_seat_watch_form_saves_preferences(client):
     assert 'name="seat_status"' in page and "max_price" not in page and "out_cash" not in page
     data = {"csrf": t, "kind": "seats", "booking_conf": "abc12-3", "booking_first": "Pat", "booking_last": "Lee",
             "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10),
-            "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "rank_exit_row": "1",
-            "rank_no_middle": "2", "rank_front": "3",
-            "active": "1"}
+            "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "prio_exit_aisle": "1",
+            "prio_extra_aisle": "1", "prio_std_aisle": "2", "prio_std_window": "3", "tiebreak_order": "view,legroom",
+            "tb_view": "1", "tb_legroom": "1", "seat_explain": "1", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     w = db.one("SELECT * FROM watches WHERE id=?", (int(loc.rstrip("/").split("/")[-1]),))
     assert (w["kind"], w["seat_auto"], w["booking_conf"], w["seat_status"]) == ("seats", 1, "ABC123", "priority")
     p = json.loads(w["seat_prefs"])
-    assert p == {"position": "aisle", "order": ["exit_row", "no_middle", "front"]}
+    assert p["priorities"] == {"exit_window_open": None, "exit_window": None, "extra_window": None,
+                               "exit_aisle": 1, "extra_aisle": 1, "std_window": 3, "std_aisle": 2, "middle": None}
+    assert p["tiebreak"] == ["view", "legroom"] and p["explain"] and not p["fallback"] and p["version"] == 2
     b = json.loads(w["booked"])[0]
     assert b["time"] == "13:15" and b["from"] == "LIR"
     edit = client.get(loc + "/edit").text
     assert 'value="ABC123"' in edit and 'value="priority" selected' in edit
-    assert edit.index('name="rank_exit_row"') < edit.index('name="rank_no_middle"') < edit.index('name="rank_front"')
-    assert edit.index('name="rank_front"') < edit.index('name="rank_extra_legroom"')    # off ones last
+    assert edit.index('name="prio_exit_aisle"') < edit.index('name="prio_std_aisle"') < edit.index('name="prio_std_window"')
+    assert edit.index('name="prio_std_window"') < edit.index('name="prio_middle"')        # off ones last
     assert "departure time" in client.post("/watches", data={**data, "out_time": ""}).text
     assert "confirmation number" in client.post("/watches", data={**data, "booking_conf": ""}).text
 
@@ -438,11 +424,12 @@ def test_seat_watch_keeps_checking_until_perfect_then_sends_a_summary(client, wo
     assert worker.due_seat_jobs(dt.datetime.fromisoformat(j["next_at"]) - dt.timedelta(minutes=1)) == []
     assert worker.due_seat_jobs(dt.datetime.fromisoformat(j["next_at"]))[0]["id"] == job["id"]
     best = [{"current": meh[0]["current"], "picked": "1F",
-             "options": [{"seat": "1F", "describe": "1F (Extra Legroom, Window)", "price": 0, "score": 100.0}]}]
+             "options": [{"seat": "1F", "describe": "1F (Extra Legroom, Window)", "price": 0, "score": 100.0,
+                          "priority": 1, "label": "Priority 1: Extra-legroom window"}]}]
     status, _, note = _run_visit(worker, j, lambda u: (untils.append(u), ([("11F", "1F (Extra Legroom, Window)")],
                                                                           "confirmed"))[1], best)
     assert untils[1] == 0                                                   # later visits look once
-    assert status == "done" and "meets all your preferences" in note and len(sent) == 1
+    assert status == "done" and "top priority" in note and len(sent) == 1
     assert "Seat watch finished" in sent[-1][1] and "1F (Extra Legroom, Window)" in sent[-1][2]
     assert db.one("SELECT next_at FROM seat_jobs WHERE id=?", (job["id"],))["next_at"] is None
 
@@ -512,7 +499,8 @@ def test_status_decides_what_is_free_when():
     assert seats.free_early("a_list_preferred") and not seats.window_gain("a_list_preferred")
     assert seats.free_early("a_list") and seats.window_gain("a_list") == {"extra"}
     assert not seats.free_early("premier") and not seats.free_early("none")
-    legroom = {"position": "any", "order": ["extra_legroom", "front"]}
+    legroom = seats.normalize({"priorities": {"extra_window": 1, "extra_aisle": 1, "middle": 1, "std_window": 2,
+                                              "std_aisle": 2}, "tiebreak": ["legroom"]})
     early = seats.choose(MAP, legroom, "a_list", window=False)
     assert early["type"] != "extra" and seats.choose(MAP, legroom, "a_list")["type"] == "extra"
 

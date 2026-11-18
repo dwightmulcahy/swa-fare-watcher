@@ -140,7 +140,9 @@ class SeatPicker:
                     "passenger": (pax.get_attribute("aria-label") or "").split(" Seat:")[0],
                     "current": _scored(cur, self.prefs),
                     "options": [_scored(x, self.prefs) for x in options[:6]],
-                    "picked": new["seat"] if seats.better(new, cur, self.prefs) else None})
+                    "picked": new["seat"] if seats.better(new, cur, self.prefs) else None,
+                    "explanation": seats.explain(new, self.prefs) if self.prefs.get("explain", True) and new
+                    and seats.better(new, cur, self.prefs) else ""})
                 if seats.better(new, cur, self.prefs):
                     out.append((fi, pi, cur_code, new))
                     taken.add(new["seat"])
@@ -346,8 +348,9 @@ def parse_trip(text):
 def _scored(seat, prefs):
     if seat is None:
         return None
+    p, cat = seats.priority(seat, prefs)
     return {"seat": seat["seat"], "describe": seats.describe(seat), "price": seat["price"],
-            "score": round(seats.fit(seat, prefs), 1)}
+            "score": seats.fit(seat, prefs), "priority": p, "category": cat, "label": seats.label(seat, prefs)}
 
 
 def money(text):

@@ -38,35 +38,63 @@
         <select name="seat_status">{% for k, (t, _, _) in seats.STATUSES.items() %}
           <option value="{{ k }}" {{ "selected" if (w.seat_status or "none") == k }}>{{ t }}</option>{% endfor %}
         </select></label>
-      <div class="field"><span class="label">Seat</span>
+      <div class="field"><span class="label">Window or aisle <span class="hint">when priorities tie</span></span>
         <div class="seg">{% for k, t in seats.POSITIONS.items() %}
           <label><input type="radio" name="seat_position" value="{{ k }}" {{ "checked" if sp.position == k }}> {{ t }}</label>{% endfor %}
         </div></div>
     </div>
-    <p class="hint">Rank what matters, 1 = most important. A wish always beats everything ranked below it; leave the rest off.</p>
-    {% set n = seats.CRITERIA|length %}
-    <div class="rank-list">{% for k in sp.order + (seats.CRITERIA.keys()|reject("in", sp.order)|list) %}{% set r = sp.order.index(k) + 1 if k in sp.order else 0 %}
-      <label class="rank-item"><select name="rank_{{ k }}" aria-label="Rank for {{ seats.CRITERIA[k] }}">
-        <option value="" {{ "selected" if not r }}>Off</option>{% for i in range(1, n + 1) %}
-        <option value="{{ i }}" {{ "selected" if r == i }}>{{ i }}</option>{% endfor %}
-      </select> {{ seats.CRITERIA[k] }}</label>{% endfor %}
+    <div class="prio" id="seat-prio" data-save="{{ '/watches/%d/seat-prefs' % w.id if w.id else '' }}"
+         data-defaults='{{ seats.DEFAULT_PRIORITIES|tojson }}'>
+      <h3 class="prio-title">Seat Selection Priorities</h3>
+      <p class="hint">Rank the seat combinations you prefer. Priority 1 is your first choice. Seats are evaluated in priority order, so a lower-priority seat will never beat a higher-priority match. Multiple seat types can share the same priority. Set a preference to Off to exclude it.</p>
+      {% if sp.migrated %}<p class="flash small">Converted from your earlier seat preferences: check the order and save.</p>{% endif %}
+      <ol class="prio-list" id="prio-list">        {% for k, v in prio_rows(sp) %}
+        <li class="prio-item" draggable="true" data-key="{{ k }}">
+          <span class="prio-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+          <select name="prio_{{ k }}" aria-label="Priority for {{ seats.CATEGORIES[k] }}">
+            <option value="" {{ "selected" if v is none }}>Off</option>{% for i in range(1, seats.MAX_PRIORITY + 1) %}
+            <option value="{{ i }}" {{ "selected" if v == i }}>{{ i }}</option>{% endfor %}
+          </select>
+          <span class="prio-name">{{ seats.CATEGORIES[k] }}</span>
+          <span class="prio-move"><button type="button" class="link" data-move="-1" aria-label="Move {{ seats.CATEGORIES[k] }} up">↑</button><button type="button" class="link" data-move="1" aria-label="Move {{ seats.CATEGORIES[k] }} down">↓</button></span>
+        </li>{% endfor %}
+      </ol>
+      <div class="prio-tools">
+        <button type="button" id="prio-defaults">Restore Defaults</button>
+        <label class="check"><input type="checkbox" name="seat_fallback" value="1" {{ "checked" if sp.fallback }}> Allow fallback seats when no preferences match</label>
+        <label class="check"><input type="checkbox" name="seat_explain" value="1" {{ "checked" if sp.explain }}> Show selection explanation</label>
+        <span class="muted small" id="prio-saved" aria-live="polite"></span>
+      </div>
+      <details class="prio-ties">
+        <summary>When priorities tie, prefer…</summary>
+        <input type="hidden" name="tiebreak_order" id="tiebreak-order" value="{{ (sp.tiebreak + (seats.TIEBREAKS.keys()|reject('in', sp.tiebreak)|list))|join(',') }}">
+        <ol class="prio-list" id="tie-list">{% for k in sp.tiebreak + (seats.TIEBREAKS.keys()|reject("in", sp.tiebreak)|list) %}
+          <li class="prio-item" draggable="true" data-key="{{ k }}">
+            <span class="prio-handle" aria-hidden="true">⠿</span>
+            <label class="check"><input type="checkbox" name="tb_{{ k }}" value="1" {{ "checked" if k in sp.tiebreak }}> {{ seats.TIEBREAKS[k] }}</label>
+            <span class="prio-move"><button type="button" class="link" data-move="-1" aria-label="Move up">↑</button><button type="button" class="link" data-move="1" aria-label="Move down">↓</button></span>
+          </li>{% endfor %}
+        </ol>
+        <p class="hint">Only between seats of the same priority; the seat number decides last.</p>
+      </details>
     </div>
     <div class="seat-heat" id="seat-heat">
       <div class="seat-heat-head">
-        <span class="label">How seats score for these preferences</span>
+        <span class="label">How seats rank with these priorities</span>
         <select id="heat-plane" aria-label="Example plane">{% for name in seats.example_maps() %}
           <option>{{ name }}</option>{% endfor %}</select>
         <label class="check small"><input type="checkbox" id="heat-window" checked> within 48 h of departure</label>
       </div>
       <div class="heat-wrap">
-        <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by preference score"></div>
+        <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by priority"></div>
         <div class="heat-tip" id="heat-tip" role="tooltip" hidden></div>
       </div>
-      <div class="heat-legend" aria-hidden="true"><span>0 worst</span><span class="heat-scale"></span><span>100 best</span></div>
-      <p class="hint">Colour = the seat's 0-100 score for these preferences; hover or tab to a seat for what it means. Outlined = the best seat your status gets free; hatched seats aren't free for it at that time. An example layout: your plane's map may differ.</p>
+      <div class="heat-legend" aria-hidden="true"><span>Priority {{ seats.MAX_PRIORITY }}</span><span class="heat-scale"></span><span>Priority 1</span><span class="heat-off"></span><span>Off</span></div>
+      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. An example layout: your plane's map may differ.</p>
     </div>
   </fieldset>
-  <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "criteria": seats.CRITERIA|list, "base": seats._BASE}|tojson }}</script>
+  <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
+  <script src="{{ asset('seat-prio.js') }}" defer></script>
   <script src="{{ asset('seat-heat.js') }}" defer></script>
   {% set active_label = "Active" %}{% include "_watch_foot.html" %}
 {% endblock %}
