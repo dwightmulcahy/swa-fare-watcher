@@ -608,4 +608,10 @@ def test_seat_heat_map_matches_the_server_scoring_and_follows_the_ranks(client):
         after = fits()
         best = pg.eval_on_selector_all(".heat-best", "els => els.map(e => e.dataset.seat)")
         assert after["16A"] > after["14A"] and set(best) <= {"16A", "16F"} and best
+        pg.focus('.heat-seat[data-seat="16A"]')                           # tooltip (hover or focus)
+        tip = pg.locator("#heat-tip")
+        assert tip.is_visible() and "Seat 16A: Best seat" in tip.inner_text() and "score" in tip.inner_text()
+        bg = pg.eval_on_selector('.heat-seat[data-seat="16A"]', "e => e.style.backgroundColor")
+        r, g, bl = map(int, bg[4:-1].split(","))
+        assert abs(r - 48) <= 2 and abs(g - 76) <= 2 and abs(bl - 178) <= 2, bg          # ~#304CB2 at ~100
         b.close()

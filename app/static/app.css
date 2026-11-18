@@ -407,8 +407,13 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .heat-row { display: grid; grid-template-columns: 1.6rem repeat(3, 1.6rem) 1.4rem repeat(3, 1.6rem); gap: 3px; }
 .heat-cols span { font-size: .7rem; text-align: center; color: var(--muted); }
 .heat-num { font-size: .7rem; color: var(--muted); text-align: right; padding-right: 2px; line-height: 1.6rem; }
-.heat-seat { height: 1.6rem; border-radius: 5px 5px 3px 3px; border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--good) calc(var(--fit) * 100%), var(--surface)); }
+.heat-seat { height: 1.6rem; border-radius: 5px 5px 3px 3px; border: 1px solid rgba(17, 27, 64, .18); cursor: default; }
+.heat-seat:focus-visible { outline: 2px solid #111B40; outline-offset: 1px; }
+.heat-wrap { position: relative; width: fit-content; max-width: 100%; }
+.heat-tip { position: absolute; z-index: 5; width: max-content; max-width: 16rem; padding: .45rem .6rem; border-radius: 6px;
+  font-size: .8rem; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); pointer-events: none; }
+.heat-legend { display: flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--muted); margin: .4rem 0; }
+.heat-scale { width: 12rem; height: .6rem; border-radius: 3px; border: 1px solid var(--line); }
 .heat-locked { background-image: repeating-linear-gradient(45deg, transparent 0 3px, color-mix(in srgb, var(--muted) 45%, transparent) 3px 4px); }
-.heat-best { outline: 2px solid var(--accent); outline-offset: 1px; }
+.heat-best { outline: 2px solid #111B40; outline-offset: 1px; }
 .heat-gap { height: 1.6rem; }

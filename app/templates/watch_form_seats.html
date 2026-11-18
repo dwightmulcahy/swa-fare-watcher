@@ -58,8 +58,12 @@
           <option>{{ name }}</option>{% endfor %}</select>
         <label class="check small"><input type="checkbox" id="heat-window" checked> within 48 h of departure</label>
       </div>
-      <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by preference score"></div>
-      <p class="hint">Darker = better match on this plane (hover for the 0-100 score; outlined = the best free seat). Hatched seats aren't free for the status chosen, at that time. An example layout: your plane's map may differ.</p>
+      <div class="heat-wrap">
+        <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by preference score"></div>
+        <div class="heat-tip" id="heat-tip" role="tooltip" hidden></div>
+      </div>
+      <div class="heat-legend" aria-hidden="true"><span>0 worst</span><span class="heat-scale"></span><span>100 best</span></div>
+      <p class="hint">Colour = the seat's 0-100 score for these preferences; hover or tab to a seat for what it means. Outlined = the best seat your status gets free; hatched seats aren't free for it at that time. An example layout: your plane's map may differ.</p>
     </div>
   </fieldset>
   <script type="application/json" id="heat-data">{{ {"maps": seats.example_maps(), "status": seats.status_table(), "criteria": seats.CRITERIA|list, "base": seats._BASE}|tojson }}</script>
@@ -97,14 +101,38 @@
       p.order.forEach((k, i) => { const w = D.base ** (n - 1 - i); tot += w; got += value(s, k, p.pos) * w; });
       return tot ? 100 * got / tot : 0;
     };
+    // Southwest colour stops: [score, colour, seat meaning, text colour]
+    const STOPS = [[0, "#D5152E", "Worst seat", "#FFFFFF"], [30, "#FFBF27", "Below average", "#111B40"],
+                   [50, "#E2E8F0", "Standard seat", "#111B40"], [75, "#60A5FA", "Preferred seat", "#111B40"],
+                   [100, "#304CB2", "Best seat", "#FFFFFF"]];
+    const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const colour = (score) => {
+      const i = STOPS.findIndex(([s]) => score <= s);
+      if (i <= 0) return STOPS[0][1];
+      const [s0, c0] = STOPS[i - 1], [s1, c1] = STOPS[i], t = (score - s0) / (s1 - s0), a = rgb(c0), b = rgb(c1);
+      return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * t)).join(",")})`;
+    };
+    const band = (score) => STOPS.reduce((best, st) => Math.abs(st[0] - score) < Math.abs(best[0] - score) ? st : best);
+    const tip = document.getElementById("heat-tip");
+    const showTip = (el) => {
+      const st = band(Number(el.dataset.fit));
+      tip.innerHTML = `<b>Seat ${el.dataset.seat}: ${st[2]}</b> · score ${Math.round(el.dataset.fit)}<br>${el.dataset.desc}`;
+      tip.style.background = st[1]; tip.style.color = st[3]; tip.hidden = false;
+      const w = tip.parentElement.getBoundingClientRect(), r = el.getBoundingClientRect();
+      tip.style.left = `${r.right - w.left + 8}px`; tip.style.top = `${r.top - w.top - 4}px`;
+    };
+    const isSeat = (e) => e.target.classList && e.target.classList.contains("heat-seat");
+    grid.addEventListener("mouseover", (e) => isSeat(e) && showTip(e.target));
+    grid.addEventListener("focusin", (e) => isSeat(e) && showTip(e.target));
+    ["mouseleave", "focusout", "scroll"].forEach((ev) => grid.addEventListener(ev, () => { tip.hidden = true; }));
+    document.querySelector(".heat-scale").style.background =
+      `linear-gradient(90deg, ${STOPS.map(([s, c]) => `${c} ${s}%`).join(", ")})`;
     const draw = () => {
       const p = prefs(), seats = D.maps[plane.value];
       const status = (form.querySelector("[name=seat_status]") || {}).value || "none";
       const free = new Set(D.status[status][win.checked ? "window" : "booking"]);
       const scored = seats.map((s) => ({...s, fit: fit(s, p), free: free.has(s.type)}));
       const best = Math.max(...scored.filter((s) => s.free).map((s) => s.fit), -1);
-      // colour by place between this plane's worst and best seat, so small differences show
-      const lo = Math.min(...scored.map((s) => s.fit)), hi = Math.max(...scored.map((s) => s.fit));
       const rows = Math.max(...seats.map((s) => s.row));
       grid.textContent = "";
       const head = document.createElement("div"); head.className = "heat-row heat-cols";
@@ -119,12 +147,14 @@
           const s = scored.find((x) => x.row === r && x.col === c);
           if (!s) { el.className = "heat-gap"; return el; }
           el.className = "heat-seat" + (s.free ? "" : " heat-locked") + (s.free && Math.abs(s.fit - best) < 1e-6 && best > 0 ? " heat-best" : "");
-          el.style.setProperty("--fit", (hi > lo ? 0.08 + 0.92 * ((s.fit - lo) / (hi - lo)) ** 1.5 : 0.5).toFixed(3));
+          el.style.backgroundColor = colour(s.fit);
+          el.tabIndex = 0;
           el.dataset.seat = s.seat; el.dataset.fit = s.fit.toFixed(2);
           const kind = {extra: "Extra Legroom", preferred: "Preferred", standard: "Standard"}[s.type];
-          el.title = `${s.seat} · ${kind}, ${s.features.filter((f) => f !== "window without window view").join(", ")}` +
+          el.dataset.desc = `${kind}, ${s.features.filter((f) => f !== "window without window view").join(", ")}` +
             (s.features.includes("window without window view") ? ", no window view" : "") +
-            ` · score ${Math.round(s.fit)}${s.free ? "" : " · not free for this status now"}`;
+            (s.free ? "" : " · not free for your status at this time");
+          el.setAttribute("aria-label", `Seat ${s.seat}: ${band(s.fit)[2]}, score ${Math.round(s.fit)}`);
           return el;
         });
         row.append(...cells); grid.append(row);
