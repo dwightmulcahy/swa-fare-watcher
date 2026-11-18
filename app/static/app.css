@@ -417,3 +417,4 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .heat-locked { background-image: repeating-linear-gradient(45deg, transparent 0 3px, color-mix(in srgb, var(--muted) 45%, transparent) 3px 4px); }
 .heat-best { outline: 2px solid #111B40; outline-offset: 1px; }
 .heat-gap { height: 1.6rem; }
+.seat-now { margin: .25rem 0 0 .2rem; }

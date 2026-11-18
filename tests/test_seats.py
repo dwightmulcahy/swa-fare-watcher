@@ -598,3 +598,22 @@ def test_broken_seat_check_retries_soon_and_right_after_a_restart(client, worker
         con.execute("UPDATE seat_jobs SET next_at='2099-01-01T00:00:00+00:00' WHERE id=?", (j["id"],))
     worker.close_interrupted_runs()
     assert worker.due_seat_jobs(dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=5))
+
+
+def test_watch_page_shows_the_current_seat_and_score(client, worker, sent):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(20), status="a_list_preferred")
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE w.id=?", (wid,))
+    rep = [{"flight": "", "passenger": "Dwight M.", "picked": None,
+            "current": {"seat": "7A", "describe": "7A (Preferred, Window)", "price": 0, "score": 62.4},
+            "options": [{"seat": "9F", "describe": "9F (Preferred, Window)", "price": 0, "score": 60.0}]}]
+    _run_visit(worker, j, lambda u: ([], "no better"), rep)
+    page = client.get(f"/watches/{wid}").text
+    assert "7A (Preferred, Window)" in page and "score 62" in page and "9F (Preferred, Window)" in page
+    rep2 = [{**rep[0], "picked": "3A", "options": [{"seat": "3A", "describe": "3A (Extra Legroom, Window)",
+                                                     "price": 0, "score": 100.0}]}]
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE w.id=?", (wid,))
+    _run_visit(worker, j, lambda u: ([("7A", "3A (Extra Legroom, Window)")], "confirmed"), rep2)
+    page = client.get(f"/watches/{wid}").text
+    assert "<b>3A (Extra Legroom, Window)</b>" in page and "score 100" in page
+    assert "3A · score 100" in client.get("/").text                        # and on the dashboard

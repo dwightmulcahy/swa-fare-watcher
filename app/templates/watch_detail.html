@@ -41,7 +41,12 @@
     <li><b>{{ j.leg_label }}</b>: opens {{ j.opens_local }}
       <span class="pill {{ 'good' if j.status in ('done', 'unchanged') else 'bad' if j.status == 'failed' else '' }}">{{
         {"pending": "scheduled", "running": "picking now", "watching": "watching for better", "done": "seat changed", "unchanged": "kept current seat", "failed": "needs you"}[j.status] }}</span>
-      {% if j.note %}<span class="muted small">{{ j.note }}</span>{% endif %}</li>{% endfor %}
+      {% if j.note %}<span class="muted small">{{ j.note }}</span>{% endif %}
+      {% for p in j.seats_now %}<div class="seat-now">
+        {% if p.passenger %}<span class="muted small">{{ p.passenger }}:</span> {% endif %}
+        {% if p.seat %}<b>{{ p.seat.describe }}</b> <span class="pill {{ 'good' if p.seat.score >= 75 else '' }}">score {{ p.seat.score|round|int }}</span>{% else %}<b>no seat yet</b>{% endif %}
+        {% if p.best %}<span class="muted small">· best other free seat: {{ p.best.describe }}, score {{ p.best.score|round|int }}</span>{% endif %}
+        <span class="muted small">· checked {{ p.checked_local }}</span></div>{% endfor %}</li>{% endfor %}
   </ul>
 </section>
 {% endif %}
