@@ -100,6 +100,9 @@ GROUPS = [
         Setting("SWA_EMAIL_WARNINGS", "off", "Email the admins about log entries, with the screenshot and any raw "
                 "JSON attached: warnings (and errors), errors only, or off. The same message at most once an "
                 "hour, at most 12 emails an hour", "choice", ("off", "errors", "warnings")),
+        Setting("SWA_PAGE_WATCH", "true", "Email the admins (screenshot and page HTML attached) when a Southwest page "
+                "the app works on changes: an element it relies on is missing, the page's structure changed, "
+                "or a step didn't go as expected. Once per change", "bool"),
         Setting("SWA_STALE_HOURS", "26", "Email the admins when no run has finished for this long; 0 = off",
                 "float"),
         Setting("SWA_BACKUP_KEEP", "7", "Daily database backups kept in data/backups; 0 = off", "int"),

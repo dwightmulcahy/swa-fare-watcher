@@ -1547,8 +1547,11 @@ class BrowserSearcher:
         self._open_booking_page()
         self._dismiss_cookie_banner()
         page.locator(FORM["origin"]).first.wait_for(state="visible", timeout=15_000)
-        missing = [k for k in ("origin", "dest", "date", "pax", "points", "submit")
-                   if not page.locator(FORM[k]).count()]
+        from . import pagewatch
+        pagewatch.check_structure(self, "Book a Flight form", self._uid())
+        missing = pagewatch.check_elements(self, "Book a Flight form", {k: FORM[k] for k in (
+            "origin", "dest", "date", "pax", "points", "submit")}, self._uid()) if pagewatch.enabled() else \
+            [k for k in ("origin", "dest", "date", "pax", "points", "submit") if not page.locator(FORM[k]).count()]
         if missing:
             raise RuntimeError(f"form fields not on {urlsplit(page.url).path}: {', '.join(missing)}")
         trip = page.locator(FORM["trip"]).first
@@ -1778,9 +1781,13 @@ class BrowserSearcher:
         flights = parse_flights(payload)
         if flights is None:
             self.shape_errors += 1
-            self._save_json(tag, payload)
+            raw = self._save_json(tag, payload)
             applog.warn(f"{tag}: Southwest's fare data has a shape the parser doesn't know; raw JSON saved "
                         "to debug/", source="search", user_id=self._uid(), attachment=self.capture(tag))
+            from . import pagewatch
+            pagewatch.report("fare data", "fare data has a shape the parser doesn't know",
+                             "Searches can't read prices until the parser is updated.", self,
+                             files=[raw] if raw else (), user_id=self._uid())
         return flights
 
     def _load(self, origin, dest, date, adults, fare_type, tag):

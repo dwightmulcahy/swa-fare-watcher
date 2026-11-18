@@ -9,7 +9,7 @@ import re
 import time
 from urllib.parse import urlencode
 
-from . import applog
+from . import applog, pagewatch
 
 CHECKIN_URL = "https://www.southwest.com/air/check-in/index.html"
 OPEN_HOURS = 24
@@ -67,6 +67,8 @@ class CheckIn:
         self.b.check_blocked("check-in", resp)
         self.b._dismiss_cookie_banner()
         self.page.locator(FIELDS["conf"]).first.wait_for(state="visible", timeout=30_000)
+        pagewatch.check_elements(self.b, "check-in form", FIELDS, self.uid)
+        pagewatch.check_structure(self.b, "check-in form", self.uid)
 
     def submit(self):
         """Fill the form like a person and wait for the review page (or a too-early message)."""
@@ -104,6 +106,17 @@ class CheckIn:
     def run(self, until, poll=(40, 70), sleep=time.sleep):
         """Check in, retrying while Southwest says it's too early, until `until` (epoch seconds).
         Returns (positions, seats)."""
+        try:
+            return self._run(until, poll, sleep)
+        except (RuntimeError, TimeoutError) as e:
+            pagewatch.flow_failed("check-in", e, self.b, self.uid)
+            raise
+        except Exception as e:
+            if e.__class__.__name__ == "TimeoutError":      # Playwright's
+                pagewatch.flow_failed("check-in", e, self.b, self.uid)
+            raise
+
+    def _run(self, until, poll, sleep):
         self.b.warm_up()
         while True:
             self.open_form()
