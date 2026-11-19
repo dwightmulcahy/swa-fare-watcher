@@ -208,6 +208,25 @@ def due_legs(w, legs, today=None, now=None):
     return out
 
 
+def with_partners(w, due, legs):
+    """A round trip's dates only count in pairs: with every date due, also the dates that pair
+    with it (stay length), so the calendar can still find a trip. One-way: unchanged."""
+    if not swa.is_roundtrip(w) or not due:
+        return due
+    pairs = swa.trip_pairs(w)
+    due_set, want = set(due), set(due)
+    for o, r in pairs:          # partners of the due dates only (not partners of partners)
+        if ("out", o) in due_set or ("ret", r) in due_set:
+            want |= {("out", o), ("ret", r)}
+    return [x for x in legs if x in want]
+
+
+def uses_calendar(w):
+    """Fare watches choose their dates from the low-fare calendar: the calendar (a page per month)
+    narrows them to SWA_CALENDAR_DETAIL_DATES, so their date list isn't what costs page loads."""
+    return bool(settings.calendar) and (dict(w).get("kind") or "fare") == "fare"
+
+
 def mark_hot(con, hits, now=None):
     """The dates of new deals stay 'hot' for HOT_HOURS: looked at again at the next check-in."""
     until = ((now or dt.datetime.now()) + dt.timedelta(hours=HOT_HOURS)).isoformat(timespec="seconds")
@@ -259,14 +278,16 @@ def fit_budget(plan, room):
     hot = {(r["watch_id"], r["leg"], r["date"]) for r in
            db.query("SELECT watch_id, leg, date FROM searched WHERE hot_until > ?", (db.now(),))}
     ranked = sorted((((w["id"], leg, d) not in hot), d, w["id"], leg, len(swa.routes(w)))
-                    for w, legs in plan for leg, d in legs)
+                    for w, legs in plan if not uses_calendar(w) for leg, d in legs)
     keep, used = set(), 0
     for _, d, wid, leg, n in ranked:
         if used + 2 * n > room:
             continue
         keep.add((wid, leg, d))
         used += 2 * n
-    return [(w, [x for x in legs if (w["id"], *x) in keep]) for w, legs in plan]
+    # watches using the calendar keep every date (cutting dates one by one would break round-trip
+    # pairs, and the calendar narrows them anyway); the run's page cap still stops at the budget
+    return [(w, legs if uses_calendar(w) else [x for x in legs if (w["id"], *x) in keep]) for w, legs in plan]
 
 
 def record_searched(con, watch_id, leg, date, rows):
@@ -1307,6 +1328,9 @@ class Worker:
                         to_search = {}   # (leg, date) -> airport pairs; default: all of them
                         fare = (w["kind"] or "fare") == "fare"
                         if fare and settings.calendar and hasattr(searcher, "calendar") and dates:
+                            # a round trip's due dates with the dates they pair with, so the calendar can
+                            # still find a trip (partners searched lately with an unchanged low are skipped)
+                            dates = with_partners(w, dates, swa.search_legs(w))
                             before = 2 * n_routes * len(dates)
                             dates, to_search, used, hit_cap = self._calendar_phase(
                                 user_id, w, route, dates, searcher, cap)
@@ -1318,7 +1342,9 @@ class Worker:
                             if hit_cap:
                                 note, limited, dates = "Daily search limit reached", True, []
                             elif not dates:
-                                note = "No date on the calendar under your target"
+                                target = w["max_price"] is not None or w["max_points"] is not None
+                                note = ("No date on the calendar under your target" if target else
+                                        "No bookable date" + (" pair" if rt else "") + " on the calendar")
                         # dates of flights already booked are always searched (rebook check)
                         booked = [b for b in swa.booked(w) if b["date"] >= db.today() and (rt or b["leg"] == "out")]
                         want = list(dict.fromkeys((b["leg"], b["date"]) for b in booked))
