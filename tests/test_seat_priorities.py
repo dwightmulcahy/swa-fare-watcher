@@ -149,6 +149,11 @@ def test_planes_and_recline():
     assert max8["6D"]["type"] == "preferred" and max8["17A"]["type"] == "standard"
     assert seats.LIMITED_RECLINE in max8["30C"]["features"] and seats.LIMITED_RECLINE in max8["13A"]["features"]
     assert seats.LIMITED_RECLINE not in max8["12A"]["features"]
+    bulk = {k for k, s in max8.items() if "bulkhead seat" in s["features"]}
+    assert bulk == {"1D", "1E", "1F", "2A", "2B", "2C"}                  # as on Southwest's map
+    no_bulk = seats.normalize({"priorities": {**seats.DEFAULT_PRIORITIES, "bulkhead_window": None,
+                                              "bulkhead_aisle": None}})
+    assert seats.priority({**max8["2A"], "features": set(max8["2A"]["features"])}, no_bulk) == (None, None)
     p = seats.normalize({"priorities": {"std_window": 1}, "tiebreak": ["recline"]})
     s12, s13 = (seat("12A", "standard", "window"), dict(seat("13A", "standard", "window"),
                                                         features={"window", seats.LIMITED_RECLINE}))
