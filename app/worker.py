@@ -913,7 +913,7 @@ class Worker:
                     changes, note = picker.run(until, sleep=self.sleep)
                 finally:
                     report = getattr(picker, "report", []) or []
-                    db.save_seat_maps(w["id"], list((getattr(picker, "maps", None) or {}).values()))
+                    self.plane_changed(w, db.save_seat_maps(w["id"], list((getattr(picker, "maps", None) or {}).values())))
             fails = 0
         except seat_picker.NotFree as e:
             stop = f"Stopped before paying anything: {e}. Your seat wasn't changed."
@@ -975,6 +975,29 @@ class Worker:
                                                   url, report))
         return status, changes, text
 
+    def plane_changed(self, w, changes):
+        """Email the watch's owner when Southwest swaps the plane on a booked flight: the seat map,
+        and with it the seats worth having, may be different."""
+        if not changes:
+            return
+        user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],))
+        from . import seat_picker
+        for flight, old, new in changes:
+            applog.warn(f"{w['name']}: plane changed on {flight}: {old} → {new}", user_id=w["user_id"],
+                        watch_id=w["id"], source="seats")
+        if not user or not user["email"]:
+            return
+        lines = [f"<b>{html.escape(f)}</b>: {html.escape(o)} → <b>{html.escape(n)}</b>" for f, o, n in changes]
+        body = mailer.render_notice(
+            f"Plane change: {w['name']}",
+            lines + ["A different plane can mean a different seat map: your seat may have moved or be a different "
+                     "type, and the seats worth having change too. "
+                     + ("The seat watch keeps checking with your priorities on the new map." if w["seat_auto"] else
+                        "Check your seat on the reservation.")],
+            seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"]),
+            button="Open my reservation")
+        mailer.send(user["email"], f"SWA plane change: {w['name']} ({changes[0][1]} → {changes[0][2]})", body)
+
     def lookup_booking(self, watch_id, browser_factory=None):
         """Read a seat watch's flights (dates, departure times, airports, flight numbers) from its
         booking's trip page, save them and plan the seat jobs. Returns the legs found."""
@@ -999,7 +1022,7 @@ class Worker:
                 legs = seat_picker.parse_trip(picker.page.inner_text("body"))
                 if legs:
                     try:            # the plane and its seat map, for the form's heat map
-                        db.save_seat_maps(watch_id, picker.capture_maps())
+                        self.plane_changed(w, db.save_seat_maps(watch_id, picker.capture_maps()))
                     except swa.Blocked:
                         raise
                     except Exception as e:
