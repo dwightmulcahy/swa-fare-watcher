@@ -314,19 +314,27 @@ def _split_booked(con):
 
 
 def save_seat_maps(watch_id, maps):
-    """Merge freshly read seat maps (by flight) into the watch's."""
+    """Merge freshly read seat maps (by flight) into the watch's. Returns the plane changes seen:
+    [(flight, old plane, new plane)] (only when both planes are named)."""
     import json
     if not maps:
-        return
+        return []
     w = one("SELECT seat_maps FROM watches WHERE id=?", (watch_id,))
     try:
         have = {m["flight"]: m for m in json.loads((w["seat_maps"] if w else None) or "[]")}
     except (ValueError, TypeError, KeyError):
         have = {}
+    changes = []
     for m in maps:
+        old = have.get(m["flight"], {}).get("plane")
+        if old and m.get("plane") and old != m["plane"]:
+            changes.append((m["flight"], old, m["plane"]))
+        if not m.get("plane") and old:            # the map didn't name it this time: keep the last one
+            m = {**m, "plane": old}
         have[m["flight"]] = {**m, "read": now()}
     with tx() as con:
         con.execute("UPDATE watches SET seat_maps=? WHERE id=?", (json.dumps(list(have.values())), watch_id))
+    return changes
 
 
 def sync_jobs(watch_id, now=None):

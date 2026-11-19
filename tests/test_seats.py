@@ -615,3 +615,20 @@ def test_watch_page_shows_the_current_seat_and_score(client, worker, sent):
     page = client.get(f"/watches/{wid}").text
     assert "<b>3A (Extra Legroom, Window)</b>" in page and "score 100" in page
     assert "3A · score 100" in client.get("/").text                        # and on the dashboard
+
+
+def test_plane_change_emails_the_owner(client, worker, sent):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(20), status="a_list_preferred")
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    m = {"flight": "Flight 1 of 1 LIR to HOU", "seats": []}
+    assert db.save_seat_maps(wid, [{**m, "plane": "Boeing 737-800"}]) == []          # first sighting: no alert
+    assert db.save_seat_maps(wid, [{**m, "plane": None}]) == []                      # not named: keeps the last
+    assert json.loads(db.one("SELECT seat_maps FROM watches WHERE id=?", (wid,))["seat_maps"])[0]["plane"] \
+        == "Boeing 737-800"
+    changes = db.save_seat_maps(wid, [{**m, "plane": "Boeing 737 MAX 8"}])
+    assert changes == [("Flight 1 of 1 LIR to HOU", "Boeing 737-800", "Boeing 737 MAX 8")]
+    worker.plane_changed(w, changes)
+    assert "SWA plane change" in sent[-1][1] and "Boeing 737-800 → Boeing 737 MAX 8" in sent[-1][1]
+    assert "manage-reservation/index.html?confirmationNumber=ABC123" in sent[-1][2]
+    assert db.save_seat_maps(wid, [{**m, "plane": "Boeing 737 MAX 8"}]) == []        # told once
