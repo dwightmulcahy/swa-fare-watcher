@@ -186,7 +186,7 @@ def test_priorities_persist_and_autosave(client):
     assert p["tiebreak"] == ["forward"] and p["fallback"] and not p["explain"] and p["position"] == "aisle"
     edit = client.get(f"/watches/{wid}/edit").text                       # restored on the next visit
     assert edit.index('name="prio_std_aisle"') < edit.index('name="prio_middle"') < edit.index('name="prio_exit_window"')
-    assert 'name="seat_fallback" value="1" checked' in edit
+    assert 'name="seat_fallback" value="1" aria-describedby="tip-fallback" checked' in edit
     assert client.post(f"/watches/{wid}/seat-prefs", data={**form, "csrf": "nope"}).status_code == 403
 
 
@@ -201,3 +201,11 @@ def test_migrated_watch_is_flagged_on_the_form(client):
     edit = client.get(f"/watches/{wid}/edit").text
     assert "Converted from your earlier seat preferences" in edit
     assert 'name="prio_middle"' in edit and edit.count("selected>Off") >= 1
+
+
+def test_form_explains_fallback_and_explanation(client):
+    from tests.test_web import admin_client
+    admin_client(client)
+    page = client.get("/watches/new?kind=seats").text
+    assert 'aria-describedby="tip-fallback"' in page and "never taken" in page and "fallback" in page
+    assert 'id="tip-explain"' in page and "Selected: 3A" in page

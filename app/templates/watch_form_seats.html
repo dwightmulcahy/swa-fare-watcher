@@ -61,8 +61,13 @@
       </ol>
       <div class="prio-tools">
         <button type="button" id="prio-defaults">Restore Defaults</button>
-        <label class="check"><input type="checkbox" name="seat_fallback" value="1" {{ "checked" if sp.fallback }}> Allow fallback seats when no preferences match</label>
-        <label class="check"><input type="checkbox" name="seat_explain" value="1" {{ "checked" if sp.explain }}> Show selection explanation</label>
+        <span class="with-tip"><label class="check"><input type="checkbox" name="seat_fallback" value="1" aria-describedby="tip-fallback" {{ "checked" if sp.fallback }}> Allow fallback seats when no preferences match</label>
+          <span class="info-tip" tabindex="0" role="button" aria-label="What this means">i<span class="info-tip-text" role="tooltip" id="tip-fallback">
+            <b>Off (recommended):</b> the watch only ever moves you to a seat that matches one of the priorities you've numbered. A seat type set to <i>Off</i> is never taken, so if you switched off Middle seat, it will never put you in a middle seat. If no free seat matches, it simply keeps the seat you have and checks again later.<br><br>
+            <b>On:</b> when no free seat matches any of your priorities and your current seat doesn't match one either, it may move you to the best remaining free seat anyway (judged by your tie-breakers), labelled "fallback" in the email. It never swaps a seat that matches your priorities for a fallback seat.</span></span></span>
+        <span class="with-tip"><label class="check"><input type="checkbox" name="seat_explain" value="1" aria-describedby="tip-explain" {{ "checked" if sp.explain }}> Show selection explanation</label>
+          <span class="info-tip" tabindex="0" role="button" aria-label="What this means">i<span class="info-tip-text" role="tooltip" id="tip-explain">
+            Adds a line to each seat email saying why that seat was chosen, e.g. "Selected: 3A. Matched Priority 3: Extra-legroom window. Higher-ranked Exit-row window seats were unavailable." Turn it off for shorter emails.</span></span></span>
         <span class="muted small" id="prio-saved" aria-live="polite"></span>
       </div>
       <details class="prio-ties">
