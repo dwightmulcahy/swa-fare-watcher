@@ -444,8 +444,8 @@ def _example(plane):
             f = {"window" if c in "AF" else "aisle" if c in "CD" else "middle"}
             if r in L["exits"]:
                 f.add("exit row")
-            if r == 1:
-                f.add("bulkhead seat")
+            if r == 1 or (r == 2 and c in "ABC"):     # the first row on each side (row 1 is DEF only),
+                f.add("bulkhead seat")                 # as Southwest labels them: 1D-F and 2A-C
             if code in L["no_view"]:
                 f.add("window without window view")
             kind = ("extra" if r in L["extra"] or code in L["extra_seats"] else
