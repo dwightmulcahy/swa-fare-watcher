@@ -697,3 +697,37 @@ def test_priorities_drag_and_new_watch_draft(client):
         assert pg.input_value("[name=prio_middle]") == "1" and order()[0] == "middle"
         assert not errors, errors
         b.close()
+
+
+
+def test_heat_map_marks_your_current_seat(client):
+    import json as _json
+
+    from playwright.sync_api import sync_playwright
+
+    from app import db
+    from tests.conftest import future
+    from tests.test_seats import _seat_watch
+    wid, _ = _seat_watch(client, future(10))
+    now = {"passenger": "Pat L.", "seat": {"seat": "7A", "describe": "7A", "price": 0, "score": 50, "priority": 6}}
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET seats_now=? WHERE watch_id=?", (_json.dumps([now]), wid))
+    with sync_playwright() as p:
+        b, pg, errors, _ = _app_page(client, p, f"/watches/{wid}/edit")
+        pg.wait_for_selector(".heat-seat", state="attached")
+        assert pg.eval_on_selector_all(".heat-mine", "els => els.map(e => e.dataset.seat)") == ["7A"]
+        pg.focus('.heat-seat[data-seat="7A"]')
+        assert "your seat (outbound)" in pg.inner_text("#heat-tip")
+        real = [{"flight": "Flight 1 of 1 LIR to HOU", "plane": "Boeing 737 MAX 8", "seats": [
+            {**s, "selected": s["seat"] == "11F"} for s in seats_example()]}]
+        db.save_seat_maps(wid, real)
+        pg.reload()
+        pg.wait_for_selector(".heat-seat", state="attached")
+        assert pg.eval_on_selector_all(".heat-mine", "els => els.map(e => e.dataset.seat)") == ["11F"]   # the real map says
+        assert not errors, errors
+        b.close()
+
+
+def seats_example():
+    from app import seats
+    return seats.example_maps()["Boeing 737 MAX 8"]

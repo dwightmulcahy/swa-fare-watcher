@@ -63,6 +63,23 @@ templates.env.globals["asset"] = _asset
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["seats"] = seats
 templates.env.globals["seat_prefs"] = seats.prefs_of
+def _my_seats(w):
+    """The seats this watch's passengers have now, from its seat checks: [{"seat", "flight"}]."""
+    wid = (w.get("id") if isinstance(w, dict) else w["id"]) if w else None
+    if not wid:
+        return []
+    out = []
+    for j in db.query("SELECT leg, seats_now FROM seat_jobs WHERE watch_id=? ORDER BY leg DESC", (wid,)):
+        try:
+            for p in json.loads(j["seats_now"] or "[]"):
+                if p.get("seat"):
+                    out.append({"seat": p["seat"]["seat"], "flight": "return" if j["leg"] == "ret" else "outbound"})
+        except (ValueError, TypeError, KeyError):
+            pass
+    return out
+
+
+templates.env.globals["my_seats"] = _my_seats
 templates.env.globals["prio_rows"] = lambda p: sorted(
     p["priorities"].items(), key=lambda kv: (kv[1] is None, kv[1] or 0, list(seats.CATEGORIES).index(kv[0])))
 templates.env.globals["max_dates"] = settings.max_dates_per_watch

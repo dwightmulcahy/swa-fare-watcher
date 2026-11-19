@@ -94,11 +94,11 @@
         <div class="heat-grid" id="heat-grid" role="img" aria-label="Seat map coloured by priority"></div>
         <div class="heat-tip" id="heat-tip" role="tooltip" hidden></div>
       </div>
-      <div class="heat-legend" aria-hidden="true"><span>Priority {{ seats.MAX_PRIORITY }}</span><span class="heat-scale"></span><span>Priority 1</span><span class="heat-off"></span><span>Off</span></div>
-      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time. "Your flight" maps are this booking's real seat map as last seen (faded = taken, ringed = your seat); the others are Southwest's plane layouts (737-700 and -800 approximate).</p>
+      <div class="heat-legend" aria-hidden="true"><span>Priority {{ seats.MAX_PRIORITY }}</span><span class="heat-scale"></span><span>Priority 1</span><span class="heat-off"></span><span>Off</span><span class="heat-mine-key"></span><span>your seat</span></div>
+      <p class="hint">Colour = the priority each seat matches; hover or tab to a seat for which one and why. Outlined = the seat it would pick (the best your status gets free); hatched seats aren't free for your status at that time; the dot is your seat now. "Your flight" maps are this booking's real seat map as last seen (faded = taken); the others are Southwest's plane layouts (737-700 and -800 approximate).</p>
     </div>
   </fieldset>
-  <script type="application/json" id="heat-data">{{ {"maps": seats.heat_maps(w if w.id else none), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
+  <script type="application/json" id="heat-data">{{ {"maps": seats.heat_maps(w if w.id else none), "mine": my_seats(w), "status": seats.status_table(), "categories": seats.CATEGORIES, "max": seats.MAX_PRIORITY, "tiebreaks": seats.TIEBREAKS|list}|tojson }}</script>
   <script src="{{ asset('seat-prio.js') }}" defer></script>
   <script src="{{ asset('seat-heat.js') }}" defer></script>
   {% set active_label = "Active" %}{% include "_watch_foot.html" %}
