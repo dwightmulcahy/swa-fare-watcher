@@ -632,3 +632,36 @@ def test_plane_change_emails_the_owner(client, worker, sent):
     assert "SWA plane change" in sent[-1][1] and "Boeing 737-800 → Boeing 737 MAX 8" in sent[-1][1]
     assert "manage-reservation/index.html?confirmationNumber=ABC123" in sent[-1][2]
     assert db.save_seat_maps(wid, [{**m, "plane": "Boeing 737 MAX 8"}]) == []        # told once
+
+
+def test_seat_checks_use_their_own_signed_out_browser_and_poll_gently(client, worker):
+    """Seat checks never use the fare-search browser (signed in to the search account), and the
+    opening check reloads every 3-5 minutes."""
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    opened = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET opens_at=? WHERE watch_id=?", (opened, wid))
+    job = worker.due_seat_jobs()[0]
+    made, polls = [], []
+    import app.seat_picker as sp
+
+    class Browser:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    class Picker:
+        def __init__(self, *a, **k): self.report = []
+        def run(self, until, poll=None, **k):
+            polls.append(poll)
+            return [], "no better"
+    real_factory, real = worker.searcher_factory, sp.SeatPicker
+    worker.searcher_factory = lambda state, profile_key=None: made.append((state, profile_key)) or Browser()
+    sp.SeatPicker = Picker
+    try:
+        worker.run_seat_job(dict(job))
+    finally:
+        worker.searcher_factory, sp.SeatPicker = real_factory, real
+    uid = job["user_id"]
+    assert made == [(None, f"{uid}-seats")] and polls == [(180, 300)]
+    assert worker.SEAT_WINDOW // 300 >= 4 and worker.SEAT_WINDOW // 180 <= 7             # 4-6 reloads
