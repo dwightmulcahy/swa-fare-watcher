@@ -421,6 +421,7 @@ def test_budget_keeps_nearest_dates(monkeypatch):
     from app.config import settings
     from app.worker import fit_budget, page_budget
     monkeypatch.setattr(settings, "page_budget", (20, 35))
+    monkeypatch.setattr(settings, "calendar", False)
     w1 = {"id": 1, "origin": "DAL", "destination": "HOU", "trip_type": "oneway"}
     w2 = {"id": 2, "origin": "DAL,DFW", "destination": "HOU", "trip_type": "oneway"}
     plan = [(w1, [("out", "2027-03-01"), ("out", "2027-01-05")]), (w2, [("out", "2027-01-10")])]
@@ -429,6 +430,35 @@ def test_budget_keeps_nearest_dates(monkeypatch):
     assert fit_budget(plan, None) == plan
     b = page_budget(7, "2027-01-05")
     assert b == page_budget(7, "2027-01-05") and 20 <= b <= 35
+    monkeypatch.setattr(settings, "calendar", True)                   # the calendar narrows: keep all dates
+    assert fit_budget(plan, 2) == plan
+
+
+def test_round_trip_dates_stay_in_pairs_so_the_calendar_finds_a_trip(monkeypatch):
+    """The 'Visit Lena' case: LIR-JAX, out Apr 7-25, 5-10 nights. A small page budget used to keep
+    the 7 nearest outbound and 2 nearest return dates (Apr 12-13), so no pair fit and the run found
+    nothing, although the calendar had Apr 10 + Apr 15."""
+    from app import swa
+    from app.config import settings
+    from app.worker import fit_budget, with_partners
+    monkeypatch.setattr(settings, "calendar", True)
+    w = {"id": 9, "kind": "fare", "origin": "LIR", "destination": "JAX", "trip_type": "roundtrip",
+         "dates": "", "date_from": "2027-04-07", "date_to": "2027-04-25", "weekdays": "", "days_from": None,
+         "days_to": None, "ret_dates": "", "nights_min": 5, "nights_max": 10,
+         "max_price": None, "max_points": None, "min_cpp": 1.3, "adults": 2}
+    today = dt.date(2026, 11, 19)
+    legs = swa.search_legs(w, today)
+    plan = fit_budget([(w, legs)], 18)
+    assert plan[0][1] == legs                                          # not cut date by date
+    due = [("out", "2027-04-10")]                                      # only one date due today ...
+    full = with_partners(w, due, legs)
+    assert ("ret", "2027-04-15") in full and ("ret", "2027-04-20") in full and ("ret", "2027-04-21") not in full
+    unav = {"cash": None, "points": None}
+    cal = {"out": {d: unav for d in ("2027-04-07", "2027-04-08", "2027-04-09")} |
+                  {"2027-04-10": {"cash": 525.0, "points": 40000}, "2027-04-11": {"cash": 520.0, "points": 39000}},
+           "ret": {"2027-04-15": {"cash": 255.0, "points": 19000}, "2027-04-16": {"cash": 229.0, "points": 17000}}}
+    picked = swa.calendar_pick(w, cal, full, 6)
+    assert ("out", "2027-04-10") in picked and ("ret", "2027-04-16") in picked
 
 
 def test_record_searched_tracks_price_changes():
