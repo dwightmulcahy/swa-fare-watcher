@@ -285,7 +285,7 @@ class SeatPicker:
         return [c for c in codes if not re.search(rf"\bSeat {c}\b", text)]
 
     # ----- the whole job
-    def run(self, until, poll=(45, 90), sleep=time.sleep, stop=lambda: False):
+    def run(self, until, poll=(180, 300), sleep=time.sleep, stop=lambda: False):
         """Open the booking, then keep checking the seat map until a better free seat shows up
         (selection opening) or `until` (epoch seconds). Returns (changes, note). A failure carries
         a screenshot of the page (e.screenshot) for the log."""

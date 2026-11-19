@@ -227,6 +227,13 @@ def uses_calendar(w):
     return bool(settings.calendar) and (dict(w).get("kind") or "fare") == "fare"
 
 
+def seat_profile(uid):
+    """The browser profile for anything done on a user's own booking (seat checks, check-in, the
+    booking lookup): its own Chrome profile, never signed in to Southwest and sharing no cookies
+    with the fare searches, so the account used for searching isn't tied to the real reservation."""
+    return f"{uid}-seats"
+
+
 def mark_hot(con, hits, now=None):
     """The dates of new deals stay 'hot' for HOT_HOURS: looked at again at the next check-in."""
     until = ((now or dt.datetime.now()) + dt.timedelta(hours=HOT_HOURS)).isoformat(timespec="seconds")
@@ -735,7 +742,8 @@ class Worker:
 
     # ----- seat selection (48 h before departure)
     SEAT_EARLY = 150          # be on the seat map this many seconds before selection opens
-    SEAT_WINDOW = 25 * 60     # and keep checking for this long after
+    SEAT_WINDOW = 20 * 60     # and keep checking for this long after (a reload every 3-5 min)
+    SEAT_POLL = (180, 300)
     SEAT_STOP_BEFORE = 3600   # then come back now and then until this long before departure
     SEAT_STOP_BEFORE_INTL = 7200   # international: Southwest stops online changes 90 min out
     SEAT_GAP = (2.0, 6.0)     # hours between checks
@@ -808,7 +816,7 @@ class Worker:
         applog.info(f"{w['name']}: checking in for the {leg} flight", user_id=uid, source="checkin")
         try:
             factory = browser_factory or (lambda: self.searcher_factory(
-                None, profile_key=uid if self.running_user != uid else f"{uid}-seats"))
+                None, profile_key=seat_profile(uid)))
             with factory() as browser:
                 ci = checkin.CheckIn(browser, w["booking_conf"], w["booking_first"], w["booking_last"], user_id=uid)
                 positions, seat_list = ci.run(max(opens.timestamp(), time.time()) + self.CHECKIN_RETRY_FOR,
@@ -900,17 +908,16 @@ class Worker:
                                         f"checking the {leg} flight's seat map for a better seat"),
                     user_id=uid, source="seats")
         changes, note, report, stop, fails = [], "", [], None, job.get("fails") or 0
-        same_profile = self.running_user != uid
         self.seat_busy.add(uid)
         try:
             factory = picker_factory or (lambda: self.searcher_factory(
-                None, profile_key=uid if same_profile else f"{uid}-seats"))
+                None, profile_key=seat_profile(uid)))
             with factory() as browser:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), status_key, user_id=uid, window=window)
                 until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if opening else 0
                 try:
-                    changes, note = picker.run(until, sleep=self.sleep)
+                    changes, note = picker.run(until, poll=self.SEAT_POLL, sleep=self.sleep)
                 finally:
                     report = getattr(picker, "report", []) or []
                     self.plane_changed(w, db.save_seat_maps(w["id"], list((getattr(picker, "maps", None) or {}).values())))
@@ -1013,7 +1020,7 @@ class Worker:
         self.seat_busy.add(uid)
         try:
             factory = browser_factory or (lambda: self.searcher_factory(
-                None, profile_key=uid if self.running_user != uid else f"{uid}-seats"))
+                None, profile_key=seat_profile(uid)))
             with factory() as browser:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), w["seat_status"] or "none", user_id=uid)
