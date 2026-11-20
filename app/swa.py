@@ -1559,8 +1559,21 @@ class BrowserSearcher:
             self._click(trip)
             listbox = trip.get_attribute("aria-controls", timeout=5000)
             self._click(page.locator(f'[id="{listbox}"] [role=option]', has_text="One-way").first)
-        self._pick_airport(FORM["origin"], origin)
-        self._pick_airport(FORM["dest"], dest)
+        # The form remembers the last search. If Arrive already holds our departure airport, typing
+        # it into Depart is an "Invalid route with departure airport" (no suggestion is offered), so
+        # change Arrive first, as a person would after seeing that.
+        held = (page.locator(FORM["dest"]).first.input_value(timeout=5000) or "").strip().upper()
+        steps = [(FORM["dest"], dest), (FORM["origin"], origin)] if origin in held.split() or held == origin \
+            else [(FORM["origin"], origin), (FORM["dest"], dest)]
+        try:
+            for sel, code in steps:
+                self._pick_airport(sel, code)
+        except RuntimeError as e:
+            if "no suggestion" not in str(e) or not re.search(r"invalid route", page.inner_text("body"), re.I):
+                raise
+            self._beat(0.6, 1.4)              # the other order: Arrive, then Depart
+            for sel, code in reversed(steps):
+                self._pick_airport(sel, code)
         d = dt.date.fromisoformat(date)
         when = page.locator(FORM["date"]).first
         if (when.input_value(timeout=5000) or "") != f"{d:%m/%d}":

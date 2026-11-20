@@ -27,8 +27,16 @@ const trip = document.getElementById("trip"), tripList = document.getElementById
 trip.onclick = () => { tripList.hidden = false; };
 tripList.querySelectorAll("[role=option]").forEach((o) => o.onclick = () => {
   trip.querySelector("span").textContent = o.textContent; tripList.hidden = true; });
+// the form remembers the last search (a test can set what it remembers)
+try {
+  const o = localStorage.getItem("prefillOrigin"), d = localStorage.getItem("prefillDest");
+  if (o) document.getElementById("originationAirportCode").value = o;
+  if (d) document.getElementById("destinationAirportCode").value = d;
+} catch (e) { /* storage off */ }
+const ids = {"originationAirportCode": "destinationAirportCode", "destinationAirportCode": "originationAirportCode"};
 for (const [id, list] of [["originationAirportCode", "origin-list"], ["destinationAirportCode", "dest-list"]]) {
   const input = document.getElementById(id), ul = document.getElementById(list);
+  const other = document.getElementById(ids[id]);
   const show = (entries) => ul.replaceChildren(...entries.map(([c, n]) => {
     const li = document.createElement("li"); li.setAttribute("role", "option"); li.textContent = n;
     li.onclick = () => { input.value = c; ul.replaceChildren(); }; return li; }));
@@ -38,7 +46,15 @@ for (const [id, list] of [["originationAirportCode", "origin-list"], ["destinati
     // like Southwest: popular airports show at once, the filtered list a moment later
     if (!ul.children.length) show(Object.entries(NAMES).filter(([c]) => c === "HOU" || c === "JAN"));
     clearTimeout(timer);
-    timer = setTimeout(() => show(Object.entries(NAMES).filter(([c, n]) => t && (c.startsWith(t) || n.toUpperCase().includes(t)))), 700);
+    // like Southwest: the airport already in the other field isn't offered ("Invalid route")
+    timer = setTimeout(() => {
+      const hits = Object.entries(NAMES).filter(([c, n]) => t && c !== other.value.toUpperCase() &&
+                                                (c.startsWith(t) || n.toUpperCase().includes(t)));
+      if (!hits.length && t === other.value.toUpperCase()) {
+        const li = document.createElement("li"); li.textContent = "Invalid route with departure airport";
+        ul.replaceChildren(li);
+      } else show(hits);
+    }, 700);
   });
 }
 const pax = document.querySelector('[name="adultPassengersCount"]'), paxbox = document.getElementById("paxbox");

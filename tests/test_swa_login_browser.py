@@ -731,3 +731,26 @@ def test_heat_map_marks_your_current_seat(client):
 def seats_example():
     from app import seats
     return seats.example_maps()["Boeing 737 MAX 8"]
+
+
+
+def test_form_remembering_our_departure_in_arrive_is_filled_arrive_first(site, monkeypatch, tmp_path):
+    """Southwest's form keeps the last search: with Arrive = LIR, typing LIR into Depart gives
+    'Invalid route with departure airport' and no suggestion (the warning seen on Nov 20)."""
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "home-menu.html"))
+    monkeypatch.setattr(settings, "book_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "form_share", 1.0)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with swa.BrowserSearcher(profile_key="t-form-prefill", human=False) as b:
+        b._warmed = True
+        _shopping_route(b, {("POINTS", "2027-01-02"): "12,000"})
+        b.page.goto(settings.home_url)
+        b.page.evaluate("localStorage.setItem('prefillOrigin', 'HOU'); localStorage.setItem('prefillDest', 'SJO')")
+        got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")
+        url = b.page.url
+    assert got and b._form_works is True
+    assert "originationAirportCode=SJO" in url and "destinationAirportCode=JAX" in url
