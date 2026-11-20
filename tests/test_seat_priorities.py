@@ -214,3 +214,12 @@ def test_form_explains_fallback_and_explanation(client):
     page = client.get("/watches/new?kind=seats").text
     assert 'aria-describedby="tip-fallback"' in page and "never taken" in page and "fallback" in page
     assert 'id="tip-explain"' in page and "Selected: 3A" in page
+
+
+
+def test_737_700_skips_rows_10_to_13():
+    m = {x["seat"]: x for x in seats.example_maps()["Boeing 737-700"]}
+    rows = sorted({x["row"] for x in m.values()})
+    assert rows == list(range(1, 10)) + list(range(14, 28)) and len(m) == 138
+    assert {k for k, x in m.items() if "bulkhead seat" in x["features"]} == {f"1{c}" for c in "ABCDEF"}
+    assert {k for k, x in m.items() if "exit row" in x["features"]} == {f"15{c}" for c in "ABCDEF"}

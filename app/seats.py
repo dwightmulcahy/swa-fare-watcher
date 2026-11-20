@@ -404,10 +404,13 @@ PLANES = {
         "preferred": set(range(7, 14)) | {6}, "exits": {14, 15}, "skip": set(),
         "no_view": {"10A", "11A", "11F"}, "no_recline": {13, 14, 15, 30},
     },
+    # rows 1-9 then 14-27 (Southwest skips 10-13 on the -700), a full row 1, one exit row (15),
+    # as on the seat map of a -700 a user saved
     "Boeing 737-700": {
-        "rows": 27, "extra": set(range(1, 7)) | {15}, "extra_seats": set(),
-        "preferred": set(range(7, 15)), "exits": {14, 15}, "skip": {"14A"},
-        "no_view": {"8F"}, "no_recline": {14, 15, 27},
+        "rows": 27, "row_list": list(range(1, 10)) + list(range(14, 28)), "full_first_row": True,
+        "extra": set(range(1, 6)) | {15}, "extra_seats": {"6D"},
+        "preferred": {6, 7, 8, 9, 14}, "exits": {15}, "skip": set(),
+        "no_view": set(), "no_recline": {14, 27},
     },
 }
 PLANES["Boeing 737 MAX 7"] = PLANES["Boeing 737-700"]          # replacing the -700s, same cabin for now
@@ -436,16 +439,17 @@ def add_plane_facts(seat_map, plane):
 
 def _example(plane):
     L, out = PLANES[plane], []
-    for r in range(1, L["rows"] + 1):
+    full = L.get("full_first_row")
+    for r in L.get("row_list") or range(1, L["rows"] + 1):
         for c in "ABCDEF":
             code = f"{r}{c}"
-            if (r == 1 and c in "ABC") or code in L["skip"]:
+            if (r == 1 and c in "ABC" and not full) or code in L["skip"]:
                 continue
             f = {"window" if c in "AF" else "aisle" if c in "CD" else "middle"}
             if r in L["exits"]:
                 f.add("exit row")
-            if r == 1 or (r == 2 and c in "ABC"):     # the first row on each side (row 1 is DEF only),
-                f.add("bulkhead seat")                 # as Southwest labels them: 1D-F and 2A-C
+            if r == 1 or (r == 2 and c in "ABC" and not full):   # the first row on each side: 1D-F and
+                f.add("bulkhead seat")                             # 2A-C when row 1 is DEF only
             if code in L["no_view"]:
                 f.add("window without window view")
             kind = ("extra" if r in L["extra"] or code in L["extra_seats"] else

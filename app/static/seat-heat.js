@@ -97,13 +97,14 @@
     const eligible = scored.filter((s) => s.free && s.available !== false && (s.pr !== null || p.fallback))
       .sort((x, y) => cmp(key(x, p), key(y, p)));
     const pick = eligible.length ? eligible[0].seat : null;
-    const rows = Math.max(...seats.map((s) => s.row));
+    // only the rows the plane has: Southwest's 737-700 numbers 1-9 then 14 on (no rows 10-13)
+    const rows = [...new Set(seats.map((s) => s.row))].sort((a, b) => a - b);
     grid.textContent = "";
     const head = document.createElement("div"); head.className = "heat-row heat-cols";
     head.innerHTML = "<span></span>" + "ABC".split("").map((c) => `<span>${c}</span>`).join("") +
       "<span></span>" + "DEF".split("").map((c) => `<span>${c}</span>`).join("");
     grid.append(head);
-    for (let r = 1; r <= rows; r++) {
+    for (const r of rows) {
       const row = document.createElement("div"); row.className = "heat-row";
       row.append(...["num", ..."ABC", "num", ..."DEF"].map((c, i) => {
         const el = document.createElement("span");

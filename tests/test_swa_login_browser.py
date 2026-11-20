@@ -724,6 +724,13 @@ def test_heat_map_marks_your_current_seat(client):
         pg.reload()
         pg.wait_for_selector(".heat-seat", state="attached")
         assert pg.eval_on_selector_all(".heat-mine", "els => els.map(e => e.dataset.seat)") == ["11F"]   # the real map says
+        db.save_seat_maps(wid, [{"flight": "Flight 1 of 1 HOU to LIR", "plane": "Boeing 737-700",
+                                 "seats": seats_700()}])
+        pg.reload()
+        pg.select_option("#heat-plane", label=next(t for t in pg.eval_on_selector_all(
+            "#heat-plane option", "els => els.map(e => e.textContent)") if "HOU to LIR" in t))
+        rows = pg.eval_on_selector_all(".heat-row:not(.heat-cols) .heat-num:first-child", "els => els.map(e => e.textContent)")
+        assert "10" not in rows and "14" in rows and len(rows) == 23                              # no empty rows
         assert not errors, errors
         b.close()
 
@@ -754,3 +761,9 @@ def test_form_remembering_our_departure_in_arrive_is_filled_arrive_first(site, m
         url = b.page.url
     assert got and b._form_works is True
     assert "originationAirportCode=SJO" in url and "destinationAirportCode=JAX" in url
+
+
+
+def seats_700():
+    from app import seats
+    return seats.example_maps()["Boeing 737-700"]
