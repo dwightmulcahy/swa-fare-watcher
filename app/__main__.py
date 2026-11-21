@@ -146,12 +146,7 @@ def test_email(to=None):
         print(f"DNS lookup for {host} failed: {e}")
     for port in (465, 587):
         try:
-            conn = smtplib.SMTP_SSL(host, port, timeout=20) if port == 465 else smtplib.SMTP(host, port, timeout=20)
-            with conn as c:
-                if port == 587:
-                    c.ehlo()
-                    c.starttls()
-                    c.ehlo()
+            with mailer._connect(port, 20) as c:             # certificate-checked, like the app
                 c.login(settings.gmail_user, settings.gmail_password.replace(" ", ""))
             print(f"port {port}: OK (connected and logged in)")
         except smtplib.SMTPAuthenticationError as e:

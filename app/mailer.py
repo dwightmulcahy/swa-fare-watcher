@@ -2,11 +2,40 @@
 import datetime as dt
 import html
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from pathlib import Path
 
 from . import swa
 from .config import settings
+
+
+def _tls():
+    """A TLS context that checks Gmail's certificate and host name. smtplib's own default doesn't
+    verify anything, so without this anyone on the path could pose as smtp.gmail.com and read the
+    app password and every email."""
+    return ssl.create_default_context()
+
+
+def _connect(port, timeout):
+    """An SMTP connection to Gmail, encrypted and certificate-checked (465: TLS; 587: STARTTLS)."""
+    if port == 465:
+        return smtplib.SMTP_SSL(settings.gmail_host, 465, timeout=timeout, context=_tls())
+    s = smtplib.SMTP(settings.gmail_host, port, timeout=timeout)
+    try:
+        s.ehlo()
+        s.starttls(context=_tls())
+        s.ehlo()
+    except Exception:
+        s.close()
+        raise
+    return s
+
+
+def _why(e):
+    if isinstance(e, ssl.SSLCertVerificationError):
+        return f"certificate check failed ({e.verify_message}): something may be intercepting the connection"
+    return e.__class__.__name__
 
 
 def check_login():
@@ -15,20 +44,14 @@ def check_login():
     errors = []
     for port in _ports():
         try:
-            conn = (smtplib.SMTP_SSL(settings.gmail_host, 465, timeout=15) if port == 465 else
-                    smtplib.SMTP(settings.gmail_host, port, timeout=15))
-            with conn as s:
-                if port != 465:
-                    s.ehlo()
-                    s.starttls()
-                    s.ehlo()
+            with _connect(port, 15) as s:
                 s.login(settings.gmail_user, password)
             return True, f"signed in to {settings.gmail_host}:{port} as {settings.gmail_user}"
         except smtplib.SMTPAuthenticationError as e:
             return False, (f"Gmail rejected the login ({e.smtp_code}): GMAIL_APP_PASSWORD must be a 16-letter app "
                            "password for GMAIL_USER")
         except Exception as e:
-            errors.append(f"port {port}: {e.__class__.__name__}")
+            errors.append(f"port {port}: {_why(e)}")
     return False, f"can't reach {settings.gmail_host} ({'; '.join(errors)}): outgoing mail blocked?"
 
 
@@ -59,15 +82,7 @@ def send(to, subject, body_html, attachments=()) -> bool:
     # which shows up as "Connection unexpectedly closed"
     for port in _ports():
         try:
-            if port == 465:
-                conn = smtplib.SMTP_SSL(settings.gmail_host, 465, timeout=30)
-            else:
-                conn = smtplib.SMTP(settings.gmail_host, port, timeout=30)
-            with conn as s:
-                if port != 465:
-                    s.ehlo()
-                    s.starttls()
-                    s.ehlo()
+            with _connect(port, 30) as s:
                 s.login(settings.gmail_user, password)
                 s.sendmail(settings.gmail_user, [to], msg.as_string())
             applog.info(f"Email sent to {to} (port {port}): {subject}", source="mail")
@@ -78,7 +93,7 @@ def send(to, subject, body_html, attachments=()) -> bool:
                          "(myaccount.google.com/apppasswords, needs 2-Step Verification).", source="mail")
             return False
         except Exception as e:
-            errors.append(f"port {port}: {e!r}")
+            errors.append(f"port {port}: {_why(e) if isinstance(e, ssl.SSLCertVerificationError) else repr(e)}")
     applog.error(f"Email to {to} failed ({'; '.join(errors)}). If both ports fail, outgoing mail from this "
                  "server is probably blocked; check the firewall/ISP, or run `python -m app test-email`.",
                  source="mail")
