@@ -968,6 +968,8 @@ class Worker:
                         "log=?, seats_now=COALESCE(?, seats_now) WHERE id=?",
                         (status, text, db.now(), nxt.isoformat(timespec="seconds") if nxt else None, fails,
                          json.dumps(log), json.dumps(_seats_now(report, changes)) if report else None, job["id"]))
+        self.record_seat_history(w["id"], job["leg"], report, changes, status if not nxt else None, text,
+                                 note if fails and nxt else None)
         applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, source="seats")
         if user["email"] and (changes or not nxt):
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
@@ -982,6 +984,23 @@ class Worker:
                                                   url, report))
         return status, changes, text
 
+    @staticmethod
+    def record_seat_history(wid, leg, report, changes, final, text, error):
+        """One history row per passenger per check (first seen, kept or moved), plus the end of the watch."""
+        seen = {r["passenger"] for r in db.query("SELECT DISTINCT passenger FROM seat_history WHERE watch_id=? AND leg=?",
+                                                 (wid, leg))}
+        for r in report:
+            pax = r.get("passenger") or ""
+            after = _seat_after(r) if changes else r.get("current")
+            moved = bool(changes and r.get("picked"))
+            best = next((o for o in r.get("options") or [] if not after or o["seat"] != after["seat"]), None)
+            db.add_seat_history(wid, leg, "moved" if moved else "kept" if pax in seen else "first", pax,
+                                r.get("flight") or "", after, r.get("current") if moved else None, best)
+        if error:
+            db.add_seat_history(wid, leg, "failed", note=error)
+        if final:
+            db.add_seat_history(wid, leg, "failed" if final == "failed" else "finished", note=text)
+
     def plane_changed(self, w, changes):
         """Email the watch's owner when Southwest swaps the plane on a booked flight: the seat map,
         and with it the seats worth having, may be different."""
@@ -989,9 +1008,12 @@ class Worker:
             return
         user = db.one("SELECT * FROM users WHERE id=?", (w["user_id"],))
         from . import seat_picker
+        legs = {b.get("flights"): b.get("leg") for b in json.loads(w["booked"] or "[]")}
         for flight, old, new in changes:
             applog.warn(f"{w['name']}: plane changed on {flight}: {old} → {new}", user_id=w["user_id"],
                         watch_id=w["id"], source="seats")
+            leg = next((lg for f, lg in legs.items() if f and str(f) in str(flight)), "") or ""
+            db.add_seat_history(w["id"], leg, "plane", flight=str(flight), note=f"{old} → {new}")
         if not user or not user["email"]:
             return
         lines = [f"<b>{html.escape(f)}</b>: {html.escape(o)} → <b>{html.escape(n)}</b>" for f, o, n in changes]

@@ -453,3 +453,14 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
   font: 400 .8rem/1.45 inherit; font-style: normal; text-align: left; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
 .info-tip:hover .info-tip-text, .info-tip:focus .info-tip-text, .info-tip:focus-within .info-tip-text { display: block; }
 .qr { background: #fff; padding: 8px; border-radius: 8px; }
+.seat-hist td { vertical-align: top; }
+.seat-hist td:first-child { white-space: nowrap; }
+@media (max-width: 600px) {
+  .seat-hist thead { display: none; }
+  .seat-hist tr { display: block; padding: .55rem 0; border-bottom: 1px solid var(--line, #e2e8f0); }
+  .seat-hist td { display: inline; padding: 0; border: 0; }
+  .seat-hist td:nth-child(2)::before { content: " · "; }
+  .seat-hist td:nth-child(2) br { display: none; }
+  .seat-hist td:nth-child(2) .muted::before { content: " · "; }
+  .seat-hist td:last-child { display: block; margin-top: .2rem; }
+}

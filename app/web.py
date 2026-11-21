@@ -875,6 +875,29 @@ def create_app(worker=None, start_worker=True):
                         "leg_label": "Return" if j["leg"] == "ret" else "Outbound"})
         return out
 
+    def _seat_history(wid):
+        """The watch's seat history, newest first; runs of checks that kept the same seat are one line."""
+        items = []
+        for r in db.query("SELECT * FROM seat_history WHERE watch_id=? ORDER BY id", (wid,)):
+            seat, prev, best = (json.loads(r[k]) if r[k] else None for k in ("seat", "prev", "best"))
+            when = dt.datetime.fromisoformat(r["ts"]).astimezone()
+            last = items[-1] if items else None
+            if (r["event"] == "kept" and last and last["event"] in ("kept", "first") and last["leg"] == r["leg"]
+                    and last["passenger"] == r["passenger"] and (last["seat"] or {}).get("seat") == (seat or {}).get("seat")):
+                last.update(checks=last["checks"] + 1, until=when)
+                if best and (not last["best"] or best["score"] > last["best"]["score"]):
+                    last["best"] = best
+                continue
+            items.append({"event": r["event"], "leg": r["leg"], "passenger": r["passenger"], "flight": r["flight"],
+                          "seat": seat, "prev": prev, "best": best, "note": r["note"], "checks": 1,
+                          "at": when, "until": when})
+        for i in items:
+            i["leg_label"] = "Return" if i["leg"] == "ret" else "Outbound" if i["leg"] == "out" else ""
+            a, b = i["at"], i["until"]
+            i["when"] = f"{a:%a %b %-d, %H:%M}" + ("" if f"{a:%d%H%M}" == f"{b:%d%H%M}" else
+                                                   f"–{b:%H:%M}" if a.date() == b.date() else f" – {b:%a %b %-d, %H:%M}")
+        return items[::-1]
+
     def _checkin_jobs(wid):
         out = []
         for j in db.query("SELECT * FROM checkin_jobs WHERE watch_id=? ORDER BY opens_at", (wid,)):
@@ -965,7 +988,7 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), next_check=_next_check(w, u, jobs),
+                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), seat_history=_seat_history(wid), next_check=_next_check(w, u, jobs),
                       flight_trends=trends.flight_trends(wid) if (w["kind"] or "fare") == "fare" else [],
                       trends_min=trends.MIN_SAMPLES,
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],

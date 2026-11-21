@@ -1,5 +1,6 @@
 """SQLite storage."""
 import datetime as dt
+import json
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
@@ -139,6 +140,20 @@ CREATE TABLE IF NOT EXISTS seat_jobs(
   note TEXT,
   updated TEXT
 );
+CREATE TABLE IF NOT EXISTS seat_history(   -- what each seat check saw and did, shown on the watch
+  id INTEGER PRIMARY KEY,
+  watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+  leg TEXT NOT NULL,                         -- out | ret
+  ts TEXT NOT NULL,
+  event TEXT NOT NULL,                       -- first | kept | moved | finished | failed | plane
+  passenger TEXT,
+  flight TEXT,
+  seat TEXT,                                 -- JSON scored seat after the check (describe, label, score, priority)
+  prev TEXT,                                 -- JSON scored seat before it (moved)
+  best TEXT,                                 -- JSON best other free seat on offer
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS seat_history_watch ON seat_history(watch_id, id);
 CREATE TABLE IF NOT EXISTS searched(       -- when each watch date was last fully searched
   watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
   leg TEXT NOT NULL,
@@ -314,6 +329,16 @@ def _split_booked(con):
         con.execute("UPDATE watches SET booked=NULL WHERE id=?", (w["id"],))
     con.execute("INSERT OR REPLACE INTO app_state VALUES ('kinds_split', '1')")
     con.commit()
+
+
+def add_seat_history(watch_id, leg, event, passenger=None, flight=None, seat=None, prev=None, best=None,
+                     note=None):
+    def j(x):
+        return json.dumps({k: x.get(k) for k in ("seat", "describe", "label", "score", "priority")}) if x else None
+    with tx() as con:
+        con.execute("INSERT INTO seat_history(watch_id, leg, ts, event, passenger, flight, seat, prev, best, note) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (watch_id, leg, now(), event, passenger, flight, j(seat), j(prev), j(best), note))
 
 
 def save_seat_maps(watch_id, maps):
