@@ -184,8 +184,20 @@ def main():
     lt.add_argument("--no-assist", action="store_true", help="never pause for you to help in the window")
     lt.add_argument("--no-prompt", action="store_true", help="never ask for input (fail on verification code)")
     lt.add_argument("--home-url", default=None, help=argparse.SUPPRESS)  # tests point this at a fake site
+    tf = sub.add_parser("reset-2fa", help="turn off a user's two-step sign-in (lost phone and recovery codes)")
+    tf.add_argument("username")
     a = ap.parse_args()
 
+    if a.cmd == "reset-2fa":
+        from . import applog, db
+        db.init()
+        with db.tx() as con:
+            n = con.execute("UPDATE users SET totp_secret=NULL, totp_recovery=NULL WHERE username=?",
+                            (a.username,)).rowcount
+        if n:
+            applog.warn(f"Two-step sign-in for {a.username} turned off from the command line", source="admin")
+        print(f"two-step sign-in turned off for {a.username}" if n else f"no user {a.username!r}")
+        sys.exit(0 if n else 1)
     if a.cmd == "selftest":
         from .swa import selftest
         return selftest()

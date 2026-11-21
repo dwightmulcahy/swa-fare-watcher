@@ -229,6 +229,9 @@ MIGRATIONS = {
         "blocked_reason": "TEXT",
         "alert_mode": "TEXT NOT NULL DEFAULT 'instant'",   # instant | daily | weekly
         "digest_sent_at": "TEXT",
+        "totp_secret": "BLOB",                   # encrypted base32 secret: two-step sign-in is on
+        "totp_recovery": "TEXT",                 # JSON list of sha256 hashes of unused recovery codes
+        "totp_step": "INTEGER NOT NULL DEFAULT -1",   # last time step used (no replays)
     },
     "logs": {
         "attachment": "TEXT",                    # screenshot, relative to the data directory

@@ -25,13 +25,14 @@ from . import airports, applog, buildinfo, db, envfile, envspec, seats, swa, tre
 from . import worker as worker_mod
 from .config import settings
 from .mailer import fmt_dur
-from .security import (decrypt_json, encrypt_json, hash_password, new_token, temp_password,
-                       token_hash, verify_password)
+from .security import (decrypt_json, encrypt_json, hash_password, new_token, recovery_codes, recovery_hash,
+                       temp_password, token_hash, totp_match, totp_secret, verify_password)
 from .worker import worker as default_worker
 
 HERE = Path(__file__).parent
 mimetypes.add_type("text/javascript", ".mjs")  # module scripts must be served as JavaScript
 COOKIE = "swa_session"
+MFA_COOKIE = "swa_2step"   # between the password and the two-step code: 5 minutes
 templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["dur"] = lambda m: fmt_dur(int(m or 0))
 templates.env.filters["money"] = lambda v: "—" if v is None else f"${v:,.0f}"
@@ -138,6 +139,8 @@ def create_app(worker=None, start_worker=True):
     login_failures = defaultdict(list)     # per address and per "user:<name>", failure times
     dummy_hash = hash_password(new_token())  # unknown usernames cost the same time as wrong passwords
     proxy_warned = []
+    mfa_pending = {}   # token hash -> (user id, expires, wrong codes)
+    mfa_enroll = {}    # session token hash -> secret being set up
 
     @app.exception_handler(Redirect)
     async def _redirect(request, exc):
@@ -353,9 +356,66 @@ def create_app(worker=None, start_worker=True):
             return render(request, "login.html", err="This account has been revoked.", status=403)
         if db.user_expired(u):
             return render(request, "login.html", err="This account has expired.", status=403)
+        if u["totp_secret"]:
+            tok = new_token()
+            now = time.time()
+            for k in [k for k, v in mfa_pending.items() if v[1] < now]:
+                mfa_pending.pop(k)
+            mfa_pending[token_hash(tok)] = (u["id"], now + 300, 0)
+            resp = render(request, "login_code.html")
+            resp.set_cookie(MFA_COOKIE, tok, max_age=300, httponly=True, samesite="strict", path="/login",
+                            secure=settings.cookie_secure)
+            return resp
         login_failures.pop(ip, None)
         login_failures.pop(ukey, None)
         return start_session(u["id"])
+
+    def use_second_step(u, code):
+        """A TOTP code or an unused recovery code for u; True (and used up) if it fits."""
+        secret = decrypt_json(u["totp_secret"])
+        step = totp_match(secret, code, after=u["totp_step"]) if secret else None
+        if step is not None:
+            with db.tx() as con:
+                con.execute("UPDATE users SET totp_step=? WHERE id=? AND totp_step<?", (step, u["id"], step))
+            return True
+        left = json.loads(u["totp_recovery"] or "[]")
+        h = recovery_hash(code)
+        if len(re.sub(r"[^0-9a-f]", "", (code or "").lower())) == 12 and h in left:
+            left.remove(h)
+            with db.tx() as con:
+                con.execute("UPDATE users SET totp_recovery=? WHERE id=?", (json.dumps(left), u["id"]))
+            applog.warn(f"{u['username']} signed in with a recovery code ({len(left)} left)", source="web")
+            return True
+        return False
+
+    @app.post("/login/code")
+    async def login_code(request: Request):
+        ip = request.client.host if request.client else "?"
+        tok = request.cookies.get(MFA_COOKIE, "")
+        p = mfa_pending.get(token_hash(tok)) if tok else None
+        if not p or p[1] < time.time():
+            raise Redirect("/login?err=" + quote_plus("That took too long. Sign in again."))
+        u = db.one("SELECT * FROM users WHERE id=?", (p[0],))
+        ukey = "user:" + u["username"].lower()
+        if len(_recent(ip)) >= IP_LIMIT or len(_recent(ukey)) >= USER_LIMIT:
+            mfa_pending.pop(token_hash(tok), None)
+            return render(request, "login.html", err="Too many attempts. Try again in 15 minutes.", status=429)
+        f = await request.form()
+        if not use_second_step(u, str(f.get("code", ""))):
+            now = time.time()
+            login_failures[ip].append(now)
+            login_failures[ukey].append(now)
+            if p[2] + 1 >= 3:   # three wrong codes: start again from the password
+                mfa_pending.pop(token_hash(tok), None)
+                raise Redirect("/login?err=" + quote_plus("Wrong code. Sign in again."))
+            mfa_pending[token_hash(tok)] = (p[0], p[1], p[2] + 1)
+            return render(request, "login_code.html", err="That code didn't work. Try the newest one.", status=401)
+        mfa_pending.pop(token_hash(tok), None)
+        login_failures.pop(ip, None)
+        login_failures.pop(ukey, None)
+        resp = start_session(u["id"])
+        resp.delete_cookie(MFA_COOKIE, path="/login")
+        return resp
 
     @app.post("/logout")
     async def logout(request: Request):
@@ -1064,6 +1124,69 @@ def create_app(worker=None, start_worker=True):
                         (code, rid))
         raise Redirect("/settings?ok=" + quote_plus("Code sent to the sign-in. Check the status below in a minute.") + "#auto")
 
+    # ---------- two-step sign-in ----------
+    def _two_step_page(request, u, s, **ctx):
+        if not u["totp_secret"] and "codes" not in ctx:
+            import segno
+            secret = mfa_enroll.setdefault(s["token_hash"], totp_secret())
+            label = quote_plus(f"SWA Fare Watcher:{u['username']}").replace("+", "%20")
+            uri = f"otpauth://totp/{label}?secret={secret}&issuer=SWA%20Fare%20Watcher"
+            ctx.update(uri=uri, qr=segno.make(uri, error="m").svg_data_uri(scale=5, border=2),
+                       secret_spaced=" ".join(secret[i:i + 4] for i in range(0, len(secret), 4)))
+        left = len(json.loads(u["totp_recovery"] or "[]"))
+        return render(request, "two_step.html", u, s, enabled=bool(u["totp_secret"]), recovery_left=left, **ctx)
+
+    def _new_recovery(uid):
+        codes = recovery_codes()
+        with db.tx() as con:
+            con.execute("UPDATE users SET totp_recovery=? WHERE id=?",
+                        (json.dumps([recovery_hash(c) for c in codes]), uid))
+        return codes
+
+    @app.get("/settings/2fa", response_class=HTMLResponse)
+    def two_step(request: Request):
+        u, s = require(request)
+        return _two_step_page(request, u, s)
+
+    @app.post("/settings/2fa/enable", response_class=HTMLResponse)
+    async def two_step_enable(request: Request):
+        u, s = require(request)
+        f = await form(request, s)
+        secret = mfa_enroll.get(s["token_hash"])
+        step = totp_match(secret, str(f.get("code", ""))) if secret and not u["totp_secret"] else None
+        if step is None:
+            return _two_step_page(request, u, s, err="That code didn't match. Check the phone's clock and try "
+                                  "the newest code.")
+        with db.tx() as con:
+            con.execute("UPDATE users SET totp_secret=?, totp_step=? WHERE id=?", (encrypt_json(secret), step, u["id"]))
+        mfa_enroll.pop(s["token_hash"], None)
+        codes = _new_recovery(u["id"])
+        applog.info(f"Two-step sign-in turned on by {u['username']}", source="web")
+        return _two_step_page(request, db.one("SELECT * FROM users WHERE id=?", (u["id"],)), s, codes=codes)
+
+    @app.post("/settings/2fa/recovery", response_class=HTMLResponse)
+    async def two_step_recovery(request: Request):
+        u, s = require(request)
+        f = await form(request, s)
+        secret = decrypt_json(u["totp_secret"])
+        step = totp_match(secret, str(f.get("code", "")), after=u["totp_step"]) if secret else None
+        if step is None:
+            return _two_step_page(request, u, s, err="That code didn't match.")
+        with db.tx() as con:
+            con.execute("UPDATE users SET totp_step=? WHERE id=?", (step, u["id"]))
+        return _two_step_page(request, u, s, codes=_new_recovery(u["id"]))
+
+    @app.post("/settings/2fa/disable")
+    async def two_step_disable(request: Request):
+        u, s = require(request)
+        f = await form(request, s)
+        if not (verify_password(str(f.get("password", "")), u["pw_hash"]) and use_second_step(u, str(f.get("code", "")))):
+            raise Redirect("/settings/2fa?err=" + quote_plus("Wrong password or code."))
+        with db.tx() as con:
+            con.execute("UPDATE users SET totp_secret=NULL, totp_recovery=NULL WHERE id=?", (u["id"],))
+        applog.warn(f"Two-step sign-in turned off by {u['username']}", source="web")
+        raise Redirect("/settings?ok=" + quote_plus("Two-step sign-in is off."))
+
     @app.post("/settings")
     async def save_settings(request: Request):
         u, s = require(request)
@@ -1332,6 +1455,17 @@ def create_app(worker=None, start_worker=True):
             con.execute("UPDATE users SET pw_hash=?, must_change_pw=1 WHERE id=?", (hash_password(pw), uid))
             con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
         return render(request, "temp_password.html", u, s, t=t, password=pw, created=False)
+
+    @app.post("/admin/users/{uid}/2fa-off")
+    async def admin_two_step_off(request: Request, uid: int):
+        u, s, t = await _admin_action(request, uid)
+        if uid == u["id"]:
+            raise Redirect("/settings/2fa")
+        with db.tx() as con:
+            con.execute("UPDATE users SET totp_secret=NULL, totp_recovery=NULL WHERE id=?", (uid,))
+            con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        applog.warn(f"Two-step sign-in for {t['username']} turned off by {u['username']}", source="admin")
+        raise Redirect(f"/admin/users/{uid}?ok=" + quote_plus("Two-step sign-in is off."))
 
     @app.post("/admin/users/{uid}/delete")
     async def admin_delete(request: Request, uid: int):
