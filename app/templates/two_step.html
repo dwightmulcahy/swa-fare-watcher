@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Two-step sign-in{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Two-step sign-in</h1>
+  {% if codes %}
+  <p>Two-step sign-in is <b>on</b>. Save these recovery codes somewhere safe (a password manager, or printed). Each works once, in place of a code from your phone. They aren't shown again.</p>
+  <pre class="secret">{% for c in codes %}{{ c }}
+{% endfor %}</pre>
+  <a class="button primary" href="/settings">Done</a>
+  {% elif enabled %}
+  <p>Two-step sign-in is <b>on</b>: signing in needs your password and a code from your authenticator app. {{ recovery_left }} recovery code(s) left.</p>
+  <form method="post" action="/settings/2fa/recovery" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Code from your app <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+    <button type="submit">New recovery codes</button>
+  </form>
+  <hr>
+  <form method="post" action="/settings/2fa/disable" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <label>Code from your app or a recovery code <input name="code" autocomplete="one-time-code" maxlength="14" required></label>
+    <button type="submit" class="danger">Turn off two-step sign-in</button>
+  </form>
+  {% else %}
+  <p>Signing in will also need a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…), so a stolen password alone isn't enough.</p>
+  <ol>
+    <li>In the app, add an account and scan this code{% if uri %}, or on this phone <a href="{{ uri }}">tap here</a>{% endif %}:
+      <p><img class="qr" src="{{ qr }}" alt="QR code for your authenticator app" width="200" height="200"></p>
+      <p class="small">Can't scan? Enter this key: <code>{{ secret_spaced }}</code> (time-based).</p></li>
+    <li>Enter the code it shows:
+      <form method="post" action="/settings/2fa/enable" class="stack">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+        <button type="submit" class="primary">Turn on</button>
+      </form></li>
+  </ol>
+  {% endif %}
+</section>
+{% endblock %}

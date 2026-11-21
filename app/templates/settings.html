@@ -111,7 +111,9 @@
     <dt>Active watches</dt><dd>{{ limits.watches }}{% if limits.max_watches is not none %} of {{ limits.max_watches }}{% else %} (no limit){% endif %}</dd>
     <dt>Searches per day</dt><dd>{{ limits.max_searches if limits.max_searches is not none else 'No limit' }}</dd>
     <dt>Account expires</dt><dd>{{ user.expires_at or 'Never' }}</dd>
+    <dt>Two-step sign-in</dt><dd>{{ 'On' if user.totp_secret else 'Off' }}{% if user.is_admin and not user.totp_secret %} <span class="pill warn">recommended for admins</span>{% endif %}</dd>
   </dl>
   <a class="button" href="/password">Change password</a>
+  <a class="button" href="/settings/2fa">{{ 'Manage' if user.totp_secret else 'Set up' }} two-step sign-in</a>
 </section>
 {% endblock %}

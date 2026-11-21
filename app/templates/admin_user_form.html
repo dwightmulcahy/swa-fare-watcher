@@ -58,6 +58,10 @@
   <div class="buttons left">
     <form method="post" action="/admin/users/{{ t.id }}/reset-password" class="inline" data-confirm="Reset {{ t.username }}'s password? They'll be signed out.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Reset password</button></form>
+    {% if t.totp_secret and t.id != user.id %}
+    <form method="post" action="/admin/users/{{ t.id }}/2fa-off" class="inline" data-confirm="Turn off {{ t.username }}'s two-step sign-in (lost phone)? They'll be signed out.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Turn off two-step sign-in</button></form>
+    {% endif %}
     {% if t.id != user.id %}
       {% if t.active %}
       <form method="post" action="/admin/users/{{ t.id }}/revoke" class="inline" data-confirm="Revoke {{ t.username }}? They'll be signed out and their watches stop running.">

@@ -11,6 +11,7 @@
     <a class="button primary" href="/admin/users/new">New user</a>
   </div>
 </div>
+{% if not user.totp_secret %}<p class="flash err">Your admin account has no two-step sign-in: anyone with your password controls every account. <a href="/settings/2fa">Set it up</a>.</p>{% endif %}
 {% if tz %}<p class="small"><span class="pill {{ 'good' if tz.level == 'ok' else 'warn' if tz.level == 'warn' else 'bad' }}">Time zone</span>
   <span class="muted">{{ tz.message }}</span></p>{% endif %}
 <div class="table-wrap">
@@ -20,7 +21,7 @@
   {% for t in users %}
   {% set expired = t.expires_at and t.expires_at < today %}
   <tr class="{{ '' if t.active and not expired else 'paused' }}">
-    <td><a class="strong" href="/admin/users/{{ t.id }}">{{ t.username }}</a>{% if t.is_admin %} <span class="pill">Admin</span>{% endif %}<br><span class="muted small">{{ t.email or 'no email' }}</span></td>
+    <td><a class="strong" href="/admin/users/{{ t.id }}">{{ t.username }}</a>{% if t.is_admin %} <span class="pill">Admin</span>{% endif %}{% if t.totp_secret %} <span class="pill good" title="Two-step sign-in is on">2-step</span>{% endif %}<br><span class="muted small">{{ t.email or 'no email' }}</span></td>
     <td>{% if not t.active %}<span class="pill bad">Revoked</span>{% elif expired %}<span class="pill warn">Expired</span>{% elif t.must_change_pw %}<span class="pill">Invited</span>{% else %}<span class="pill good">Active</span>{% endif %}
       {% if worker.status(t.id) %}<br><span class="muted small">Search {{ worker.status(t.id) }}</span>{% endif %}</td>
     <td class="num">{{ t.n_watches }}{% if t.max_watches is not none %} / {{ t.max_watches }}{% endif %}</td>

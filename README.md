@@ -104,6 +104,10 @@ QNAP: `docker compose -f compose.qnap.yaml pull && docker compose -f compose.qna
 
 Both Compose files run with a read-only root filesystem, dropped capabilities, `no-new-privileges`, bounded memory and PIDs, an init process and rotated logs.
 
+## Two-step sign-in
+
+Under **Settings → Set up two-step sign-in**, any account can require a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) after the password: scan the QR code, enter a code, and save the 8 one-time recovery codes. Admins are reminded on the Admin page until it's on. The secret is stored encrypted, codes can't be reused, and 3 wrong codes send you back to the password. Lost phone: use a recovery code, ask another admin (**Admin → user → Turn off two-step sign-in**), or on the NAS run `docker compose exec watcher python -m app reset-2fa <username>`.
+
 ## Southwest sessions
 
 Each user uploads their own signed-in session under **Settings → Southwest session**, either:
