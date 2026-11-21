@@ -4,7 +4,7 @@
 <p class="crumbs"><a href="/admin">Admin</a> / Settings</p>
 <div class="head">
   <div><h1>Settings</h1>
-    <p class="muted">These are the app's <code>.env</code> settings, saved to <code>{{ env_path }}</code> with an explanation for each, so you can also edit the file by hand. The app reads them when it starts: <b>restart it after saving</b>. Settings under <i>Docker</i> are read by docker compose and apply after <code>docker compose up -d</code>.</p></div>
+    <p class="muted">These are the app's <code>.env</code> settings, saved to <code>{{ env_path }}</code> with an explanation for each, so you can also edit the file by hand. The app reads them when it starts: <b>restart it after saving</b>. Settings under <i>Docker</i> are read by docker compose (image, port, folders) and are read-only here: change them in the <code>.env</code> on the NAS, then <code>docker compose up -d</code>.</p></div>
   <div class="buttons">
     <form method="post" action="/admin/settings/restart" class="inline" data-confirm="Restart the app now? Any search in progress stops; the page comes back in about a minute.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Restart app</button></form>

@@ -1195,6 +1195,8 @@ def create_app(worker=None, start_worker=True):
         errs, values = [], envfile.read()
         before = dict(values)
         for st in envspec.ALL.values():
+            if st.compose:
+                continue                       # docker compose's own settings: edit the .env on the NAS
             v = _env_value(st, f, errs)
             if v is None:
                 continue
