@@ -186,7 +186,7 @@ Admins can edit every setting under **Admin → Settings (.env)**. It saves the 
 |---|---|---|
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / random | First admin, created on first start only |
 | `BASE_URL` | `http://localhost:8080` | Used in email links |
-| `COOKIE_SECURE` | `false` | Set `true` behind HTTPS |
+| `COOKIE_SECURE` | `false` | Set `true` behind HTTPS (also sends HSTS, so browsers stop using plain HTTP for a year) |
 | `SECRET_KEY` | auto (`/data/secret.key`) | Encrypts stored Southwest sessions; keep stable |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | — | Alert sender ([app password](https://myaccount.google.com/apppasswords), needs 2FA) |
 | `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time. **`TZ` must match where the server's internet connection is** (checked at start) |

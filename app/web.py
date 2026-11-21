@@ -150,6 +150,8 @@ def create_app(worker=None, start_worker=True):
         resp.headers.setdefault("Content-Security-Policy",
                                 "default-src 'self'; style-src 'self'; script-src 'self'; "
                                 "img-src 'self' data:; form-action 'self'; frame-ancestors 'none'")
+        if settings.cookie_secure:  # served over HTTPS: browsers refuse plain HTTP for a year
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return resp
 
     # ---------- auth helpers ----------
