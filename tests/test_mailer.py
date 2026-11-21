@@ -11,7 +11,7 @@ class FakeSMTP:
     fail_ports = set()
     auth_fail = False
 
-    def __init__(self, host, port, timeout=None):
+    def __init__(self, host, port, timeout=None, context=None):
         self.port = port
         if port in FakeSMTP.fail_ports:
             raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
@@ -25,7 +25,10 @@ class FakeSMTP:
     def ehlo(self):
         pass
 
-    def starttls(self):
+    def close(self):
+        pass
+
+    def starttls(self, context=None):
         FakeSMTP.log.append(("starttls", self.port))
 
     def login(self, user, pw):
