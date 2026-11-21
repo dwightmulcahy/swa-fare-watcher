@@ -81,15 +81,21 @@ def _prune():
         con.execute("DELETE FROM logs WHERE ts < ?", (cutoff,))
         con.execute("DELETE FROM logs WHERE id <= (SELECT MAX(id) FROM logs) - ?", (MAX_ROWS,))
         keep = {r[0] for r in con.execute("SELECT attachment FROM logs WHERE attachment IS NOT NULL")}
-    # screenshots and sign-in recordings older than the log retention, unless still referenced
+    # everything under debug/ older than the log retention, unless a log entry still shows it:
+    # screenshots, sign-in recordings, and the saved pages (seat map, check-in) and raw fare JSON,
+    # which carry names, confirmation numbers and Rapid Rewards details
     old = dt.date.today() - dt.timedelta(days=RETENTION_DAYS)
-    for folder in (settings.debug_dir / "shots", settings.debug_dir / "signin"):
-        if not folder.is_dir():
-            continue
-        for f in folder.rglob("*"):
+    root = settings.debug_dir
+    if root.is_dir():
+        for f in root.rglob("*"):
             try:
                 if f.is_file() and dt.date.fromtimestamp(f.stat().st_mtime) < old and _rel(f) not in keep:
                     f.unlink()
+            except OSError:
+                pass
+        for d in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)):
+            try:
+                d.rmdir()                  # only succeeds when empty
             except OSError:
                 pass
 
