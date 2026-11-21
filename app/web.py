@@ -135,7 +135,9 @@ def create_app(worker=None, start_worker=True):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.worker = worker
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
-    login_failures = defaultdict(list)
+    login_failures = defaultdict(list)     # per address and per "user:<name>", failure times
+    dummy_hash = hash_password(new_token())  # unknown usernames cost the same time as wrong passwords
+    proxy_warned = []
 
     @app.exception_handler(Redirect)
     async def _redirect(request, exc):
@@ -314,24 +316,45 @@ def create_app(worker=None, start_worker=True):
             raise Redirect("/")
         return render(request, "login.html")
 
+    IP_LIMIT, USER_LIMIT, WINDOW = 10, 5, 900
+
+    def _recent(key):
+        login_failures[key] = [t for t in login_failures[key] if t > time.time() - WINDOW]
+        return login_failures[key]
+
+    def _check_proxy(request, ip):
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd and not proxy_warned and fwd.split(",")[-1].strip() != ip:
+            proxy_warned.append(ip)
+            applog.warn(f"Sign-ins come through a proxy at {ip} that the app doesn't trust, so sign-in limits "
+                        f"treat everyone as one address: set FORWARDED_ALLOW_IPS={ip}", source="web")
+
     @app.post("/login")
     async def login(request: Request):
         ip = request.client.host if request.client else "?"
-        recent = [t for t in login_failures[ip] if t > time.time() - 900]
-        login_failures[ip] = recent
-        if len(recent) >= 10:
-            return render(request, "login.html", err="Too many attempts. Try again in 15 minutes.", status=429)
+        _check_proxy(request, ip)
         f = await request.form()
-        u = db.one("SELECT * FROM users WHERE username=?", (str(f.get("username", "")).strip(),))
-        ok = u is not None and verify_password(str(f.get("password", "")), u["pw_hash"])
+        name = str(f.get("username", "")).strip()
+        ukey = "user:" + name.lower()
+        if len(_recent(ip)) >= IP_LIMIT or len(_recent(ukey)) >= USER_LIMIT:
+            return render(request, "login.html", err="Too many attempts. Try again in 15 minutes.", status=429)
+        u = db.one("SELECT * FROM users WHERE username=?", (name,))
+        pw = str(f.get("password", ""))
+        ok = verify_password(pw, u["pw_hash"]) if u is not None else (verify_password(pw, dummy_hash) and False)
         if not ok:
-            recent.append(time.time())
+            now = time.time()
+            login_failures[ip].append(now)
+            login_failures[ukey].append(now)
+            if u is not None and len(login_failures[ukey]) == USER_LIMIT:
+                applog.warn(f"Sign-in for {name[:40]!r} paused for 15 minutes after {USER_LIMIT} wrong passwords "
+                            f"(last from {ip})", source="web")
             return render(request, "login.html", err="Wrong username or password.", status=401)
         if not u["active"]:
             return render(request, "login.html", err="This account has been revoked.", status=403)
         if db.user_expired(u):
             return render(request, "login.html", err="This account has expired.", status=403)
         login_failures.pop(ip, None)
+        login_failures.pop(ukey, None)
         return start_session(u["id"])
 
     @app.post("/logout")

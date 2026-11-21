@@ -187,6 +187,7 @@ Admins can edit every setting under **Admin → Settings (.env)**. It saves the 
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / random | First admin, created on first start only |
 | `BASE_URL` | `http://localhost:8080` | Used in email links |
 | `COOKIE_SECURE` | `false` | Set `true` behind HTTPS (also sends HSTS, so browsers stop using plain HTTP for a year) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxy address(es) whose `X-Forwarded-For` is trusted, so sign-in limits (10 failures per address, 5 per username, per 15 min) see each visitor's real address. A warning is logged when an untrusted proxy is seen |
 | `SECRET_KEY` | auto (`/data/secret.key`) | Encrypts stored Southwest sessions; keep stable |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | — | Alert sender ([app password](https://myaccount.google.com/apppasswords), needs 2FA) |
 | `SWA_DAILY_AT`, `TZ` | `07:20`, `UTC` | Daily run time. **`TZ` must match where the server's internet connection is** (checked at start) |
