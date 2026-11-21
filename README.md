@@ -180,7 +180,7 @@ Don't run it over and over if it fails: repeated failed sign-ins can lock the ac
 
 ## Configuration
 
-Admins can edit every setting under **Admin → Settings (.env)**. It saves the `.env` file the container starts with, rewriting it with every setting grouped and explained (unchanged defaults stay as commented lines; settings it doesn't know are kept at the end), so it's still easy to edit by hand. The compose files mount that file into the container at `/config/.env` (`ENV_FILE`, default `./.env`); the app's user (uid 1000) needs write access to it (on the NAS: `chmod 666 .env`). Secrets are never shown: leave them blank to keep them. Changes apply after **Restart app** on that page (the container's restart policy brings it back); the *Docker* settings apply after `docker compose up -d`.
+Admins can edit every setting under **Admin → Settings (.env)**. It saves the `.env` file the container starts with, rewriting it with every setting grouped and explained (unchanged defaults stay as commented lines; settings it doesn't know are kept at the end), so it's still easy to edit by hand. The compose files mount that file into the container at `/config/.env` (`ENV_FILE`, default `./.env`); the app's user (uid 1000) needs write access to it (on the NAS: `chmod 666 .env`). Secrets are never shown: leave them blank to keep them. Changes apply after **Restart app** on that page (the container's restart policy brings it back); the *Docker* settings (image, port, folders) are shown read-only: change them in the `.env` on the NAS and run `docker compose up -d`, so a stolen admin sign-in can't switch the image the NAS runs.
 
 | Variable | Default | Purpose |
 |---|---|---|

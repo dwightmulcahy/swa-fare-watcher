@@ -86,3 +86,18 @@ def test_admin_settings_need_an_admin_and_restart_is_deferred(client, monkeypatc
     with db.tx() as con:
         con.execute("UPDATE users SET is_admin=0")
     assert client.get("/admin/settings", follow_redirects=False).status_code in (303, 403, 404)
+
+
+def test_docker_settings_are_read_only_in_the_admin_page(client, tmp_path, monkeypatch):
+    from tests.test_web import admin_client
+    env = tmp_path / ".env"
+    env.write_text("IMAGE=ghcr.io/dwightmulcahy/swa-fare-watcher:latest\nHOST_PORT=8080\n")
+    monkeypatch.setenv("SWA_ENV_FILE", str(env))
+    t = admin_client(client)
+    page = client.get("/admin/settings").text
+    assert 'name="IMAGE"' not in page and 'name="HOST_PORT"' not in page and "readonly" in page
+    client.post("/admin/settings", data={"csrf": t, "IMAGE": "evil/image:latest", "HOST_PORT": "80",
+                                         "DATA_DIR": "/", "SWA_DAILY_AT": "06:00"})
+    vals = envfile.read(env)
+    assert vals["IMAGE"] == "ghcr.io/dwightmulcahy/swa-fare-watcher:latest" and vals["HOST_PORT"] == "8080"
+    assert "DATA_DIR" not in vals and vals["SWA_DAILY_AT"] == "06:00"
