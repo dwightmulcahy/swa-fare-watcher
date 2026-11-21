@@ -18,7 +18,7 @@ class Setting:
 GROUPS = [
     ("App", [
         Setting("BASE_URL", "http://localhost:8080", "Public URL of the app, used in email links", "url"),
-        Setting("COOKIE_SECURE", "false", "Set true when the app is served over HTTPS", "bool"),
+        Setting("COOKIE_SECURE", "false", "Set true when the app is served over HTTPS (also sends HSTS)", "bool"),
         Setting("SESSION_DAYS", "14", "How long a web sign-in lasts (days)", "int"),
         Setting("SECRET_KEY", "", "Encrypts stored Southwest sessions. Blank = auto-generated /data/secret.key. "
                 "Never change it once set: stored sessions become unreadable", "secret"),
