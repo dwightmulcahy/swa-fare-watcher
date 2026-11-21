@@ -665,3 +665,27 @@ def test_seat_checks_use_their_own_signed_out_browser_and_poll_gently(client, wo
     uid = job["user_id"]
     assert made == [(None, f"{uid}-seats")] and polls == [(180, 300)]
     assert worker.SEAT_WINDOW // 300 >= 4 and worker.SEAT_WINDOW // 180 <= 7             # 4-6 reloads
+
+
+def test_seat_history_is_recorded_and_shown_on_the_watch(client, worker, sent):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    opened = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET opens_at=? WHERE watch_id=?", (opened, wid))
+    q = "SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?"
+    job = worker.due_seat_jobs()[0]
+    cur = {"seat": "11F", "describe": "11F (Window)", "price": 0, "score": 40.0, "priority": 3, "label": "Priority 3: Window"}
+    alt = {"seat": "20C", "describe": "20C (Aisle)", "price": 0, "score": 30.0, "priority": 4}
+    meh = [{"passenger": "Pat Q", "current": cur, "options": [alt], "picked": None}]
+    for _ in range(3):
+        _run_visit(worker, db.one(q, (job["id"],)), lambda u: ([], "no better"), meh)
+    top = {"seat": "1F", "describe": "1F (Extra Legroom, Window)", "price": 0, "score": 100.0, "priority": 1,
+           "label": "Priority 1: Extra-legroom window"}
+    _run_visit(worker, db.one(q, (job["id"],)), lambda u: ([("11F", top["describe"])], "confirmed"),
+               [{"passenger": "Pat Q", "current": cur, "options": [top], "picked": "1F"}])
+    ev = [r["event"] for r in db.query("SELECT event FROM seat_history WHERE watch_id=? ORDER BY id", (wid,))]
+    assert ev == ["first", "kept", "kept", "moved", "finished"]
+    page = client.get(f"/watches/{wid}").text
+    assert "Seat history" in page and "3 checks" in page and "from 11F (Window)" in page
+    assert "best other free seat seen: 20C (Aisle)" in page and page.index("Finished") < page.index("First check")

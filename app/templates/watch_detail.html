@@ -51,6 +51,26 @@
   </ul>
 </section>
 {% endif %}
+{% if seat_history %}
+{% macro seatlbl(s) %}<b>{{ s.describe }}</b> <span class="pill {{ 'good' if s.priority == 1 else '' }}">{{ s.label or ('score %d' % (s.score|round|int)) }}</span>{% endmacro %}
+<section class="card seat-history">
+  <h2>Seat history</h2>
+  <table class="list seat-hist">
+    <thead><tr><th>When</th><th>Flight</th><th>What happened</th></tr></thead>
+    <tbody>{% for h in seat_history %}
+    <tr class="ev-{{ h.event }}"><td class="small">{{ h.when }}</td>
+      <td class="small">{{ h.leg_label }}{% if h.passenger %}<br><span class="muted">{{ h.passenger }}</span>{% endif %}</td>
+      <td>{% if h.event == 'moved' %}<span class="pill good">Moved</span> {{ seatlbl(h.seat) }}{% if h.prev %} <span class="muted small">from {{ h.prev.describe }} ({{ h.prev.label or ('score %d' % (h.prev.score|round|int)) }})</span>{% endif %}
+        {% elif h.event in ('first', 'kept') %}{% if h.event == 'first' %}<span class="pill">First check</span> {% endif %}{% if h.seat %}{{ 'Had' if h.event == 'first' else 'Kept' }} {{ seatlbl(h.seat) }}{% else %}No seat yet{% endif %}
+          {% if h.checks > 1 %}<span class="muted small">· {{ h.checks }} checks</span>{% endif %}
+          {% if h.best %}<br><span class="muted small">best other free seat seen: {{ h.best.describe }}, {{ h.best.label or ('score %d' % (h.best.score|round|int)) }}</span>{% endif %}
+        {% elif h.event == 'plane' %}<span class="pill bad">Plane change</span> {{ h.flight }}: {{ h.note }}
+        {% elif h.event == 'failed' %}<span class="pill bad">Problem</span> <span class="small">{{ h.note }}</span>
+        {% else %}<span class="pill good">Finished</span> <span class="small">{{ h.note }}</span>{% endif %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 {% if not w.booked %}<p class="flash {{ 'err' if w.last_status and 'ouldn' in w.last_status or 'blocked' in (w.last_status or '') else '' }}">{{ w.last_status or "The flights haven't been read from the booking yet." }}
   {% if 'Looking up' in (w.last_status or '') %}Refresh in a minute.{% endif %}</p>
 <form method="post" action="/watches/{{ w.id }}/lookup" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Look up the booking again</button></form>
