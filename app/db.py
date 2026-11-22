@@ -267,6 +267,7 @@ MIGRATIONS = {
         "booking_conf": "TEXT",                  # confirmation number of the booked trip
         "booking_first": "TEXT",                 # passenger name as on the booking (for lookup)
         "booking_last": "TEXT",
+        "booking_email": "TEXT",                 # receipt email Southwest requires to confirm a seat change
         "seat_auto": "INTEGER NOT NULL DEFAULT 0",   # pick seats when selection opens (48 h before)
         "seat_status": "TEXT",                   # seats.STATUSES key
         "seat_prefs": "TEXT",                    # JSON, see seats.DEFAULT_PREFS

@@ -104,7 +104,7 @@ def test_seat_watch_form_saves_preferences(client):
     t = admin_client(client)
     page = client.get("/watches/new?kind=seats").text
     assert 'name="seat_status"' in page and "max_price" not in page and "out_cash" not in page
-    data = {"csrf": t, "kind": "seats", "booking_conf": "abc12-3", "booking_first": "Pat", "booking_last": "Lee",
+    data = {"csrf": t, "kind": "seats", "booking_conf": "abc12-3", "booking_first": "Pat", "booking_last": "Lee", "booking_email": "pat@x.com",
             "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10),
             "out_time": "13:15", "seat_status": "priority", "seat_position": "aisle", "prio_exit_aisle": "1",
             "prio_extra_aisle": "1", "prio_std_aisle": "2", "prio_std_window": "3", "tiebreak_order": "view,legroom",
@@ -131,7 +131,7 @@ def _seat_watch(client, date, time_="13:15", origin="LIR", status="premier"):
     from app import db
     from tests.test_web import admin_client
     t = admin_client(client)
-    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee", "booking_email": "pat@x.com",
             "origin": origin, "destination": "HOU", "trip_type": "oneway", "out_date": date, "out_time": time_,
             "seat_status": status, "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
@@ -314,7 +314,7 @@ def test_seat_watch_with_just_the_booking_looks_it_up(client, worker, monkeypatc
     t = admin_client(client)
     started = []
     monkeypatch.setattr(worker, "lookup_booking", lambda wid: started.append(wid))
-    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee", "booking_email": "pat@x.com",
             "seat_status": "premier", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     wid = int(loc.rstrip("/").split("/")[-1])
@@ -333,7 +333,7 @@ def test_lookup_booking_fills_the_watch_and_plans_seats(client, worker):
     from tests.test_web import admin_client
     t = admin_client(client)
     worker.lookup_booking = lambda wid: None          # don't start one from the web request
-    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee", "booking_email": "pat@x.com",
             "seat_status": "premier", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
     wid = int(loc.rstrip("/").split("/")[-1])
@@ -690,3 +690,39 @@ def test_seat_history_is_recorded_and_shown_on_the_watch(client, worker, sent):
     page = client.get(f"/watches/{wid}").text
     assert "Seat history" in page and "3 checks" in page and "from 11F (Window)" in page
     assert "best other free seat seen: 20C (Aisle)" in page and page.index("Finished") < page.index("First check")
+
+
+def test_seat_watch_needs_a_receipt_email_and_the_picker_gets_it(client, worker):
+    from tests.conftest import future
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    base = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+            "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10), "out_time": "13:15",
+            "seat_status": "none", "active": "1"}
+    from app import db
+    with db.tx() as con:
+        con.execute("UPDATE users SET email='me@example.com' WHERE username='admin'")
+    assert 'value="me@example.com"' in client.get("/watches/new?kind=seats").text     # prefilled from Settings
+    r = client.post("/watches", data={**base, "booking_email": "not-an-email"})
+    assert r.status_code == 400 and "seat-change receipt" in r.text
+    loc = client.post("/watches", data={**base, "booking_email": "trip@x.com"}, follow_redirects=False).headers["location"]
+    wid = int(loc.split("?")[0].rstrip("/").split("/")[-1])
+    assert db.one("SELECT booking_email FROM watches WHERE id=?", (wid,))["booking_email"] == "trip@x.com"
+    got = {}
+
+    class Browser:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    class Picker:
+        report = []
+        def __init__(self, *a, receipt_email=None, **k): got["email"] = receipt_email
+        def run(self, until, **k): return [], "no better"
+    import app.seat_picker as sp
+    real, sp.SeatPicker = sp.SeatPicker, Picker
+    try:
+        worker.run_seat_job(dict(worker.due_seat_jobs(seats.opens_at(future(10), "13:15", "LIR"))[0]),
+                            picker_factory=Browser)
+    finally:
+        sp.SeatPicker = real
+    assert got["email"] == "trip@x.com"

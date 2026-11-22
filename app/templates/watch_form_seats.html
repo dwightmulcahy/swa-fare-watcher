@@ -15,6 +15,7 @@
       <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off" required></label>
       <label>Last name <input name="booking_last" value="{{ w.booking_last or '' }}" autocomplete="off" required></label>
     </div>
+    <label>Receipt email <span class="hint">Southwest requires one to confirm a seat change; it emails the ($0) receipt there</span><input name="booking_email" type="email" value="{{ w.booking_email or user.email or '' }}" maxlength="120" autocomplete="email" required></label>
     <label>Name <span class="hint">optional</span><input name="name" value="{{ w.name }}" maxlength="60" placeholder="Spring trip seats"></label>
     <p class="hint">After you save, it looks the booking up on southwest.com and reads the flights, dates and departure times from it.</p>
     <label class="check"><input type="checkbox" name="checkin_auto" value="1" {{ "checked" if w.checkin_auto }}> Check in automatically when check-in opens (24 hours before each flight) and email the boarding positions</label>

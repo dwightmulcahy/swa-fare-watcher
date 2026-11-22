@@ -175,7 +175,7 @@ def test_priorities_persist_and_autosave(client):
     from tests.conftest import future
     from tests.test_web import admin_client
     t = admin_client(client)
-    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee",
+    data = {"csrf": t, "kind": "seats", "booking_conf": "ABC123", "booking_first": "Pat", "booking_last": "Lee", "booking_email": "pat@x.com",
             "origin": "LIR", "destination": "HOU", "trip_type": "oneway", "out_date": future(10),
             "out_time": "13:15", "seat_status": "a_list_preferred", "seat_position": "window", "active": "1"}
     loc = client.post("/watches", data=data, follow_redirects=False).headers["location"].split("?")[0]
