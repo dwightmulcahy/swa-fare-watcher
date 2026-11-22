@@ -991,7 +991,9 @@ def create_app(worker=None, start_worker=True):
         runs = db.query("SELECT * FROM runs WHERE watch_id=? ORDER BY id DESC LIMIT 10", (wid,))
         legs = swa.search_legs(w)
         return render(request, "watch_detail.html", u, s, w=w, fares=fares, last=last, trend=trend,
-                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), seat_history=_seat_history(wid), next_check=_next_check(w, u, jobs),
+                      history=history, checkin_jobs=_checkin_jobs(wid), seat_jobs=(jobs := _seat_jobs(wid)), seat_history=_seat_history(wid),
+                      watch_log=log_query(u, {"watch": str(wid)}, limit=25) if w["kind"] == "seats" else [],
+                      next_check=_next_check(w, u, jobs),
                       flight_trends=trends.flight_trends(wid) if (w["kind"] or "fare") == "fare" else [],
                       trends_min=trends.MIN_SAMPLES,
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],

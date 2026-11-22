@@ -813,7 +813,7 @@ class Worker:
         opens = dt.datetime.fromisoformat(job["opens_at"])
         tries = (job.get("tries") or 0) + 1
         positions, seat_list, status, nxt = [], [], "failed", None
-        applog.info(f"{w['name']}: checking in for the {leg} flight", user_id=uid, source="checkin")
+        applog.info(f"{w['name']}: checking in for the {leg} flight", user_id=uid, watch_id=w["id"], source="checkin")
         try:
             factory = browser_factory or (lambda: self.searcher_factory(
                 None, profile_key=seat_profile(uid)))
@@ -842,7 +842,7 @@ class Worker:
             con.execute("UPDATE checkin_jobs SET status=?, note=?, tries=?, next_at=?, updated=? WHERE id=?",
                         (status, note, tries, nxt.isoformat(timespec="seconds") if nxt else None, db.now(), job["id"]))
         applog.log(f"{w['name']}: check-in ({leg}): {note}", "info" if status != "failed" else "warn",
-                   user_id=uid, source="checkin")
+                   user_id=uid, watch_id=w["id"], source="checkin")
         if user["email"] and status != "pending":
             url = checkin.checkin_url(w["booking_conf"], w["booking_first"], w["booking_last"])
             subject = "SWA checked in" if status == "done" else "SWA check-in needs you"
@@ -906,7 +906,7 @@ class Worker:
         applog.info(f"{w['name']}: " + (f"seat selection for the {leg} flight opens at {opens.astimezone():%H:%M}; "
                                         "opening the booking" if opening else
                                         f"checking the {leg} flight's seat map for a better seat"),
-                    user_id=uid, source="seats")
+                    user_id=uid, watch_id=w["id"], source="seats")
         changes, note, report, stop, fails = [], "", [], None, job.get("fails") or 0
         self.seat_busy.add(uid)
         try:
@@ -932,7 +932,7 @@ class Worker:
         except Exception as e:
             fails += 1
             note = f"Couldn't finish ({e.__class__.__name__}: {str(e)[:200]})"
-            applog.warn(f"{w['name']}: seat check ({leg}): {note}", user_id=uid, source="seats",
+            applog.warn(f"{w['name']}: seat check ({leg}): {note}", user_id=uid, watch_id=w["id"], source="seats",
                         attachment=getattr(e, "screenshot", None))
             if fails >= self.SEAT_MAX_FAILS:
                 stop = f"{note}, {fails} times in a row. Pick your seat yourself."
@@ -972,7 +972,7 @@ class Worker:
                          json.dumps(log), json.dumps(_seats_now(report, changes)) if report else None, job["id"]))
         self.record_seat_history(w["id"], job["leg"], report, changes, status if not nxt else None, text,
                                  note if fails and nxt else None)
-        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, source="seats")
+        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, watch_id=w["id"], source="seats")
         if user["email"] and (changes or not nxt):
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
             if nxt:          # a change, still watching
@@ -1058,7 +1058,7 @@ class Worker:
                         raise
                     except Exception as e:
                         applog.info(f"{w['name']}: couldn't read the seat map yet ({e.__class__.__name__})",
-                                    user_id=uid, source="seats")
+                                    user_id=uid, watch_id=w["id"], source="seats")
         except swa.Blocked as e:
             db.bump_block(uid, e)
             status = f"Southwest blocked the lookup ({e}); enter the flights by hand"
@@ -1078,11 +1078,11 @@ class Worker:
                              f"Booking read: {len(legs)} flight(s)", watch_id))
             db.sync_jobs(watch_id)
             applog.info(f"{w['name']}: read the booking: " + "; ".join(
-                f"{x['from']}→{x['to']} {x['date']} {x['time']}" for x in legs), user_id=uid, source="seats")
+                f"{x['from']}→{x['to']} {x['date']} {x['time']}" for x in legs), user_id=uid, watch_id=w["id"], source="seats")
         else:
             with db.tx() as con:
                 con.execute("UPDATE watches SET last_status=? WHERE id=?", (status, watch_id))
-            applog.warn(f"{w['name']}: {status}", user_id=uid, source="seats")
+            applog.warn(f"{w['name']}: {status}", user_id=uid, watch_id=w["id"], source="seats")
         return legs
 
     def housekeeping(self):

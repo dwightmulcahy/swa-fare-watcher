@@ -71,6 +71,21 @@
   </table>
 </section>
 {% endif %}
+{% if kind == 'seats' %}
+<section class="card watch-log">
+  <h2>Log <a class="small" href="/log?watch={{ w.id }}">full log</a></h2>
+  {% if watch_log %}
+  <table class="list compact log">
+    <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
+    <tbody>{% for r in watch_log %}
+    <tr class="lvl-{{ r.level }}"><td class="nowrap small">{{ r.ts|when }}</td>
+      <td><span class="pill {{ {'error': 'bad', 'warn': 'warn'}.get(r.level, '') }}">{{ r.level }}</span></td>
+      <td class="msg small">{{ r.message.split('\n')[0] }}{% if r.shot_url %} <a href="{{ r.shot_url }}" target="_blank" rel="noopener">screenshot</a>{% endif %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Nothing logged for this watch yet.</p>{% endif %}
+</section>
+{% endif %}
 {% if not w.booked %}<p class="flash {{ 'err' if w.last_status and 'ouldn' in w.last_status or 'blocked' in (w.last_status or '') else '' }}">{{ w.last_status or "The flights haven't been read from the booking yet." }}
   {% if 'Looking up' in (w.last_status or '') %}Refresh in a minute.{% endif %}</p>
 <form method="post" action="/watches/{{ w.id }}/lookup" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Look up the booking again</button></form>
