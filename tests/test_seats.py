@@ -167,8 +167,9 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
         human, page, humanize = None, None, False
 
     class Picker:
-        def __init__(self, b, conf, first, last, prefs, status, user_id=None, window=True):
+        def __init__(self, b, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None):
             assert (conf, first, last, status, window) == ("ABC123", "Pat", "Lee", "premier", True)
+            assert receipt_email                                     # the review page requires one
         report = [{"flight": "", "passenger": "Pat Lee", "current": None, "picked": "9A",
                    "options": [{"seat": "9A", "describe": "9A (Preferred, Window)", "price": 0, "score": 21.0}]}]
         def run(self, until, sleep=None, **kw):

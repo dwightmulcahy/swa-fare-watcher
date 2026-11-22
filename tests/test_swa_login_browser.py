@@ -517,9 +517,10 @@ def test_seat_picker_waits_for_free_seats_then_confirms(site, monkeypatch, tmp_p
         b.page.goto(root + "/index.html")
         b.page.evaluate("localStorage.clear(); sessionStorage.clear()")
         prefs = {**seats.DEFAULT_PREFS, "position": "window"}
-        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", prefs, "priority")
+        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", prefs, "priority", receipt_email="me@x.com")
         changes, note = picker.run(time.time() + 60, poll=(0.2, 0.3), sleep=time.sleep)
         assert b.page.evaluate("sessionStorage.getItem('seatLoads')") == "2"     # waited for free seats
+        assert b.page.evaluate("localStorage.getItem('receipt')") == "me@x.com"  # required receipt email
         assert b.page.evaluate("localStorage.getItem('paid')") == "0.00"
         assert b.page.evaluate("localStorage.getItem('lookup')") == "ABC123|Pat|Lee"
     assert note == "confirmed" and changes == [("11F", "9A (Preferred, Window)")]
@@ -767,3 +768,19 @@ def test_form_remembering_our_departure_in_arrive_is_filled_arrive_first(site, m
 def seats_700():
     from app import seats
     return seats.example_maps()["Boeing 737-700"]
+
+
+def test_seat_confirm_blocked_by_the_page_says_why(site, monkeypatch, tmp_path):
+    from app import seat_picker, swa
+    from app.config import settings
+
+    root = site.replace("/index.html", "")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(seat_picker, "CONFIRM_WAIT", (1500, 500))
+    with swa.BrowserSearcher(profile_key="t-seat-err", human=False) as b:
+        b.page.goto(root + "/air/seat/purchase.html?seat=9A&due=0.00")
+        picker = seat_picker.SeatPicker(b, "ABC123", "Pat", "Lee", {}, "none")
+        with pytest.raises(RuntimeError, match="needs an email"):
+            picker._fill_receipt()                                  # no email to give
+        with pytest.raises(RuntimeError, match="Enter email address"):
+            picker._confirm(b.page.locator(seat_picker.CONFIRM).first)
