@@ -43,6 +43,8 @@ CONTINUE = 'button:has-text("Continue to payment")'
 # role and accessible name (from the content) instead.
 NOTE_OK = ':is(button, a, [role=button], input[type=button], span, div):text-is("Ok"):visible'
 CONFIRM = "#confirmSeatChange"
+CONFIRM_WAIT = (45_000, 15_000)   # ms: for the next page, then for the button to go
+RECEIPT_EMAIL = re.compile(r"email receipt", re.I)   # required field on the review page (since 2026-11)
 
 
 class NotFree(Exception):
@@ -50,8 +52,9 @@ class NotFree(Exception):
 
 
 class SeatPicker:
-    def __init__(self, browser, conf, first, last, prefs, status, user_id=None, window=True):
+    def __init__(self, browser, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None):
         self.b, self.page = browser, browser.page
+        self.receipt_email = receipt_email
         self.conf, self.first, self.last = conf, first, last
         self.prefs, self.status, self.uid = prefs, status, user_id
         self.window = window     # within 48 h of departure: the status's upgrade seats count too
@@ -269,14 +272,36 @@ class SeatPicker:
         due = re.search(r"Amount due.*?\$\s*([\d,]+\.\d{2})", body, re.S)
         if not due or money(due.group(1)) != 0:
             raise NotFree(f"the review page shows amount due {due.group(1) if due else 'unknown'}")
+        self._fill_receipt()
         if self.b.humanize:
             self.b.human.pause(1.0, 2.5)
+        self._confirm(confirm)
+
+    def _confirm(self, confirm):
         before = self.page.url
         self.b._click(confirm)
         try:
-            self.page.wait_for_url(lambda u: u != before, timeout=45_000)
+            self.page.wait_for_url(lambda u: u != before, timeout=CONFIRM_WAIT[0])
         except Exception:
-            confirm.wait_for(state="detached", timeout=15_000)
+            try:
+                confirm.wait_for(state="detached", timeout=CONFIRM_WAIT[1])
+            except Exception:
+                errs = self.page.get_by_text(re.compile(r"^(Enter|Please enter|Required)\b", re.I))
+                msg = "; ".join(e.inner_text().strip() for e in errs.all()[:3] if e.is_visible())
+                raise RuntimeError("Southwest didn't accept Confirm seat change"
+                                   + (f": the page says {msg!r}" if msg else " (the page didn't move on)")) from None
+
+    def _fill_receipt(self):
+        """The review page won't confirm with 'Email receipt to' empty: fill in the watcher's email."""
+        box = self.page.get_by_label(RECEIPT_EMAIL)
+        if not box.count():
+            box = self.page.locator('input[type="email"]')
+        if not box.count() or not box.first.is_visible() or box.first.input_value().strip():
+            return
+        if not self.receipt_email:
+            raise RuntimeError("the review page needs an email for the receipt; add it to the seat watch")
+        self.b._type(box.first, self.receipt_email)
+        self.b._beat(0.3, 0.8)
 
     def verify(self, codes):
         """Look the booking up again and check each new seat is on it."""
