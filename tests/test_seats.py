@@ -690,6 +690,9 @@ def test_seat_history_is_recorded_and_shown_on_the_watch(client, worker, sent):
     page = client.get(f"/watches/{wid}").text
     assert "Seat history" in page and "3 checks" in page and "from 11F (Window)" in page
     assert "best other free seat seen: 20C (Aisle)" in page and page.index("Finished") < page.index("First check")
+    log = page.split('class="card watch-log"')[1]
+    assert "full log" in log and "seat selection" in log          # this watch's own log entries
+    assert db.one("SELECT COUNT(*) n FROM logs WHERE source='seats' AND watch_id IS NULL")["n"] == 0
 
 
 def test_seat_watch_needs_a_receipt_email_and_the_picker_gets_it(client, worker):
