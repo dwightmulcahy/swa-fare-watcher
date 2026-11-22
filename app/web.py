@@ -697,6 +697,9 @@ def create_app(worker=None, start_worker=True):
                      booking_last=str(f.get("booking_last", "")).strip()[:30] or None)
             if not (len(conf) == 6 and w["booking_first"] and w["booking_last"]):
                 errs.append("Enter the 6-character confirmation number and the first and last name as booked.")
+            w["booking_email"] = str(f.get("booking_email", "")).strip()[:120] or None
+            if not (w["booking_email"] and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", w["booking_email"])):
+                errs.append("Enter an email for Southwest's seat-change receipt.")
             if lookup and not w["name"]:
                 w["name"] = f"Seats {conf}"
             status = str(f.get("seat_status", "none"))
@@ -832,7 +835,7 @@ def create_app(worker=None, start_worker=True):
         if kind not in FORMS:
             return render(request, "watch_kind.html", u, s)
         w = {"kind": kind, "booked": None, "booking_conf": None, "booking_first": None, "booking_last": None,
-             "seat_auto": 0, "seat_status": "none", "seat_prefs": None, "checkin_auto": 0, "name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
+             "booking_email": None, "seat_auto": 0, "seat_status": "none", "seat_prefs": None, "checkin_auto": 0, "name": "", "origin": "", "destination": "", "dates": "", "days_from": 14, "days_to": 45,
              "date_from": None, "date_to": None,
              "weekdays": "", "adults": 1, "max_stops": 1, "max_duration_min": None, "depart_after": "",
              "depart_before": "", "max_price": None, "max_points": None, "min_cpp": 1.3, "active": 1,

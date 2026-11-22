@@ -915,7 +915,8 @@ class Worker:
             with factory() as browser:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), status_key, user_id=uid, window=window,
-                                                receipt_email=user["email"] or None)   # never the app's Gmail sender
+                                                # the watch's receipt email, else the owner's; never the Gmail sender
+                                                receipt_email=dict(w).get("booking_email") or user["email"] or None)
                 until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if opening else 0
                 try:
                     changes, note = picker.run(until, poll=self.SEAT_POLL, sleep=self.sleep)
