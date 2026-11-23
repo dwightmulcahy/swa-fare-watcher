@@ -788,6 +788,33 @@ class Worker:
                         "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status='watching' AND j.next_at<=?)) "
                         "AND w.active=1 AND w.seat_auto=1", (soon, now.isoformat(timespec="seconds")))
 
+    SEAT_NOW_GAP = 5 * 60   # Search now on a seat watch: not again within this long of a visit
+
+    def seat_check_now(self, watch_id, now=None):
+        """Search now on a seat watch: every leg not yet flown gets a visit right away (the usual plan
+        carries on after it). Returns (legs queued, reason none were)."""
+        now = now or dt.datetime.now(dt.timezone.utc)
+        jobs = db.query("SELECT * FROM seat_jobs WHERE watch_id=?", (watch_id,))
+        if not jobs:
+            return 0, "no booked flights yet"
+        if any(j["status"] == "running" for j in jobs):
+            return 0, "a seat check is running now"
+        def at(s):   # db.now() is local time without an offset
+            return dt.datetime.fromisoformat(s).astimezone()
+        if any(j["visits"] and j["updated"] and (now - at(j["updated"])).total_seconds() < self.SEAT_NOW_GAP
+               for j in jobs):
+            return 0, "the seats were checked in the last few minutes"
+        n = 0
+        with db.tx() as con:
+            for j in jobs:
+                departs = dt.datetime.fromisoformat(j["opens_at"]) + dt.timedelta(hours=seats.OPEN_HOURS)
+                if departs - now <= dt.timedelta(seconds=self.SEAT_STOP_BEFORE):
+                    continue
+                n += con.execute("UPDATE seat_jobs SET status='watching', next_at=?, fails=0, updated=? "
+                                 "WHERE id=? AND status!='running'",
+                                 (now.isoformat(timespec="seconds"), db.now(), j["id"])).rowcount
+        return n, None if n else "every flight is too close to departure"
+
     CHECKIN_EARLY = 30            # start this many seconds before check-in opens
     CHECKIN_RETRY_FOR = 20 * 60   # and keep trying while it says "too early" this long after
     CHECKIN_TRIES = 3             # attempts that fail for other reasons, 3-6 min apart

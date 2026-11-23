@@ -11,7 +11,9 @@
   <div class="buttons">
     <a class="button" href="/watches/{{ w.id }}/edit">Edit</a>
     {% if kind != 'seats' %}<form method="post" action="/watches/{{ w.id }}/run" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit" class="primary" {{ 'disabled' if run_status or not w.active }}>{{ 'Search ' ~ run_status if run_status else 'Search now' }}</button></form>{% endif %}
+      <button type="submit" class="primary" {{ 'disabled' if run_status or not w.active }}>{{ 'Search ' ~ run_status if run_status else 'Search now' }}</button></form>
+    {% else %}{% set seat_running = seat_jobs|selectattr('status', 'equalto', 'running')|list %}<form method="post" action="/watches/{{ w.id }}/run" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="primary" title="Look at the seat map now and move to a better free seat" {{ 'disabled' if seat_running or not w.active or not w.seat_auto }}>{{ 'Checking seats…' if seat_running else 'Search now' }}</button></form>{% endif %}
   </div>
 </div>
 
