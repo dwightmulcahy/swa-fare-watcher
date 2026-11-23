@@ -784,3 +784,25 @@ def test_seat_confirm_blocked_by_the_page_says_why(site, monkeypatch, tmp_path):
             picker._fill_receipt()                                  # no email to give
         with pytest.raises(RuntimeError, match="Enter email address"):
             picker._confirm(b.page.locator(seat_picker.CONFIRM).first)
+
+
+def test_human_click_scrolls_a_seat_out_from_under_a_sticky_bar(monkeypatch, tmp_path):
+    """Southwest's bottom bar ("Select new seat to continue") covers the last rows on screen: a click
+    there hit the bar, so seat 3F 'didn't stick'."""
+    import random
+
+    from app import swa
+    from app.config import settings
+    from app.human import Human
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    html = """<body style="margin:0;height:3000px">
+      <button id="seat" style="position:absolute;top:calc(100vh - 80px);left:200px;width:40px;height:40px"
+        onclick="window.hit='seat'">3F</button>
+      <div style="position:fixed;bottom:0;left:0;right:0;height:120px;background:#304cb2"
+        onclick="window.hit='bar'"></div></body>"""
+    with swa.BrowserSearcher(profile_key="t-sticky", human=False) as b:
+        b.page.set_content(html)
+        h = Human(b.page, rng=random.Random(1), sleep=lambda s: None)
+        h.click(b.page.locator("#seat"))
+        b.page.wait_for_timeout(300)
+        assert b.page.evaluate("window.hit") == "seat"

@@ -205,7 +205,7 @@ class SeatPicker:
             btn = self.page.locator(f'{SEAT_BUTTON}[aria-label^="Seat {new["seat"]} "]').first
             self.b._click(btn)
             self.b._beat(0.8, 1.6)
-            self.confirm_seat(pi, new["seat"])
+            self.confirm_seat(pi, new["seat"], btn)
         total = self.page.locator(SEATS_TOTAL).first.inner_text(timeout=10_000)
         if money(total) != 0:
             raise NotFree(f"the seat map's total is {total.strip()}")
@@ -228,11 +228,12 @@ class SeatPicker:
                 return b
         return None
 
-    def confirm_seat(self, pi, code, timeout=15):
+    def confirm_seat(self, pi, code, btn=None, timeout=15):
         """A seat click opens its details panel: press Select, then Ok on the "no refunds if you
         paid for your original seat" notice, until the passenger shows the seat. Never presses
         Select while the bar's seats total isn't $0, and never again while the notice is up."""
         end = time.monotonic() + timeout
+        retry_at = time.monotonic() + timeout / 3   # nothing opened by then: the click missed, try once more
         oks = 0
         while True:
             got = self.current_seat(self.passengers()[pi].get_attribute("aria-label"))
@@ -257,6 +258,10 @@ class SeatPicker:
                     raise NotFree(f"seat {code} would cost ${m.group(1)}")
                 self.b._click(select)
                 self.b._beat(0.8, 1.4)
+            elif btn is not None and time.monotonic() > retry_at:
+                self.b._click(btn)
+                btn = None
+                self.b._beat(0.8, 1.6)
             else:
                 self.b._beat(0.5, 1.0)
             if time.monotonic() > end:
