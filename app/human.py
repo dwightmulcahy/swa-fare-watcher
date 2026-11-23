@@ -175,8 +175,29 @@ class Human:
             box = locator.bounding_box() or box
         return box
 
+    _HITS = "(el, [x, y]) => { const t = document.elementFromPoint(x, y); return !!t && (el === t || el.contains(t)); }"
+
+    def _hits(self, locator, x, y):
+        """Whether a click at (x, y) reaches the element, not a sticky bar or banner on top of it."""
+        try:
+            return bool(locator.evaluate(self._HITS, [x, y]))
+        except Exception:
+            return True   # can't tell (detached, odd frame): click as before
+
     def hover(self, locator):
-        self.move_to(*self._target_point(self._box(locator)))
+        box = self._box(locator)
+        x, y = self._target_point(box)
+        for _ in range(3):   # covered by a fixed footer/header: wheel it towards the middle of the window
+            if self._hits(locator, x, y):
+                break
+            before = self._scroll_y()
+            self.scroll(box["y"] + box["height"] / 2 - self.h / 2)
+            self.pause(0.15, 0.4)
+            box = locator.bounding_box() or box
+            x, y = self._target_point(box)
+            if before is not None and self._scroll_y() == before:
+                break
+        self.move_to(x, y)
         self.pause(0.08, 0.3)
 
     def click(self, locator):
