@@ -205,6 +205,7 @@ class Human:
             before = self._scroll_y()
             self.scroll(box["y"] + box["height"] / 2 - self.h / 2)
             self.pause(0.15, 0.4)
+            self._settle()
             box = locator.bounding_box() or box
             x, y = self._target_point(box)
             if before is not None and self._scroll_y() == before:
@@ -342,6 +343,19 @@ class Human:
             if left > 2:
                 self.sleep(self.rng.uniform(0.15, 0.5) * self.speed)
 
+    def _settle(self, tries=20):
+        """Wheel scrolling lands a moment later (smooth scrolling): wait until the page stops moving."""
+        prev = None
+        for _ in range(tries):
+            y = self._scroll_y()
+            if y is None or y == prev:
+                return
+            prev = y
+            try:
+                self.page.wait_for_timeout(60)
+            except Exception:
+                return
+
     def _scroll_y(self):
         try:
             return self.page.evaluate("() => window.scrollY")
@@ -363,6 +377,7 @@ class Human:
             else:
                 self.scroll(min(box["y"] + box["height"] - self.h * 0.6, self.h * 0.8))
             self.pause(0.15, 0.4)
+            self._settle()
             if before is not None and self._scroll_y() == before:
                 break
         locator.scroll_into_view_if_needed()
