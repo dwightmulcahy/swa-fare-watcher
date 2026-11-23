@@ -2,7 +2,7 @@
 <body><h1>Review seats and pay</h1>
 <p id="seat"></p>
 <section><h2>Send receipt</h2><p>Receipts contain confidential billing information</p>
-<label for="receiptEmail">Email receipt to</label><input id="receiptEmail" type="text" aria-required="true">
+<label for="emailReceiptTo" data-test="emailReceiptToLabel">Email receipt to</label><input aria-label="Email for receipt" data-test="emailReceiptToField" id="emailReceiptTo" maxlength="180" name="emailReceiptTo" type="text" value="">
 <span id="emailErr" hidden>Enter email address.</span></section>
 <div><div>Amount due</div><div>Includes taxes and fees</div>
 <div><div style="position:absolute;left:-9999px" id="hidden"></div><span aria-hidden="true"><sup>$</sup><span id="amt"></span></span></div></div>
@@ -13,7 +13,7 @@ document.getElementById("seat").textContent = "Seat " + q.get("seat");
 document.getElementById("hidden").textContent = q.get("due") + " Dollars";
 document.getElementById("amt").textContent = q.get("due");
 document.getElementById("confirmSeatChange").onclick = () => {
-  const em = document.getElementById("receiptEmail").value.trim();
+  const em = document.getElementById("emailReceiptTo").value.trim();
   if (!em) { document.getElementById("emailErr").hidden = false; return; }   // like the real page: stays put
   localStorage.setItem("receipt", em);
   localStorage.setItem("seat", q.get("seat")); localStorage.setItem("paid", q.get("due"));

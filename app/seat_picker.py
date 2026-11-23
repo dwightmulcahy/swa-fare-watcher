@@ -44,7 +44,10 @@ CONTINUE = 'button:has-text("Continue to payment")'
 NOTE_OK = ':is(button, a, [role=button], input[type=button], span, div):text-is("Ok"):visible'
 CONFIRM = "#confirmSeatChange"
 CONFIRM_WAIT = (45_000, 15_000)   # ms: for the next page, then for the button to go
-RECEIPT_EMAIL = re.compile(r"email receipt", re.I)   # required field on the review page (since 2026-11)
+# required field on the review page (since 2026-11): <label>Email receipt to</label>, but the input's
+# own aria-label "Email for receipt" is its accessible name
+RECEIPT_FIELD = '#emailReceiptTo, input[name="emailReceiptTo"], [data-test="emailReceiptToField"]'
+RECEIPT_EMAIL = re.compile(r"email\b.*\breceipt", re.I)
 
 
 class NotFree(Exception):
@@ -298,15 +301,20 @@ class SeatPicker:
 
     def _fill_receipt(self):
         """The review page won't confirm with 'Email receipt to' empty: fill in the watcher's email."""
-        box = self.page.get_by_label(RECEIPT_EMAIL)
-        if not box.count():
-            box = self.page.locator('input[type="email"]')
-        if not box.count() or not box.first.is_visible() or box.first.input_value().strip():
+        box = self.page.locator(RECEIPT_FIELD)
+        for alt in (lambda: self.page.get_by_label(RECEIPT_EMAIL), lambda: self.page.locator('input[type="email"]')):
+            if box.count():
+                break
+            box = alt()
+        box = box.first
+        if not box.count() or not box.is_visible() or box.input_value().strip():
             return
         if not self.receipt_email:
             raise RuntimeError("the review page needs an email for the receipt; add it to the seat watch")
-        self.b._type(box.first, self.receipt_email)
+        self.b._type(box, self.receipt_email)
         self.b._beat(0.3, 0.8)
+        if box.input_value().strip() != self.receipt_email:
+            box.fill(self.receipt_email)   # typing was swallowed (re-render): set it outright
 
     def verify(self, codes):
         """Look the booking up again and check each new seat is on it."""
