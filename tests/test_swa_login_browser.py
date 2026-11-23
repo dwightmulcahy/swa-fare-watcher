@@ -805,4 +805,5 @@ def test_human_click_scrolls_a_seat_out_from_under_a_sticky_bar(monkeypatch, tmp
         h = Human(b.page, rng=random.Random(1), sleep=lambda s: None)
         h.click(b.page.locator("#seat"))
         b.page.wait_for_timeout(300)
-        assert b.page.evaluate("window.hit") == "seat"
+        where = b.page.evaluate("[innerWidth, innerHeight, scrollY, document.getElementById('seat').getBoundingClientRect().top]")
+        assert b.page.evaluate("window.hit") == "seat", f"window/scroll/seat top: {where}, pointer {h.pos}"

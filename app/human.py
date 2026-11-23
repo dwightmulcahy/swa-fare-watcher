@@ -184,7 +184,19 @@ class Human:
         except Exception:
             return True   # can't tell (detached, odd frame): click as before
 
+    def _refresh_size(self):
+        """A real window can change size (or still be opening when this was made): re-read it."""
+        if self.page.viewport_size:
+            return
+        try:
+            vp = self.page.evaluate("() => ({width: innerWidth, height: innerHeight})")
+            if vp and vp["height"] > 100:
+                self.w, self.h = vp["width"], vp["height"]
+        except Exception:
+            pass
+
     def hover(self, locator):
+        self._refresh_size()
         box = self._box(locator)
         x, y = self._target_point(box)
         for _ in range(3):   # covered by a fixed footer/header: wheel it towards the middle of the window
