@@ -999,7 +999,9 @@ def create_app(worker=None, start_worker=True):
                       runs=runs, dates=[d for leg, d in legs if leg == "out"],
                       ret_dates=[d for leg, d in legs if leg == "ret"], rt=rt, trips=trips,
                       pairs=len(swa.trip_pairs(w)) if rt else 0,
-                      run_status=app.state.worker.status(u["id"]),
+                      run_status=(run_status := app.state.worker.status(u["id"])),
+                      ask_run=request.query_params.get("ask_run") == "1" and bool(w["active"]) and (
+                          not run_status if (w["kind"] or "fare") != "seats" else bool(w["seat_auto"] and w["booked"])),
                       book=lambda f: swa.booking_url(*fare_route(w, f), f["date"], w["adults"]),
                       fare_route=lambda f: "→".join(fare_route(w, f)),
                       multi=len(swa.routes(w)) > 1, searches=swa.searches_per_run(w),
@@ -1027,7 +1029,7 @@ def create_app(worker=None, start_worker=True):
                         (*w.values(), wid, u["id"]))
         db.sync_jobs(wid)
         _maybe_lookup(wid, w)
-        raise Redirect(f"/watches/{wid}?ok=Watch+saved")
+        raise Redirect(f"/watches/{wid}?ok=Watch+saved" + ("&ask_run=1" if w.get("active") else ""))
 
     @app.post("/watches/{wid}/toggle")
     async def toggle_watch(request: Request, wid: int):

@@ -342,3 +342,16 @@ def test_admin_site_health(client):
     page = client.get("/admin/health").text
     assert "Site health" in page and "8.0%" in page and "25" in page
     assert token
+
+
+def test_saving_an_edit_asks_to_run_now_once(client):
+    t = admin_client(client)
+    loc = client.post("/watches", data=watch_form(t), follow_redirects=False).headers["location"]
+    wid = int(loc.split("?")[0].rstrip("/").split("/")[-1])
+    assert "data-autoshow" not in client.get(f"/watches/{wid}").text           # creating doesn't ask
+    r = client.post(f"/watches/{wid}", data=watch_form(t, max_price="200"), follow_redirects=False)
+    assert "ask_run=1" in r.headers["location"]
+    page = client.get(r.headers["location"]).text
+    assert "Run it now?" in page and f'action="/watches/{wid}/run"' in page.split("data-autoshow")[1]
+    r = client.post(f"/watches/{wid}", data=watch_form(t, active=""), follow_redirects=False)
+    assert "ask_run" not in r.headers["location"]                                 # paused: nothing to run

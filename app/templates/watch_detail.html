@@ -17,6 +17,17 @@
   </div>
 </div>
 
+{% if ask_run %}
+<dialog class="about run-now" data-autoshow aria-labelledby="run-now-title">
+  <h2 id="run-now-title">Watch saved. Run it now?</h2>
+  <p>{% if kind == 'seats' %}Look at the seat map now and move to a better free seat if there is one. Otherwise it waits for the next planned check.{% else %}Run its {{ searches }} search{{ '' if searches == 1 else 'es' }} now with the new settings. Otherwise it waits for the next scheduled run.{% endif %}</p>
+  <div class="buttons">
+    <form method="post" action="/watches/{{ w.id }}/run" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="primary" autofocus>Search now</button></form>
+    <form method="dialog" class="inline"><button type="submit">Not now</button></form>
+  </div>
+</dialog>
+{% endif %}
 {% if checkin_jobs %}
 <section class="card seat-jobs">
   <h2>Automatic check-in</h2>

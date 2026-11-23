@@ -5,6 +5,15 @@ document.addEventListener("submit", (e) => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  // "Run it now?" after saving a watch: show once, and drop the flag so a reload doesn't ask again
+  const ask = document.querySelector("dialog[data-autoshow]");
+  if (ask && typeof ask.showModal === "function") {
+    ask.showModal();
+    const u = new URL(location.href);
+    u.searchParams.delete("ask_run");
+    history.replaceState(null, "", u.pathname + u.search + u.hash);
+  }
+
   const radios = document.querySelectorAll('input[name="date_mode"]');
   const sync = () => {
     const mode = document.querySelector('input[name="date_mode"]:checked');
