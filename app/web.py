@@ -1059,6 +1059,17 @@ def create_app(worker=None, start_worker=True):
         await form(request, s)
         if not w["active"]:
             raise Redirect(f"/watches/{wid}?err=Resume+the+watch+first")
+        if w["kind"] == "seats":
+            if not w["seat_auto"]:
+                raise Redirect(f"/watches/{wid}?err=" + quote_plus("Turn on automatic seat selection first"))
+            if not w["booked"]:
+                _maybe_lookup(wid, dict(w))
+                raise Redirect(f"/watches/{wid}?ok=Looking+up+the+booking:+refresh+in+a+minute")
+            n, why = app.state.worker.seat_check_now(wid)
+            if not n:
+                raise Redirect(f"/watches/{wid}?err=" + quote_plus(f"Not checking now: {why}"))
+            raise Redirect(f"/watches/{wid}?ok=" + quote_plus(
+                f"Seat check queued ({n} flight{'s' if n > 1 else ''}). It starts within a minute; refresh to see it."))
         need, cap = swa.searches_per_run(w), u["max_searches_per_day"]
         if cap is not None and db.searches_today(u["id"]) + 2 > cap:
             raise Redirect(f"/watches/{wid}?err=Daily+search+limit+reached")

@@ -246,7 +246,7 @@ def test_pages_render_for_each_kind(client):
     from tests.conftest import future
     wid, db = _seat_watch(client, future(10))
     page = client.get(f"/watches/{wid}").text
-    assert "Conf. ABC123" in page and "Search now" not in page and "Seat selection" in page
+    assert "Conf. ABC123" in page and "Search now" in page and "Seat selection" in page
     dash = client.get("/").text
     assert "kind-seats" in dash and "Scheduled" in dash
 
@@ -729,3 +729,35 @@ def test_seat_watch_needs_a_receipt_email_and_the_picker_gets_it(client, worker)
     finally:
         sp.SeatPicker = real
     assert got["email"] == "trip@x.com"
+
+
+def test_search_now_on_a_seat_watch_queues_a_visit(client, worker):
+    from tests.conftest import csrf, future
+    wid, db = _seat_watch(client, future(10))
+    page = client.get(f"/watches/{wid}").text
+    assert f'action="/watches/{wid}/run"' in page and "Search now" in page
+    t = csrf(page)
+    r = client.post(f"/watches/{wid}/run", data={"csrf": t}, follow_redirects=False)
+    assert "Seat+check+queued" in r.headers["location"]
+    j = db.one("SELECT * FROM seat_jobs WHERE watch_id=?", (wid,))
+    assert j["status"] == "watching" and [x["id"] for x in worker.due_seat_jobs()] == [j["id"]]
+    # just visited: not again straight away
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET visits=1, updated=? WHERE id=?", (db.now(), j["id"]))
+    r = client.post(f"/watches/{wid}/run", data={"csrf": t}, follow_redirects=False)
+    assert "last+few+minutes" in r.headers["location"]
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='running' WHERE id=?", (j["id"],))
+    assert "Checking seats" in client.get(f"/watches/{wid}").text
+
+
+def test_search_now_reopens_a_finished_seat_watch_but_not_a_departed_flight(client, worker):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='done', next_at=NULL WHERE watch_id=?", (wid,))
+    assert worker.seat_check_now(wid)[0] == 1
+    later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=11)
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET status='done' WHERE watch_id=?", (wid,))
+    assert worker.seat_check_now(wid, now=later) == (0, "every flight is too close to departure")
