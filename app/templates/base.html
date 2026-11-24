@@ -7,6 +7,10 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="{{ asset('app.css') }}">
   <script src="{{ asset('app.js') }}" defer></script>
+  {% if user and not user.must_change_pw and whats_new() %}
+  <!-- "What's new" after an upgrade (release notes bundled at release time) -->
+  <script src="/static/whats-new.js" data-src="/static/changelog.json" data-css="/static/whats-new.css" data-key="swa.seenVersion" defer></script>
+  {% endif %}
 </head>
 <body{% block body_attrs %}{% endblock %}>
   <header class="top">
@@ -23,6 +27,7 @@
       <a href="/" class="{{ 'on' if request.url.path == '/' or request.url.path.startswith('/watches') }}">Watches</a>
       <a href="/settings" class="{{ 'on' if request.url.path.startswith('/settings') }}">Settings</a>
       <a href="/log" class="{{ 'on' if request.url.path.startswith('/log') }}">Log</a>
+      {% if whats_new() %}<button class="link" type="button" data-whats-new>What's new</button>{% endif %}
       {% if user.is_admin %}<a href="/admin" class="{{ 'on' if request.url.path.startswith('/admin') }}">Admin</a>{% endif %}
       <form method="post" action="/logout" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}">

@@ -1,0 +1,20 @@
+/* styles for whats-new.js (kept in sync with WN_CSS there) */
+#wn-dlg{position:fixed;inset:0;margin:auto;height:fit-content;box-sizing:border-box;color-scheme:light dark;width:min(640px,calc(100vw - 24px));max-height:80vh;padding:18px 20px;border:1px solid var(--wn-line,#8884);border-radius:12px;background:var(--wn-bg,Canvas);color:var(--wn-text,CanvasText);font:14px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 10px 40px #0005}
+#wn-dlg::backdrop{background:#0006}
+#wn-dlg .wn-hd{display:flex;justify-content:space-between;align-items:center;gap:12px}
+#wn-dlg .wn-hd b{font-size:16px}
+#wn-dlg button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--wn-line,#8884);padding:6px 14px;background:transparent;color:inherit}
+#wn-dlg .wn-x{border:0;padding:2px 8px;opacity:.7}
+#wn-dlg .wn-ok{background:var(--wn-accent,#2563eb);border-color:transparent;color:#fff;font-weight:600}
+#wn-dlg .wn-body{overflow:auto;max-height:60vh;margin:10px 0 14px;padding-right:6px}
+#wn-dlg .wn-rel{border-left:3px solid var(--wn-accent,#2563eb);padding:2px 0 2px 12px;margin:0 0 16px}
+#wn-dlg h3{margin:0;font-size:15px}
+#wn-dlg h3 span{font-weight:400;opacity:.65;margin-left:6px;font-size:13px}
+#wn-dlg h4{margin:8px 0 2px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;opacity:.65}
+#wn-dlg h4.wn-break{color:#dc2626;opacity:1}
+#wn-dlg ul{margin:2px 0;padding-left:18px}
+#wn-dlg li{font-size:13px}
+#wn-dlg a{color:var(--wn-accent,#2563eb)}
+#wn-dlg .wn-int,#wn-dlg .wn-none{font-size:12px;opacity:.65;margin-top:4px}
+#wn-dlg .wn-ft{display:flex;align-items:center;gap:12px}
+#wn-dlg .wn-sp{flex:1}
