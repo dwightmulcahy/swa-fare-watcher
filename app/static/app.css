@@ -475,3 +475,6 @@ a.card.kind p { margin: 0; color: var(--muted); flex: 1; }
 .occ-bar::-webkit-progress-bar { background: var(--line, #e2e8f0); }
 .occ-bar::-webkit-progress-value { background: #304CB2; }
 .occ-bar::-moz-progress-bar { background: #304CB2; }
+
+/* "What's new" dialog (static/whats-new.js) in this app's colours */
+:root { --wn-bg: var(--surface, #fff); --wn-text: var(--ink); --wn-line: var(--line); --wn-accent: var(--accent); }

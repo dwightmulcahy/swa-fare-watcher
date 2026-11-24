@@ -61,6 +61,8 @@ def _asset(name):
 
 
 templates.env.globals["asset"] = _asset
+# The release build generates the changelog; without it (dev/tests) skip the What's-new script.
+templates.env.globals["whats_new"] = lambda: (HERE / "static" / "changelog.json").is_file()
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["seats"] = seats
 templates.env.globals["seat_prefs"] = seats.prefs_of

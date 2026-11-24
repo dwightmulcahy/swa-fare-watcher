@@ -52,3 +52,5 @@ debug/
 
 # Generated at image build time (app/buildinfo.py)
 app/build.json
+# generated at release time by scripts/build_changelog.py
+app/static/changelog.json
