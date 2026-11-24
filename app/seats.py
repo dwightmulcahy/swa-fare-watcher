@@ -71,11 +71,14 @@ MAX_PRIORITY = len(CATEGORIES)
 TIEBREAKS = {
     "position": "Your window / aisle choice",
     "legroom": "More legroom (Extra Legroom, no seat in front)",
+    "neighbor": "An empty seat next to it",
     "forward": "Further forward in the cabin",
     "view": "A window with a view",
     "recline": "A seat that reclines",
 }
 LIMITED_RECLINE = "limited recline"
+EMPTY_NEIGHBOR = "empty seat next to it"
+NEXT_TO = {"A": "B", "C": "B", "D": "E", "F": "E", "B": "AC", "E": "DF"}   # same side of the aisle
 DEFAULT_TIEBREAK = list(TIEBREAKS)
 DEFAULT_PREFS = {"version": 2, "position": "window", "priorities": dict(DEFAULT_PRIORITIES),
                  "tiebreak": list(DEFAULT_TIEBREAK), "fallback": False, "explain": True}
@@ -140,6 +143,12 @@ def annotate(seat_map):
         if ("window" in s["features"] and "exit row" in s["features"] and ahead in rows and (ahead, s["col"]) not in have
                 and sum(1 for r, _ in have if r == ahead) >= 2):
             s["features"].add(OPEN_FRONT)
+    # the seat(s) beside it on its side of the aisle are free (your own seat counts as free: you'd leave it)
+    free = {(s["row"], s["col"]) for s in seat_map if s.get("available") or s.get("selected")}
+    for s in seat_map:
+        beside = [(s["row"], c) for c in NEXT_TO.get(s["col"], "") if (s["row"], c) in have]
+        if beside and all(b in free for b in beside):
+            s["features"].add(EMPTY_NEIGHBOR)
     return seat_map
 
 
@@ -173,7 +182,9 @@ def normalize(p):
           if k in TIEBREAKS]
     if isinstance(p.get("tiebreak"), list) and "recline" not in p["tiebreak"] and not p.get("tiebreak_v2"):
         tb.append("recline")           # added later: on for lists saved before it existed
-    out = {"version": 2, "tiebreak_v2": True, "position": pos, "priorities": pri, "tiebreak": tb,
+    if isinstance(p.get("tiebreak"), list) and "neighbor" not in p["tiebreak"] and not p.get("tiebreak_v3"):
+        tb.append("neighbor")          # added later: on (last) for lists saved before it existed
+    out = {"version": 2, "tiebreak_v2": True, "tiebreak_v3": True, "position": pos, "priorities": pri, "tiebreak": tb,
            "fallback": bool(p.get("fallback", False)), "explain": bool(p.get("explain", True))}
     if p.get("migrated"):
         out["migrated"] = True
@@ -200,6 +211,7 @@ def attributes(seat):
            "open_front": OPEN_FRONT in f, "bulkhead": "bulkhead seat" in f}
     out["view"] = None if pos != "window" else "window without window view" not in f
     out["recline"] = False if LIMITED_RECLINE in f else None      # only known when it doesn't
+    out["neighbor_free"] = EMPTY_NEIGHBOR in f
     return out
 
 
@@ -245,6 +257,8 @@ def _tiebreak(seat, prefs):
             out.append(1 if a["view"] is False else 0)
         elif k == "recline":
             out.append(1 if a["recline"] is False else 0)
+        elif k == "neighbor":
+            out.append(0 if a["neighbor_free"] else 1)
     return tuple(out)
 
 
@@ -315,6 +329,8 @@ def explain(chosen, prefs, fallback=None):
     text = f"Selected: {chosen['seat']}. Matched Priority {p}: {CATEGORIES[cat]}."
     if higher:
         text += f" Higher-ranked {', '.join(higher)} seats were unavailable."
+    if "neighbor" in (prefs.get("tiebreak") or []) and EMPTY_NEIGHBOR in chosen["features"]:
+        text += " The seat next to it is free (for now)."
     return text
 
 
@@ -363,7 +379,8 @@ def _migrate(old):
     pri = {c: levels.index(v) + 1 for c, v in scores.items()}
     if "no_middle" in (old.get("order") or []):
         pri["middle"] = None
-    tb = (["position"] if old.get("position") in ("window", "aisle") else []) + ["legroom", "forward", "view", "recline"]
+    tb = (["position"] if old.get("position") in ("window", "aisle") else []) + ["legroom", "neighbor", "forward", "view",
+                                                                                "recline"]
     return {"version": 2, "position": old.get("position", "window"), "priorities": pri, "tiebreak": tb,
             "fallback": False, "explain": True, "migrated": True}
 
