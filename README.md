@@ -96,7 +96,7 @@ docker compose up -d --build
 open http://localhost:8080   # sign in as admin
 ```
 
-If `ADMIN_PASSWORD` is blank, a temporary admin password is printed once in `docker compose logs`.
+If `ADMIN_PASSWORD` is blank, a temporary admin password is printed once in `docker compose logs`. `ADMIN_PASSWORD` is only used on that first start; to reset a forgotten password later run `docker exec -it <container> python -m app reset-password <username>` (prints a temporary password, signs the user out, and asks for a new one at sign-in).
 
 Put it behind an HTTPS reverse proxy (Caddy, Traefik, nginx, Cloudflare Tunnel) before giving others access, then set `COOKIE_SECURE=true` and `BASE_URL=https://…`.
 

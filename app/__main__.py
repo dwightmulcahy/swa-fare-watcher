@@ -186,7 +186,28 @@ def main():
     lt.add_argument("--home-url", default=None, help=argparse.SUPPRESS)  # tests point this at a fake site
     tf = sub.add_parser("reset-2fa", help="turn off a user's two-step sign-in (lost phone and recovery codes)")
     tf.add_argument("username")
+    rp = sub.add_parser("reset-password", help="give a user a temporary password (forgotten password)")
+    rp.add_argument("username")
     a = ap.parse_args()
+
+    if a.cmd == "reset-password":
+        from . import applog, db
+        from .security import hash_password, temp_password
+        db.init()
+        pw = temp_password()
+        with db.tx() as con:
+            u = con.execute("SELECT id FROM users WHERE username=?", (a.username,)).fetchone()
+            if u:
+                con.execute("UPDATE users SET pw_hash=?, must_change_pw=1 WHERE id=?", (hash_password(pw), u["id"]))
+                con.execute("DELETE FROM sessions WHERE user_id=?", (u["id"],))
+        if not u:
+            names = ", ".join(r["username"] for r in db.query("SELECT username FROM users ORDER BY id"))
+            print(f"no user {a.username!r} (users: {names or 'none'})")
+            sys.exit(1)
+        applog.warn(f"Password for {a.username} reset from the command line", source="admin")   # never the password
+        print(f"temporary password for {a.username}: {pw}\n"
+              "sign in with it and choose a new one; if sign-in says 'Too many attempts', restart the container")
+        sys.exit(0)
 
     if a.cmd == "reset-2fa":
         from . import applog, db
