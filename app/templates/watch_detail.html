@@ -62,6 +62,14 @@
         {% if p.best %}<span class="muted small">· best other free seat: {{ p.best.describe }}, {{ p.best.label or ('score %d' % (p.best.score|round|int)) }}</span>{% endif %}
         <span class="muted small">· checked {{ p.checked_local }}</span></div>{% endfor %}</li>{% endfor %}
   </ul>
+  {% for o in seats.occupancy(w) %}
+  <div class="occupancy">
+    <div class="occ-head"><b>{{ o.flight }}</b>{% if o.plane %} <span class="muted small">{{ o.plane }}</span>{% endif %}
+      <span class="small">{{ o.free }} free · {{ o.taken }} taken of {{ o.total }} ({{ o.full }}% full)</span>
+      <span class="muted small">seen {{ o.read }}</span></div>
+    <progress class="occ-bar" max="100" value="{{ o.full }}" aria-label="{{ o.full }}% of seats taken">{{ o.full }}%</progress>
+    {% if o.free_types %}<div class="muted small">Free: {% for t, n in o.free_types|dictsort %}{{ n }} {{ t }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+  </div>{% endfor %}
 </section>
 {% endif %}
 {% if seat_history %}
