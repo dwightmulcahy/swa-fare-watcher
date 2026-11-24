@@ -133,7 +133,7 @@ def test_watches_saved_before_bulkhead_keep_treating_it_as_extra_legroom():
            "tiebreak": ["position", "legroom"]}
     p = seats.normalize(old)
     assert p["priorities"]["bulkhead_window"] == 3 and p["priorities"]["bulkhead_aisle"] is None
-    assert p["tiebreak"] == ["position", "legroom", "recline"]           # new tie-breaker on for old lists
+    assert p["tiebreak"] == ["position", "legroom", "recline", "neighbor"]  # new tie-breakers on for old lists
     again = seats.normalize(json.loads(seats.to_json({**p, "tiebreak": ["position"]})))
     assert again["tiebreak"] == ["position"]                              # ... but removing it sticks
 
@@ -252,3 +252,24 @@ def test_seat_presets_save_list_apply_and_delete(client):
     assert "Lisa short hops" in client.get("/watches/new?kind=seats").text
     r = client.post(f"/seat-presets/{saved['id']}/delete", data={"csrf": csrf(page)})
     assert r.json()["ok"] and not db.one("SELECT 1 FROM seat_presets")
+
+
+def test_empty_seat_next_to_it_breaks_ties():
+    def s(code, free=True, mine=False):
+        return {"seat": code, "row": int(code[:-1]), "col": code[-1], "type": "standard", "price": 0,
+                "features": {"window" if code[-1] in "AF" else "aisle" if code[-1] in "CD" else "middle"},
+                "available": free, "selected": mine}
+    m = seats.annotate([s("8D"), s("8E", free=False), s("8F", free=False, mine=True),
+                        s("9D", free=False), s("9E"), s("9F"), s("10B"), s("10A", free=False), s("10C", free=False)])
+    has = {x["seat"] for x in m if seats.EMPTY_NEIGHBOR in x["features"]}
+    assert "9F" in has and "8F" not in has and "8D" not in has      # 9E free beside 9F; 8E taken beside 8F
+    assert "9D" in has                                             # its neighbour 9E is free (taken itself)
+    assert "8E" in has                                             # 8D free and 8F is your own seat
+    assert "10B" not in has                                        # middle: both 10A and 10C taken
+    prefs = seats.normalize({"priorities": {"std_window": 1}, "tiebreak": ["neighbor"], "tiebreak_v3": True})
+    cur, other = next(x for x in m if x["seat"] == "8F"), next(x for x in m if x["seat"] == "9F")
+    assert seats.choose(m, prefs)["seat"] == "9F" and seats.better(other, cur, prefs)
+    assert "The seat next to it is free" in seats.explain(other, prefs)
+    off = {**prefs, "tiebreak": []}
+    assert not seats.better(other, cur, off)                        # tie-breaker off: just another seat
+    assert seats.normalize({})["tiebreak"][:3] == ["position", "legroom", "neighbor"]
