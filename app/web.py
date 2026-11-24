@@ -860,7 +860,8 @@ def create_app(worker=None, start_worker=True):
                                               f"P{now_seat['priority']}" if now_seat.get("priority")
                                               else "not in priorities" if "priority" in now_seat
                                               else f"score {round(now_seat['score'])}")
-                                          if now_seat else ""}
+                                          if now_seat else "",
+                                          "occ": seats.occupancy(w)}
         return render(request, "dashboard.html", u, s, watches=watches, best=best, seat_next=seat_next,
                       est={w["id"]: swa.searches_per_run(w) for w in watches},
                       limits=limits_for(u), run_status=app.state.worker.status(u["id"]),

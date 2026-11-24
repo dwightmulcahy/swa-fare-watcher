@@ -501,6 +501,30 @@ def heat_maps(w=None):
     return {**out, **example_maps()}
 
 
+def occupancy(w):
+    """Free and taken seats on each of the watch's flights, from the seat maps last seen:
+    [{"flight", "plane", "free", "taken", "total", "full" (percent), "free_types" {type: n}, "read"}]."""
+    import json
+    try:
+        maps = json.loads((w["seat_maps"] if w is not None and "seat_maps" in w.keys() else None) or "[]")
+    except (ValueError, TypeError, AttributeError):
+        return []
+    out = []
+    for m in maps:
+        ss = [s for s in m.get("seats") or [] if s.get("seat")]
+        if not ss:
+            continue
+        free = [s for s in ss if s.get("available") and not s.get("selected")]
+        types = {}
+        for s in free:
+            types[s.get("type") or "Standard"] = types.get(s.get("type") or "Standard", 0) + 1
+        out.append({"flight": m.get("flight") or "Flight", "plane": m.get("plane"), "free": len(free),
+                    "taken": len(ss) - len(free), "total": len(ss),
+                    "full": round(100 * (len(ss) - len(free)) / len(ss)), "free_types": types,
+                    "read": (m.get("read") or "")[:16].replace("T", " ")})
+    return out
+
+
 def status_table():
     """{status: {"booking": [...], "window": [...]}} free seat types, for the heat map."""
     return {k: {"booking": sorted(b), "window": sorted(b | w)} for k, (_, b, w) in STATUSES.items()}

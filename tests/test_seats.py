@@ -777,3 +777,20 @@ def test_seat_check_result_is_logged():
     assert moved == ("Lisa F.: moved 9F → 3F (Priority 1: Extra-legroom window); "
                      "no other free seat that fits")
     assert seat_results([], []) == ""
+
+
+def test_seat_watch_shows_free_and_taken_seats(client):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    s = lambda seat, typ, free, mine=False: {"seat": seat, "row": int(seat[:-1]), "col": seat[-1], "type": typ,
+                                              "features": [], "available": free, "selected": mine}
+    db.save_seat_maps(wid, [{"flight": "Flight 1 of 1", "plane": "Boeing 737-700", "seats": [
+        s("1A", "Extra Legroom", True), s("2A", "Preferred", True), s("3A", "Standard", True),
+        s("4A", "Standard", False), s("9F", "Standard", False, mine=True)]}])
+    occ = seats.occupancy(db.one("SELECT * FROM watches WHERE id=?", (wid,)))
+    assert occ[0] | {"read": ""} == {"flight": "Flight 1 of 1", "plane": "Boeing 737-700", "free": 3, "taken": 2,
+                                     "total": 5, "full": 40, "read": "",
+                                     "free_types": {"Extra Legroom": 1, "Preferred": 1, "Standard": 1}}
+    page = client.get(f"/watches/{wid}").text
+    assert "3 free · 2 taken of 5 (40% full)" in page and 'value="40"' in page and "1 Extra Legroom" in page
+    assert "3 free · 2 taken (40% full)" in client.get("/").text
