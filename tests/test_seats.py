@@ -692,6 +692,9 @@ def test_seat_history_is_recorded_and_shown_on_the_watch(client, worker, sent):
     assert "best other free seat seen: 20C (Aisle)" in page and page.index("Finished") < page.index("First check")
     log = page.split('class="card watch-log"')[1]
     assert "full log" in log and "seat selection" in log          # this watch's own log entries
+    msgs = [r["message"] for r in db.query("SELECT message FROM logs WHERE source='seats' AND message LIKE '%seat selection%'")]
+    assert any("Pat Q: kept 11F (Priority 3: Window); best other free seat 20C" in m for m in msgs)
+    assert any("Pat Q: moved 11F → 1F" in m for m in msgs)
     assert db.one("SELECT COUNT(*) n FROM logs WHERE source='seats' AND watch_id IS NULL")["n"] == 0
 
 
@@ -761,3 +764,16 @@ def test_search_now_reopens_a_finished_seat_watch_but_not_a_departed_flight(clie
     with db.tx() as con:
         con.execute("UPDATE seat_jobs SET status='done' WHERE watch_id=?", (wid,))
     assert worker.seat_check_now(wid, now=later) == (0, "every flight is too close to departure")
+
+
+def test_seat_check_result_is_logged():
+    from app.worker import seat_results
+    cur = {"seat": "9F", "describe": "9F (Window)", "score": 40.0, "priority": 3, "label": "Priority 3: Window"}
+    top = {"seat": "3F", "describe": "3F", "score": 100.0, "priority": 1, "label": "Priority 1: Extra-legroom window"}
+    alt = {"seat": "12C", "score": 30.4, "priority": 4}
+    kept = seat_results([{"passenger": "Lisa F.", "current": cur, "options": [alt], "picked": None}], [])
+    assert kept == "Lisa F.: kept 9F (Priority 3: Window); best other free seat 12C (score 30)"
+    moved = seat_results([{"passenger": "Lisa F.", "current": cur, "options": [top], "picked": "3F"}], [("9F", "3F")])
+    assert moved == ("Lisa F.: moved 9F → 3F (Priority 1: Extra-legroom window); "
+                     "no other free seat that fits")
+    assert seat_results([], []) == ""

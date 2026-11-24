@@ -268,6 +268,27 @@ def _seat_after(r):
     return r.get("current")
 
 
+def seat_results(report, changes):
+    """What a seat check found, for the log: per passenger the seat kept or moved to, and the best other
+    free seat on offer."""
+    def lbl(s):
+        return f"{s['seat']} ({s.get('label') or 'score %d' % round(s.get('score') or 0)})"
+    out = []
+    for r in report or []:
+        after = _seat_after(r) if changes else r.get("current")
+        moved = bool(changes and r.get("picked"))
+        who = (r.get("passenger") or "passenger") + ": "
+        if moved:
+            cur = r.get("current")
+            what = f"moved {cur['seat'] + ' → ' if cur else 'to '}{lbl(after) if after else r['picked']}"
+        else:
+            what = f"kept {lbl(after)}" if after else "no seat yet"
+        free = [o for o in r.get("options") or [] if not after or o["seat"] != after["seat"]]
+        what += f"; best other free seat {lbl(free[0])}" if free else "; no other free seat that fits"
+        out.append(who + what)
+    return " | ".join(out)
+
+
 def page_budget(user_id, day=None):
     """Today's page-load budget for this user: random in SWA_DAILY_PAGE_BUDGET, fixed for the day."""
     lo, hi = settings.page_budget
@@ -999,7 +1020,9 @@ class Worker:
                          json.dumps(log), json.dumps(_seats_now(report, changes)) if report else None, job["id"]))
         self.record_seat_history(w["id"], job["leg"], report, changes, status if not nxt else None, text,
                                  note if fails and nxt else None)
-        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {text}", user_id=uid, watch_id=w["id"], source="seats")
+        found = seat_results(report, changes)
+        applog.info(f"{w['name']}: seat selection ({leg}): {status}. {found + '. ' if found else ''}{text}",
+                    user_id=uid, watch_id=w["id"], source="seats")
         if user["email"] and (changes or not nxt):
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
             if nxt:          # a change, still watching
