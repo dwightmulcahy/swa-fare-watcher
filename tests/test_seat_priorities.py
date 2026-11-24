@@ -223,3 +223,32 @@ def test_737_700_skips_rows_10_to_13():
     assert rows == list(range(1, 10)) + list(range(14, 28)) and len(m) == 138
     assert {k for k, x in m.items() if "bulkhead seat" in x["features"]} == {f"1{c}" for c in "ABCDEF"}
     assert {k for k, x in m.items() if "exit row" in x["features"]} == {f"15{c}" for c in "ABCDEF"}
+
+
+def test_seat_presets_save_list_apply_and_delete(client):
+    import json
+
+    from app import db, seats
+    from tests.conftest import csrf
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    page = client.get("/watches/new?kind=seats").text
+    data = json.loads(page.split("data-presets='")[1].split("'")[0].replace("&#34;", '"'))
+    assert [p["name"] for p in data] == list(seats.BUILTIN_PRESETS)          # ready-made ones first
+    assert data[1]["prefs"]["position"] == "aisle" and data[0]["prefs"]["priorities"]["middle"] is None
+    form = {"csrf": t, "seat_position": "aisle", "prio_exit_aisle": "1", "prio_std_aisle": "2",
+            "tiebreak_order": "legroom,position", "tb_legroom": "1", "seat_fallback": "1"}
+    r = client.post("/seat-presets", data={**form, "preset_name": "  Lisa   short hops "})
+    assert r.json()["ok"] and r.json()["presets"][-1]["name"] == "Lisa short hops"
+    saved = r.json()["presets"][-1]
+    assert saved["prefs"]["priorities"]["exit_aisle"] == 1 and saved["prefs"]["priorities"]["middle"] is None
+    assert saved["prefs"]["tiebreak"] == ["legroom"] and saved["prefs"]["fallback"] is True
+    # same name replaces; built-in names and blank names are refused; other users can't delete it
+    client.post("/seat-presets", data={**form, "prio_middle": "3", "preset_name": "Lisa short hops"})
+    assert db.one("SELECT COUNT(*) n FROM seat_presets")["n"] == 1
+    assert client.post("/seat-presets", data={**form, "preset_name": "window FIRST"}).status_code == 400
+    assert client.post("/seat-presets", data={**form, "preset_name": " "}).status_code == 400
+    assert client.post("/seat-presets", data={"preset_name": "x"}).status_code == 403          # no csrf
+    assert "Lisa short hops" in client.get("/watches/new?kind=seats").text
+    r = client.post(f"/seat-presets/{saved['id']}/delete", data={"csrf": csrf(page)})
+    assert r.json()["ok"] and not db.one("SELECT 1 FROM seat_presets")
