@@ -8,7 +8,7 @@
         ties = document.getElementById("tie-list"), tieOrder = document.getElementById("tiebreak-order"),
         saved = document.getElementById("prio-saved"), defaults = JSON.parse(box.dataset.defaults),
         saveUrl = box.dataset.save, DRAFT = "swa-seat-prio-draft";
-  const fields = () => [...box.querySelectorAll("select, input")];
+  const fields = () => [...box.querySelectorAll("select, input")].filter((f) => !f.closest("#prio-presets"));
   const changed = () => { form.dispatchEvent(new Event("prio-change")); schedule(); };
 
   // keep the list in priority order (Off last), stable for equal priorities
@@ -56,6 +56,77 @@
     sortRows(); changed();
   });
 
+  // the priorities (and window/aisle choice) as form fields, for auto-save and presets
+  function formData() {
+    const data = new FormData();
+    data.append("csrf", form.querySelector("[name=csrf]").value);
+    form.querySelectorAll("[name=seat_position]:checked").forEach((r) => data.append(r.name, r.value));
+    fields().forEach((f) => { if (!f.name) return; if (f.type === "checkbox") { if (f.checked) data.append(f.name, f.value); } else data.append(f.name, f.value); });
+    return data;
+  }
+
+  // ---- presets: built-in and saved Seat Selection Priorities
+  const pbox = document.getElementById("prio-presets");
+  const pick = document.getElementById("preset-pick"), pname = document.getElementById("preset-name"),
+        pdel = document.getElementById("preset-delete");
+  let presets = JSON.parse(pbox.dataset.presets || "[]");
+  ["change", "input"].forEach((ev) => pbox.addEventListener(ev, (e) => e.stopPropagation()));  // not a prefs edit
+  const fillPick = (keep) => {
+    pick.replaceChildren(new Option("Choose a preset…", ""));
+    const groups = [["Ready-made", presets.filter((p) => !p.id)], ["Saved", presets.filter((p) => p.id)]];
+    groups.forEach(([label, ps]) => {
+      if (!ps.length) return;
+      const g = document.createElement("optgroup"); g.label = label;
+      ps.forEach((p) => g.append(new Option(p.name, p.name)));
+      pick.append(g);
+    });
+    pick.value = keep || "";
+    const cur = presets.find((p) => p.name === pick.value);
+    pdel.hidden = !(cur && cur.id);
+  };
+  const apply = (prefs) => {
+    [...list.children].forEach((li) => {
+      const v = prefs.priorities[li.dataset.key];
+      li.querySelector("select").value = v ? String(v) : "";
+    });
+    const pos = form.querySelector(`[name=seat_position][value="${prefs.position}"]`);
+    if (pos) pos.checked = true;
+    box.querySelector("[name=seat_fallback]").checked = !!prefs.fallback;
+    box.querySelector("[name=seat_explain]").checked = !!prefs.explain;
+    const on = prefs.tiebreak || [];
+    [...on, ...[...ties.children].map((li) => li.dataset.key).filter((k) => !on.includes(k))].forEach((k) => {
+      const li = ties.querySelector(`[data-key="${k}"]`);
+      if (li) { ties.append(li); li.querySelector("input").checked = on.includes(k); }
+    });
+    syncTies(); sortRows(); changed();
+  };
+  const post = async (url, extra) => {
+    const data = formData();
+    Object.entries(extra || {}).forEach(([k, v]) => data.append(k, v));
+    const r = await fetch(url, {method: "POST", body: data, credentials: "same-origin"});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || "Couldn't save the preset");
+    presets = j.presets;
+  };
+  pick.addEventListener("change", () => {
+    const p = presets.find((x) => x.name === pick.value);
+    pdel.hidden = !(p && p.id);
+    if (p) { apply(p.prefs); pname.value = p.id ? p.name : ""; saved.textContent = `Loaded "${p.name}"`; }
+  });
+  document.getElementById("preset-save").addEventListener("click", async () => {
+    const name = pname.value.trim();
+    if (!name) { pname.focus(); saved.textContent = "Name the preset first"; return; }
+    try { await post("/seat-presets", {preset_name: name}); fillPick(name); saved.textContent = `Saved preset "${name}"`; }
+    catch (e) { saved.textContent = e.message; }
+  });
+  pdel.addEventListener("click", async () => {
+    const p = presets.find((x) => x.name === pick.value);
+    if (!p || !p.id) return;
+    try { await post(`/seat-presets/${p.id}/delete`); fillPick(""); pname.value = ""; saved.textContent = `Deleted preset "${p.name}"`; }
+    catch (e) { saved.textContent = e.message; }
+  });
+  fillPick("");
+
   // ---- auto-save
   let timer = null;
   const schedule = () => { clearTimeout(timer); if (saveUrl) saved.textContent = "Saving…"; timer = setTimeout(save, 700); };
@@ -65,10 +136,7 @@
       saved.textContent = "Draft kept in this browser until you save";
       return;
     }
-    const data = new FormData();
-    data.append("csrf", form.querySelector("[name=csrf]").value);
-    form.querySelectorAll("[name=seat_position]:checked").forEach((r) => data.append(r.name, r.value));
-    fields().forEach((f) => { if (!f.name) return; if (f.type === "checkbox") { if (f.checked) data.append(f.name, f.value); } else data.append(f.name, f.value); });
+    const data = formData();
     try {
       const r = await fetch(saveUrl, {method: "POST", body: data, credentials: "same-origin"});
       saved.textContent = r.ok ? "Saved" : "Couldn't save: press Save below";

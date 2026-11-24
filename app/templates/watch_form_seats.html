@@ -48,6 +48,12 @@
          data-defaults='{{ seats.DEFAULT_PRIORITIES|tojson }}'>
       <h3 class="prio-title">Seat Selection Priorities</h3>
       <p class="hint">Rank the seat combinations you prefer. Priority 1 is your first choice. Seats are evaluated in priority order, so a lower-priority seat will never beat a higher-priority match. Multiple seat types can share the same priority. Set a preference to Off to exclude it.</p>
+      <div class="prio-presets" id="prio-presets" data-presets='{{ seat_presets(user.id)|tojson }}'>
+        <label>Preset <select id="preset-pick" aria-label="Load a preset"><option value="">Choose a preset…</option></select></label>
+        <button type="button" id="preset-delete" class="link" hidden>Delete preset</button>
+        <span class="preset-save"><input id="preset-name" maxlength="40" placeholder="Name these priorities" aria-label="Preset name">
+          <button type="button" id="preset-save">Save as preset</button></span>
+      </div>
       {% if sp.migrated %}<p class="flash small">Converted from your earlier seat preferences: check the order and save.</p>{% endif %}
       <ol class="prio-list" id="prio-list">        {% for k, v in prio_rows(sp) %}
         <li class="prio-item" draggable="true" data-key="{{ k }}">

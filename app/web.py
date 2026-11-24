@@ -64,6 +64,18 @@ templates.env.globals["asset"] = _asset
 templates.env.globals["booked_of"] = lambda w: {b["leg"]: b for b in swa.booked(w)}
 templates.env.globals["seats"] = seats
 templates.env.globals["seat_prefs"] = seats.prefs_of
+
+
+def _seat_presets(user_id):
+    """Built-in and the user's saved Seat Selection Priorities, for the seat watch form."""
+    out = [{"id": None, "name": n, "prefs": seats.normalize(p)} for n, p in seats.BUILTIN_PRESETS.items()]
+    for r in db.query("SELECT id, name, prefs FROM seat_presets WHERE user_id=? ORDER BY name COLLATE NOCASE",
+                      (user_id,)):
+        out.append({"id": r["id"], "name": r["name"], "prefs": seats.normalize(json.loads(r["prefs"]))})
+    return [{**p, "prefs": {k: v for k, v in p["prefs"].items() if k != "migrated"}} for p in out]
+
+
+templates.env.globals["seat_presets"] = _seat_presets
 def _my_seats(w):
     """The seats this watch's passengers have now, from its seat checks: [{"seat", "flight"}]."""
     wid = (w.get("id") if isinstance(w, dict) else w["id"]) if w else None
@@ -747,6 +759,40 @@ def create_app(worker=None, start_worker=True):
         with db.tx() as con:
             con.execute("UPDATE watches SET seat_prefs=? WHERE id=?", (seats.to_json(p), wid))
         return JSONResponse({"ok": True, "saved": db.now()})
+
+    MAX_PRESETS = 20
+
+    @app.post("/seat-presets")
+    async def save_seat_preset(request: Request):
+        """Save the priorities on the form as a named preset (same name: replaced)."""
+        u, s = require(request)
+        f = await request.form()
+        if not hmac.compare_digest(str(f.get("csrf", "")), s["csrf"]):
+            return JSONResponse({"ok": False, "error": "form expired"}, status_code=403)
+        name = " ".join(str(f.get("preset_name", "")).split())[:40]
+        if not name:
+            return JSONResponse({"ok": False, "error": "Give the preset a name"}, status_code=400)
+        if name.lower() in (n.lower() for n in seats.BUILTIN_PRESETS):
+            return JSONResponse({"ok": False, "error": "That name is a built-in preset"}, status_code=400)
+        have = db.query("SELECT name FROM seat_presets WHERE user_id=?", (u["id"],))
+        if name not in {r["name"] for r in have} and len(have) >= MAX_PRESETS:
+            return JSONResponse({"ok": False, "error": f"Up to {MAX_PRESETS} presets: delete one first"},
+                                status_code=400)
+        with db.tx() as con:
+            con.execute("INSERT INTO seat_presets(user_id, name, prefs, created) VALUES (?,?,?,?) "
+                        "ON CONFLICT(user_id, name) DO UPDATE SET prefs=excluded.prefs",
+                        (u["id"], name, seats.to_json(parse_seat_prefs(f)), db.now()))
+        return JSONResponse({"ok": True, "presets": _seat_presets(u["id"])})
+
+    @app.post("/seat-presets/{pid}/delete")
+    async def delete_seat_preset(request: Request, pid: int):
+        u, s = require(request)
+        f = await request.form()
+        if not hmac.compare_digest(str(f.get("csrf", "")), s["csrf"]):
+            return JSONResponse({"ok": False, "error": "form expired"}, status_code=403)
+        with db.tx() as con:
+            con.execute("DELETE FROM seat_presets WHERE id=? AND user_id=?", (pid, u["id"]))
+        return JSONResponse({"ok": True, "presets": _seat_presets(u["id"])})
 
     @app.post("/watches/{wid}/lookup")
     async def relookup(request: Request, wid: int):

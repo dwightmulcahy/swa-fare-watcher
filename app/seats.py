@@ -80,6 +80,26 @@ DEFAULT_TIEBREAK = list(TIEBREAKS)
 DEFAULT_PREFS = {"version": 2, "position": "window", "priorities": dict(DEFAULT_PRIORITIES),
                  "tiebreak": list(DEFAULT_TIEBREAK), "fallback": False, "explain": True}
 
+def _preset(order, off=("middle",), position="window"):
+    pri = {k: None for k in CATEGORIES}
+    pri.update({k: i + 1 for i, k in enumerate(order)})
+    for k in off:
+        pri[k] = None
+    return {**DEFAULT_PREFS, "priorities": pri, "position": position}
+
+
+# Ready-made Seat Selection Priorities (users can also save their own)
+BUILTIN_PRESETS = {
+    "Window first": _preset(["exit_window_open", "exit_window", "extra_window", "bulkhead_window", "std_window",
+                             "exit_aisle", "extra_aisle", "bulkhead_aisle", "std_aisle"]),
+    "Aisle first": _preset(["exit_aisle", "extra_aisle", "bulkhead_aisle", "std_aisle", "exit_window_open",
+                            "exit_window", "extra_window", "bulkhead_window", "std_window"], position="aisle"),
+    "Most legroom": _preset(["exit_window_open", "exit_window", "exit_aisle", "extra_window", "extra_aisle",
+                             "bulkhead_window", "bulkhead_aisle", "std_window", "std_aisle"]),
+    "Extra legroom only": _preset(["exit_window_open", "exit_window", "exit_aisle", "extra_window", "extra_aisle",
+                                   "bulkhead_window", "bulkhead_aisle"], off=("std_window", "std_aisle", "middle")),
+}
+
 OPEN_HOURS = 48          # seat selection (free upgrades) opens this long before departure
 
 _LABEL = re.compile(r"^Seat\s+(\d+)([A-K])\b(?P<rest>.*)$", re.S)
