@@ -101,3 +101,28 @@ def test_reset_2fa_from_the_command_line(client, monkeypatch, capsys):
     with pytest.raises(SystemExit) as e:
         main()
     assert e.value.code == 0 and not db.one("SELECT totp_secret FROM users WHERE username='admin'")["totp_secret"]
+
+
+def test_reset_password_from_the_command_line(client, monkeypatch, capsys):
+    import sys
+
+    import pytest
+
+    from app.__main__ import main
+    from app.security import verify_password
+    admin_client(client)
+    for args, code in ((["reset-password", "nobody"], 1), (["reset-password", "admin"], 0)):
+        monkeypatch.setattr(sys, "argv", ["app", *args])
+        with pytest.raises(SystemExit) as e:
+            main()
+        assert e.value.code == code
+    out = capsys.readouterr().out
+    assert "no user 'nobody' (users: admin" in out
+    pw = re.search(r"temporary password for admin: (\S+)", out).group(1)
+    u = db.one("SELECT * FROM users WHERE username='admin'")
+    assert verify_password(pw, u["pw_hash"]) and u["must_change_pw"] == 1
+    assert not db.one("SELECT 1 FROM sessions WHERE user_id=?", (u["id"],))       # signed out
+    assert pw not in str(db.query("SELECT message FROM logs"))                     # never logged
+    assert client.get("/", follow_redirects=False).headers["location"] == "/login"
+    assert login(client, "admin", pw).status_code == 303
+    assert "/password" in client.get("/", follow_redirects=False).headers["location"]   # must choose a new one
