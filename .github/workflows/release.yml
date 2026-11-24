@@ -162,7 +162,8 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists; refreshing notes and assets"
             gh release edit "$TAG" "${flags[@]}"
-                      else
+          else
             gh release create "$TAG" --verify-tag "${flags[@]}"
           fi
+          gh release upload "$TAG" release-notes.md --clobber
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
