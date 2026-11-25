@@ -300,6 +300,7 @@ MIGRATIONS = {
         "fails": "INTEGER NOT NULL DEFAULT 0",   # visits in a row that couldn't finish
         "log": "TEXT",                           # JSON [[from seat, to seat], ...] of changes made
         "seats_now": "TEXT",                     # JSON per passenger after the last check: seat, score, best free
+        "held": "INTEGER NOT NULL DEFAULT 0",    # everyone has a top seat: only a daily check that it still holds
     },
     "fares": {
         "leg": "TEXT NOT NULL DEFAULT 'out'",    # out | ret

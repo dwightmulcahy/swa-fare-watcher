@@ -167,7 +167,7 @@ def test_seat_job_runs_when_due_and_emails(client, worker, sent):
         human, page, humanize = None, None, False
 
     class Picker:
-        def __init__(self, b, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None):
+        def __init__(self, b, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None, hold=False):
             assert (conf, first, last, status, window) == ("ABC123", "Pat", "Lee", "premier", True)
             assert receipt_email                                     # the review page requires one
         report = [{"flight": "", "passenger": "Pat Lee", "current": None, "picked": "9A",
@@ -440,9 +440,19 @@ def test_seat_watch_keeps_checking_until_perfect_then_sends_a_summary(client, wo
     status, _, note = _run_visit(worker, j, lambda u: (untils.append(u), ([("11F", "1F (Extra Legroom, Window)")],
                                                                           "confirmed"))[1], best)
     assert untils[1] == 0                                                   # later visits look once
-    assert status == "done" and "top priority" in note and len(sent) == 1
-    assert "Seat watch finished" in sent[-1][1] and "1F (Extra Legroom, Window)" in sent[-1][2]
-    assert db.one("SELECT next_at FROM seat_jobs WHERE id=?", (job["id"],))["next_at"] is None
+    assert status == "holding" and "top priority" in note and "once a day" in note and len(sent) == 1
+    assert "Top seat reached" in sent[-1][1] and "1F (Extra Legroom, Window)" in sent[-1][2]
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?", (job["id"],))
+    gap = dt.datetime.fromisoformat(j["next_at"]) - dt.datetime.now(dt.timezone.utc)
+    assert j["held"] == 1 and dt.timedelta(hours=19) < gap < dt.timedelta(hours=29)          # about daily
+    # the daily check: still held -> quiet; seat lost -> looking again, with an email
+    top = {**best[0]["options"][0]}
+    status, _, _ = _run_visit(worker, j, lambda u: ([], "no better"), [{"current": top, "options": [], "picked": None}])
+    assert status == "holding" and len(sent) == 1
+    j = db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id WHERE j.id=?", (job["id"],))
+    status, _, note = _run_visit(worker, j, lambda u: ([], "no better"), meh)
+    assert status == "watching" and "lost" in note and "looking again" in sent[-1][1]
+    assert db.one("SELECT held FROM seat_jobs WHERE id=?", (job["id"],))["held"] == 0
 
 
 def test_seat_watch_gives_up_after_repeated_failures(client, worker, sent):
@@ -686,10 +696,10 @@ def test_seat_history_is_recorded_and_shown_on_the_watch(client, worker, sent):
     _run_visit(worker, db.one(q, (job["id"],)), lambda u: ([("11F", top["describe"])], "confirmed"),
                [{"passenger": "Pat Q", "current": cur, "options": [top], "picked": "1F"}])
     ev = [r["event"] for r in db.query("SELECT event FROM seat_history WHERE watch_id=? ORDER BY id", (wid,))]
-    assert ev == ["first", "kept", "kept", "moved", "finished"]
+    assert ev == ["first", "kept", "kept", "moved", "held"]
     page = client.get(f"/watches/{wid}").text
     assert "Seat history" in page and "3 checks" in page and "from 11F (Window)" in page
-    assert "best other free seat seen: 20C (Aisle)" in page and page.index("Finished") < page.index("First check")
+    assert "best other free seat seen: 20C (Aisle)" in page and page.index("Top seat") < page.index("First check")
     log = page.split('class="card watch-log"')[1]
     assert "full log" in log and "seat selection" in log          # this watch's own log entries
     msgs = [r["message"] for r in db.query("SELECT message FROM logs WHERE source='seats' AND message LIKE '%seat selection%'")]
@@ -855,5 +865,5 @@ def test_top_priority_is_the_best_seat_type_this_plane_has(client, worker, sent)
                               "WHERE j.id=?", (job["id"],)), lambda u: ([], "no better"),
                [{"passenger": "Pat Q", "current": cur, "options": [], "picked": None, "best_here": 2}])
     j = db.one("SELECT * FROM seat_jobs WHERE id=?", (job["id"],))
-    assert j["status"] != "watching" and j["next_at"] is None
-    assert "best seat type this plane has" in db.one("SELECT note FROM seat_history WHERE event='finished'")["note"]
+    assert j["status"] == "holding"
+    assert "best seat type this plane has" in db.one("SELECT note FROM seat_history WHERE event='held'")["note"]

@@ -55,9 +55,11 @@ class NotFree(Exception):
 
 
 class SeatPicker:
-    def __init__(self, browser, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None):
+    def __init__(self, browser, conf, first, last, prefs, status, user_id=None, window=True, receipt_email=None,
+                 hold=False):
         self.b, self.page = browser, browser.page
         self.receipt_email = receipt_email
+        self.hold = hold   # top seats already held: only move someone who lost theirs
         self.conf, self.first, self.last = conf, first, last
         self.prefs, self.status, self.uid = prefs, status, user_id
         self.window = window     # within 48 h of departure: the status's upgrade seats count too
@@ -195,13 +197,16 @@ class SeatPicker:
                 cur = next((s for s in smap if s["seat"] == cur_code), None)
                 options = seats.ranked(smap, self.prefs, self.status, taken, self.window)
                 new = options[0] if options else None
+                top = seats.best_on_plane(smap, self.prefs, self.status) or seats.best_priority(self.prefs)
+                if self.hold and cur is not None and (seats.priority(cur, self.prefs)[0] or 99) <= (top or 0):
+                    new = None          # still a top seat: no tie-breaker shuffles while holding
                 report.append({
                     "flight": (tab.get_attribute("aria-label") or "").split(" hours")[0] if tab is not None else "",
                     "passenger": (pax.get_attribute("aria-label") or "").split(" Seat:")[0],
                     "current": _scored(cur, self.prefs),
                     "options": [_scored(x, self.prefs) for x in options[:6]],
                     "picked": new["seat"] if seats.better(new, cur, self.prefs) else None,
-                    "best_here": seats.best_on_plane(smap, self.prefs, self.status),
+                    "best_here": top,
                     "explanation": seats.explain(new, self.prefs) if self.prefs.get("explain", True) and new
                     and seats.better(new, cur, self.prefs) else ""})
                 if seats.better(new, cur, self.prefs):
