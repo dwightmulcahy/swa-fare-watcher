@@ -256,7 +256,7 @@ def _seats_now(report, changes):
         seat = next((o for o in r.get("options") or [] if o["seat"] == r["picked"]), None) if moved else r.get("current")
         others = [o for o in r.get("options") or [] if not seat or o["seat"] != seat["seat"]]
         out.append({"passenger": r.get("passenger") or "", "flight": r.get("flight") or "",
-                    "seat": seat, "best": others[0] if others else None,
+                    "seat": seat, "best": others[0] if others else None, "edge": r.get("edge"),
                     "checked": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
     return out
 
@@ -294,6 +294,8 @@ def seat_results(report, changes):
             what = f"kept {lbl(after)}" if after else "no seat yet"
         free = [o for o in r.get("options") or [] if not after or o["seat"] != after["seat"]]
         what += f"; best other free seat {lbl(free[0])}" if free else "; no other free seat that fits"
+        if free and r.get("edge"):
+            what += f" (same priority; this one has {r['edge']})"
         out.append(who + what)
     return " | ".join(out)
 

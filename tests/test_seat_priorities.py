@@ -316,3 +316,22 @@ def test_a_whole_empty_side_of_the_row_beats_one_empty_seat_beside_you():
     prefs = seats.normalize({"priorities": {"std_window": 1}, "tiebreak": ["neighbor"], "tiebreak_v3": True})
     assert [x["seat"] for x in seats.ranked(m, prefs, "none", set(), True)][:3] == ["7A", "8A", "9A"]
     assert seats.better(by["7A"], by["8A"], prefs) and "rest of its side of the row is free" in seats.explain(by["7A"], prefs)
+
+
+def test_edge_names_the_tie_breaker_that_decided():
+    def s(code, feats=(), typ="extra"):
+        return {"seat": code, "row": int(code[:-1]), "col": code[-1], "type": typ, "price": 0,
+                "features": {"window", *feats}, "available": True, "selected": False}
+    prefs = seats.normalize({"priorities": {"extra_window": 1, "std_window": 2},
+                             "tiebreak": ["legroom", "neighbor", "forward"], "tiebreak_v3": True})
+    assert seats.edge(s("4F"), s("15A"), prefs) == "further forward in the cabin"
+    assert seats.edge(s("14F", [seats.EMPTY_NEIGHBOR]), s("4A"), prefs) == "the seat next to it is free"
+    assert seats.edge(s("14F", [seats.EMPTY_NEIGHBOR, seats.EMPTY_SIDE]), s("4A", [seats.EMPTY_NEIGHBOR]), prefs) \
+        == "the rest of its side of the row is free"
+    assert seats.edge(s("4A"), s("4F"), prefs) == "a lower seat number"
+    assert seats.edge(s("15A"), s("4F"), prefs) is None                         # it's the other way round
+    assert seats.edge(s("4F"), s("4A", typ="standard"), prefs) is None          # different priority: shown already
+    from app.worker import seat_results
+    r = {"passenger": "Lisa F.", "current": {"seat": "4F", "label": "Priority 1"}, "picked": None,
+         "options": [{"seat": "5A", "label": "Priority 1"}], "edge": "further forward in the cabin"}
+    assert seat_results([r], []).endswith("(same priority; this one has further forward in the cabin)")
