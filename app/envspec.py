@@ -103,6 +103,8 @@ GROUPS = [
         Setting("SWA_EMAIL_WARNINGS", "off", "Email the admins about log entries, with the screenshot and any raw "
                 "JSON attached: warnings (and errors), errors only, or off. The same message at most once an "
                 "hour, at most 12 emails an hour", "choice", ("off", "errors", "warnings")),
+        Setting("SWA_SEAT_CC_ADMINS", "true", "Copy the admins on seat watch emails (seat changes, the summary, "
+                "plane changes), which go to the watch's receipt email", "bool"),
         Setting("SWA_PAGE_WATCH", "true", "Email the admins (screenshot and page HTML attached) when a Southwest page "
                 "the app works on changes: an element it relies on is missing, the page's structure changed, "
                 "or a step didn't go as expected. Once per change", "bool"),

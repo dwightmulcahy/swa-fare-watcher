@@ -84,18 +84,23 @@ def tmp_data(tmp_path, monkeypatch):
     yield tmp_path
 
 
+class _Sent(list):
+    cc: list   # the Cc list of each email, in order
+
+
 @pytest.fixture
 def sent(monkeypatch):
-    out = []
-    monkeypatch.setattr(mailer, "send",
-                        lambda to, subject, html, attachments=(): out.append((to, subject, html)) or True)
+    out = _Sent()
+    out.cc = []
+    monkeypatch.setattr(mailer, "send", lambda to, subject, html, attachments=(), cc=():
+                        out.cc.append(list(cc)) or out.append((to, subject, html)) or True)
     return out
 
 
 @pytest.fixture
 def sent_with_files(monkeypatch):
     out = []
-    monkeypatch.setattr(mailer, "send", lambda to, subject, html, attachments=():
+    monkeypatch.setattr(mailer, "send", lambda to, subject, html, attachments=(), cc=():
                         out.append((to, subject, html, list(attachments))) or True)
     return out
 
