@@ -815,10 +815,11 @@ class Worker:
         now = now or dt.datetime.now(dt.timezone.utc)
         soon = (now + dt.timedelta(seconds=self.SEAT_EARLY)).isoformat(timespec="seconds")
         return db.query("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
-                        "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status='watching' AND j.next_at<=?)) "
+                        "WHERE ((j.status='pending' AND j.opens_at<=?) OR (j.status IN ('watching', 'holding') AND j.next_at<=?)) "
                         "AND w.active=1 AND w.seat_auto=1", (soon, now.isoformat(timespec="seconds")))
 
     SEAT_NOW_GAP = 5 * 60   # Search now on a seat watch: not again within this long of a visit
+    SEAT_HOLD_HOURS = (20, 28)   # top seats held: a light check about once a day
 
     def seat_check_now(self, watch_id, now=None):
         """Search now on a seat watch: every leg not yet flown gets a visit right away (the usual plan
@@ -840,7 +841,7 @@ class Worker:
                 departs = dt.datetime.fromisoformat(j["opens_at"]) + dt.timedelta(hours=seats.OPEN_HOURS)
                 if departs - now <= dt.timedelta(seconds=self.SEAT_STOP_BEFORE):
                     continue
-                n += con.execute("UPDATE seat_jobs SET status='watching', next_at=?, fails=0, updated=? "
+                n += con.execute("UPDATE seat_jobs SET status='watching', held=0, next_at=?, fails=0, updated=? "
                                  "WHERE id=? AND status!='running'",
                                  (now.isoformat(timespec="seconds"), db.now(), j["id"])).rowcount
         return n, None if n else "every flight is too close to departure"
@@ -973,7 +974,8 @@ class Worker:
                 picker = seat_picker.SeatPicker(browser, w["booking_conf"], w["booking_first"], w["booking_last"],
                                                 seats.prefs_of(w), status_key, user_id=uid, window=window,
                                                 # the watch's receipt email, else the owner's; never the Gmail sender
-                                                receipt_email=dict(w).get("booking_email") or user["email"] or None)
+                                                receipt_email=dict(w).get("booking_email") or user["email"] or None,
+                                                hold=bool(job.get("held")))
                 until = max(opens.timestamp(), time.time()) + self.SEAT_WINDOW if opening else 0
                 try:
                     changes, note = picker.run(until, poll=self.SEAT_POLL, sleep=self.sleep)
@@ -1004,18 +1006,29 @@ class Worker:
             (_seat_after(r) or {}).get("priority") is not None
             and (_seat_after(r) or {}).get("priority") <= (r.get("best_here") or best) for r in report)
         top_here = bool(report) and any((r.get("best_here") or best) != best for r in report)
-        # before the window a perfect seat may still be beaten once Extra Legroom frees up
-        perfect = perfect and (window or not gain)
         b = next((x for x in json.loads(w["booked"] or "[]") if x.get("leg") == job["leg"]), {})
         stop_before = self.SEAT_STOP_BEFORE_INTL if seats.international(b.get("from"), b.get("to")) \
             else self.SEAT_STOP_BEFORE
         nxt = None if stop or perfect else self.next_seat_visit(now, departs, gain=gain, stop_before=stop_before)
+        hold = perfect and not stop
+        if hold:   # top seats: stop looking for better, but check about daily that they (and the plane) hold
+            nxt = now + dt.timedelta(hours=random.uniform(*self.SEAT_HOLD_HOURS))
+            if nxt >= departs - dt.timedelta(seconds=stop_before):
+                nxt, hold = None, False
+        was_held = bool(job.get("held"))
         if nxt and fails:      # a check that broke: try again soon rather than after the usual gap
             soon = now + dt.timedelta(minutes=random.uniform(*self.SEAT_RETRY_MINUTES))
             nxt = min(nxt, soon) if soon < departs - dt.timedelta(seconds=stop_before) else nxt
-        if nxt:
+        if hold:
+            status = "holding"
+            text = (f"Seat change {note}. " if changes else "") + \
+                ("Everyone has the best seat type this plane has." if top_here else
+                 "Everyone has a seat in your top priority.") + \
+                f" No more moves; checking once a day (next {nxt.astimezone():%a %H:%M}) that the seat and plane hold."
+        elif nxt:
             status = "watching"
             text = (f"Seat change {note}. " if changes else "") + \
+                ("A top seat was lost, so it's looking again. " if was_held else "") + \
                 f"Checking again {nxt.astimezone():%a %H:%M} for a better free seat."
         else:
             status = "failed" if stop else "done" if log else "unchanged"
@@ -1027,18 +1040,24 @@ class Worker:
             elif not log and not stop:
                 text = f"Your current seat stayed the best free match. {text}"
         with db.tx() as con:
-            con.execute("UPDATE seat_jobs SET status=?, note=?, updated=?, next_at=?, visits=visits+1, fails=?, "
-                        "log=?, seats_now=COALESCE(?, seats_now) WHERE id=?",
-                        (status, text, db.now(), nxt.isoformat(timespec="seconds") if nxt else None, fails,
+            con.execute("UPDATE seat_jobs SET status=?, held=?, note=?, updated=?, next_at=?, visits=visits+1, "
+                        "fails=?, log=?, seats_now=COALESCE(?, seats_now) WHERE id=?",
+                        (status, int(hold), text, db.now(), nxt.isoformat(timespec="seconds") if nxt else None, fails,
                          json.dumps(log), json.dumps(_seats_now(report, changes)) if report else None, job["id"]))
-        self.record_seat_history(w["id"], job["leg"], report, changes, status if not nxt else None, text,
+        self.record_seat_history(w["id"], job["leg"], report, changes,
+                                 status if not nxt or (hold and not was_held) else None, text,
                                  note if fails and nxt else None)
         found = seat_results(report, changes)
         applog.info(f"{w['name']}: seat selection ({leg}): {status}. {found + '. ' if found else ''}{text}",
                     user_id=uid, watch_id=w["id"], source="seats")
-        if (changes or not nxt) and seat_mail_to(w, user)[0]:
+        newly_held, lost = hold and not was_held, was_held and not hold and not stop
+        if (changes or not nxt or newly_held or lost) and seat_mail_to(w, user)[0]:
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
-            if nxt:          # a change, still watching
+            if newly_held:   # the summary: top seats, now only checked daily
+                subject, shown = "Top seat reached", [tuple(c) for c in log]
+            elif lost and not changes:
+                subject, shown = "Seat watch looking again", []
+            elif nxt:        # a change, still watching
                 subject, shown = "Seat selected", changes
             else:            # the summary (with this visit's change, if any)
                 subject = {"done": "Seat watch finished", "unchanged": "Seat watch finished, no change",
@@ -1065,7 +1084,7 @@ class Worker:
         if error:
             db.add_seat_history(wid, leg, "failed", note=error)
         if final:
-            db.add_seat_history(wid, leg, "failed" if final == "failed" else "finished", note=text)
+            db.add_seat_history(wid, leg, {"failed": "failed", "holding": "held"}.get(final, "finished"), note=text)
 
     def plane_changed(self, w, changes):
         """Email the watch's owner when Southwest swaps the plane on a booked flight: the seat map,

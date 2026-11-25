@@ -54,7 +54,7 @@
   <ul class="plain">{% for j in seat_jobs %}
     <li><b>{{ j.leg_label }}</b>: opens {{ j.opens_local }}
       <span class="pill {{ 'good' if j.status in ('done', 'unchanged') else 'bad' if j.status == 'failed' else '' }}">{{
-        {"pending": "scheduled", "running": "picking now", "watching": "watching for better", "done": "seat changed", "unchanged": "kept current seat", "failed": "needs you"}[j.status] }}</span>
+        {"pending": "scheduled", "running": "picking now", "watching": "watching for better", "holding": "top seat held, checking daily", "done": "seat changed", "unchanged": "kept current seat", "failed": "needs you"}[j.status] }}</span>
       {% if j.note %}<span class="muted small">{{ j.note }}</span>{% endif %}
       {% for p in j.seats_now %}<div class="seat-now">
         {% if p.passenger %}<span class="muted small">{{ p.passenger }}:</span> {% endif %}
@@ -86,6 +86,7 @@
           {% if h.checks > 1 %}<span class="muted small">· {{ h.checks }} checks</span>{% endif %}
           {% if h.best %}<br><span class="muted small">best other free seat seen: {{ h.best.describe }}, {{ h.best.label or ('score %d' % (h.best.score|round|int)) }}</span>{% endif %}
         {% elif h.event == 'plane' %}<span class="pill bad">Plane change</span> {{ h.flight }}: {{ h.note }}
+        {% elif h.event == 'held' %}<span class="pill good">Top seat</span> <span class="small">{{ h.note }}</span>
         {% elif h.event == 'failed' %}<span class="pill bad">Problem</span> <span class="small">{{ h.note }}</span>
         {% else %}<span class="pill good">Finished</span> <span class="small">{{ h.note }}</span>{% endif %}</td></tr>{% endfor %}
     </tbody>

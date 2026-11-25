@@ -899,13 +899,15 @@ def create_app(worker=None, start_worker=True):
                 " WHERE watch_id=? AND ts=(SELECT MAX(ts) FROM fares WHERE watch_id=?)", (w["id"], w["id"]))
         seat_next = {}
         labels = {"pending": "Scheduled", "running": "Picking now", "watching": "Watching for better",
+                  "holding": "Top seat held",
                   "done": "Seat changed", "unchanged": "Kept current seat", "failed": "Needs you"}
         for w in watches:
             if (w["kind"] or "fare") == "seats":
                 jobs = _seat_jobs(w["id"])
-                j = next((x for x in jobs if x["status"] in ("pending", "running", "watching")), jobs[-1] if jobs else None)
+                j = next((x for x in jobs if x["status"] in ("pending", "running", "watching", "holding")),
+                         jobs[-1] if jobs else None)
                 if j:
-                    when = (f"next {_next_check(w, u, jobs)[0]}" if j["status"] in ("pending", "watching")
+                    when = (f"next {_next_check(w, u, jobs)[0]}" if j["status"] in ("pending", "watching", "holding")
                             else j["opens_local"])
                     now_seat = next((p["seat"] for jj in jobs for p in jj["seats_now"] if p.get("seat")), None)
                     seat_next[w["id"]] = {"label": labels[j["status"]], "when": f"{j['leg_label']} · {when}",
@@ -1021,6 +1023,9 @@ def create_app(worker=None, start_worker=True):
             for j in jobs:
                 if j["status"] == "watching" and j["next_at"]:
                     nxt.append((dt.datetime.fromisoformat(j["next_at"]), f"{j['leg_label']}: checking for a better seat"))
+                elif j["status"] == "holding" and j["next_at"]:
+                    nxt.append((dt.datetime.fromisoformat(j["next_at"]),
+                                f"{j['leg_label']}: daily check that the top seat still holds"))
                 elif j["status"] == "pending":
                     t = dt.datetime.fromisoformat(j["opens_at"]) - dt.timedelta(seconds=app.state.worker.SEAT_EARLY)
                     nxt.append((t, f"{j['leg_label']}: seat selection opens"))
