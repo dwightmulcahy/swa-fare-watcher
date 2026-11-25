@@ -300,3 +300,19 @@ def test_travelers_save_list_and_delete(client):
     assert data[0]["name"] == "Lisa F."
     assert client.post(f"/travelers/{x['id']}/delete", data={"csrf": csrf(page)}).json()["travelers"] == []
     assert not db.one("SELECT 1 FROM travelers")
+
+
+def test_a_whole_empty_side_of_the_row_beats_one_empty_seat_beside_you():
+    def s(code, free=True):
+        return {"seat": code, "row": int(code[:-1]), "col": code[-1], "type": "standard", "price": 0,
+                "features": {"window" if code[-1] in "AF" else "aisle" if code[-1] in "CD" else "middle"},
+                "available": free, "selected": False}
+    m = seats.annotate([s("7A"), s("7B"), s("7C"),                 # whole side free
+                        s("8A"), s("8B"), s("8C", free=False),     # just the middle free
+                        s("9A"), s("9B", free=False), s("9C")])    # nobody-free beside 9A
+    by = {x["seat"]: x for x in m}
+    assert seats.EMPTY_SIDE in by["7A"]["features"] and seats.EMPTY_SIDE not in by["8A"]["features"]
+    assert seats.EMPTY_NEIGHBOR in by["8A"]["features"] and seats.EMPTY_NEIGHBOR not in by["9A"]["features"]
+    prefs = seats.normalize({"priorities": {"std_window": 1}, "tiebreak": ["neighbor"], "tiebreak_v3": True})
+    assert [x["seat"] for x in seats.ranked(m, prefs, "none", set(), True)][:3] == ["7A", "8A", "9A"]
+    assert seats.better(by["7A"], by["8A"], prefs) and "rest of its side of the row is free" in seats.explain(by["7A"], prefs)

@@ -138,7 +138,7 @@ class SeatPicker:
                     s["available"], s["selected"] = False, True
                 elif cur_code and s["seat"] == cur_code:
                     s["available"], s["selected"] = True, False
-            fresh = seats.annotate([{**s, "features": set(s["features"]) - {seats.EMPTY_NEIGHBOR}} for s in m["seats"]])
+            fresh = seats.annotate([{**s, "features": set(s["features"]) - {seats.EMPTY_NEIGHBOR, seats.EMPTY_SIDE}} for s in m["seats"]])
             for s, f in zip(m["seats"], fresh):
                 s["features"] = sorted(f["features"])
 
