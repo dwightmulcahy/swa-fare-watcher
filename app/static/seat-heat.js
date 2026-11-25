@@ -13,7 +13,7 @@
     const pos = ["window", "aisle", "middle"].find((x) => f.has(x)) || null;
     return {pos, exit: f.has("exit row"), extra: s.type === "extra", open: f.has("no seat in front"),
             bulk: f.has("bulkhead seat"), recline: f.has("limited recline") ? false : null,
-            neighbor: f.has("empty seat next to it"),
+            neighbor: f.has("rest of its side of the row empty") ? 2 : f.has("empty seat next to it") ? 1 : 0,
             view: pos !== "window" ? null : !f.has("window without window view")};
   };
   const matches = (a, cat) => {
@@ -43,7 +43,7 @@
     return p.tie.map((k) => k === "position" ? ((p.pos !== "window" && p.pos !== "aisle") || a.pos === p.pos ? 0 : 1)
       : k === "legroom" ? (a.extra || a.open ? 0 : 1) : k === "forward" ? Math.floor((s.row - 1) / 10)
       : k === "view" ? (a.view === false ? 1 : 0) : k === "recline" ? (a.recline === false ? 1 : 0)
-      : k === "neighbor" ? (a.neighbor ? 0 : 1) : 0);
+      : k === "neighbor" ? 2 - a.neighbor : 0);
   };
   const key = (s, p) => [priority(s, p)[0] ?? D.max + 1, ...tiebreak(s, p), s.row, s.col];
   const cmp = (x, y) => { for (let i = 0; i < x.length; i++) { if (x[i] < y[i]) return -1; if (x[i] > y[i]) return 1; } return 0; };

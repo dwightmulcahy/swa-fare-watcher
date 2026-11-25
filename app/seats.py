@@ -78,6 +78,8 @@ TIEBREAKS = {
 }
 LIMITED_RECLINE = "limited recline"
 EMPTY_NEIGHBOR = "empty seat next to it"
+EMPTY_SIDE = "rest of its side of the row empty"   # e.g. a window seat with the middle and aisle seats free
+SIDE = {c: s for s in ("ABC", "DEF") for c in s}
 NEXT_TO = {"A": "B", "C": "B", "D": "E", "F": "E", "B": "AC", "E": "DF"}   # same side of the aisle
 DEFAULT_TIEBREAK = list(TIEBREAKS)
 DEFAULT_PREFS = {"version": 2, "position": "window", "priorities": dict(DEFAULT_PRIORITIES),
@@ -149,6 +151,9 @@ def annotate(seat_map):
         beside = [(s["row"], c) for c in NEXT_TO.get(s["col"], "") if (s["row"], c) in have]
         if beside and all(b in free for b in beside):
             s["features"].add(EMPTY_NEIGHBOR)
+            side = [(s["row"], c) for c in SIDE.get(s["col"], "") if c != s["col"] and (s["row"], c) in have]
+            if len(side) >= 2 and all(b in free for b in side):
+                s["features"].add(EMPTY_SIDE)
     return seat_map
 
 
@@ -211,7 +216,7 @@ def attributes(seat):
            "open_front": OPEN_FRONT in f, "bulkhead": "bulkhead seat" in f}
     out["view"] = None if pos != "window" else "window without window view" not in f
     out["recline"] = False if LIMITED_RECLINE in f else None      # only known when it doesn't
-    out["neighbor_free"] = EMPTY_NEIGHBOR in f
+    out["neighbor_free"] = 2 if EMPTY_SIDE in f else 1 if EMPTY_NEIGHBOR in f else 0   # seats free beside it
     return out
 
 
@@ -257,8 +262,8 @@ def _tiebreak(seat, prefs):
             out.append(1 if a["view"] is False else 0)
         elif k == "recline":
             out.append(1 if a["recline"] is False else 0)
-        elif k == "neighbor":
-            out.append(0 if a["neighbor_free"] else 1)
+        elif k == "neighbor":    # whole side of the row free > the seat beside it free > neither
+            out.append(2 - a["neighbor_free"])
     return tuple(out)
 
 
@@ -329,7 +334,9 @@ def explain(chosen, prefs, fallback=None):
     text = f"Selected: {chosen['seat']}. Matched Priority {p}: {CATEGORIES[cat]}."
     if higher:
         text += f" Higher-ranked {', '.join(higher)} seats were unavailable."
-    if "neighbor" in (prefs.get("tiebreak") or []) and EMPTY_NEIGHBOR in chosen["features"]:
+    if "neighbor" in (prefs.get("tiebreak") or []) and EMPTY_SIDE in chosen["features"]:
+        text += " The rest of its side of the row is free (for now)."
+    elif "neighbor" in (prefs.get("tiebreak") or []) and EMPTY_NEIGHBOR in chosen["features"]:
         text += " The seat next to it is free (for now)."
     return text
 
