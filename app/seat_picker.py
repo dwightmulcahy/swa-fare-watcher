@@ -65,6 +65,7 @@ class SeatPicker:
         self.report = []     # per flight and passenger: current seat and the best free seats, scored
         self.plane = None    # e.g. "Boeing 737 MAX 8", read from the seat map
         self.maps = {}       # flight tab label -> {"flight", "plane", "seats"} as last seen (no personal data)
+        self.map_labels = {}  # flight index in the plan -> its label in self.maps
 
     def log(self, msg, level="info", **kw):
         getattr(applog, level)(msg, source="seats", user_id=self.uid, **kw)
@@ -121,6 +122,23 @@ class SeatPicker:
             {"seat": s["seat"], "row": s["row"], "col": s["col"], "type": s["type"],
              "features": sorted(s["features"]), "available": s["available"], "selected": s["selected"]}
             for s in smap]}
+        return label
+
+    def mark_moves(self, plan, missing=()):
+        """After a confirmed change, make the remembered maps show it (the map was read before the move):
+        the new seat is yours and taken, the old one free again; empty-neighbour marks are redone."""
+        for fi, _pi, cur_code, new in plan:
+            m = self.maps.get(self.map_labels.get(fi))
+            if not m or new["seat"] in missing:
+                continue
+            for s in m["seats"]:
+                if s["seat"] == new["seat"]:
+                    s["available"], s["selected"] = False, True
+                elif cur_code and s["seat"] == cur_code:
+                    s["available"], s["selected"] = True, False
+            fresh = seats.annotate([{**s, "features": set(s["features"]) - {seats.EMPTY_NEIGHBOR}} for s in m["seats"]])
+            for s, f in zip(m["seats"], fresh):
+                s["features"] = sorted(f["features"])
 
     def capture_maps(self):
         """Open the seat map from the trip page and remember every flight's map (no seat is clicked)."""
@@ -172,7 +190,7 @@ class SeatPicker:
                     self.read_plane()
                 smap = self.seat_map()
                 if pi == 0:
-                    self.remember_map(tab, smap)
+                    self.map_labels[fi] = self.remember_map(tab, smap)
                 cur_code = self.current_seat(pax.get_attribute("aria-label"))
                 cur = next((s for s in smap if s["seat"] == cur_code), None)
                 options = seats.ranked(smap, self.prefs, self.status, taken, self.window)
@@ -362,6 +380,7 @@ class SeatPicker:
                 self.apply(plan)
                 self.checkout()
                 missing = self.verify([new["seat"] for *_, new in plan])
+                self.mark_moves(plan, missing)
                 changes = [(cur, seats.describe(new)) for _, _, cur, new in plan]
                 if missing:
                     return changes, f"confirmed, but the trip page doesn't show seat(s) {', '.join(missing)} yet"
