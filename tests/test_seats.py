@@ -794,3 +794,22 @@ def test_seat_watch_shows_free_and_taken_seats(client):
     page = client.get(f"/watches/{wid}").text
     assert "3 free · 2 taken of 5 (40% full)" in page and 'value="40"' in page and "1 Extra Legroom" in page
     assert "3 free · 2 taken (40% full)" in client.get("/").text
+
+
+def test_remembered_map_shows_the_new_seat_after_a_move():
+    from app.seat_picker import SeatPicker
+    p = SeatPicker.__new__(SeatPicker)
+    p.maps, p.map_labels = {}, {0: "Flight 1 of 1"}
+    s = lambda code, free, mine=False: {"seat": code, "row": int(code[:-1]), "col": code[-1], "type": "standard",
+                                         "features": ["window" if code[-1] in "AF" else "middle"],
+                                         "available": free, "selected": mine}
+    p.maps["Flight 1 of 1"] = {"flight": "Flight 1 of 1", "plane": None,
+                               "seats": [s("2E", False), s("2F", True), s("8E", True), s("8F", False, mine=True)]}
+    p.mark_moves([(0, 0, "8F", {"seat": "2F"})])
+    by = {x["seat"]: x for x in p.maps["Flight 1 of 1"]["seats"]}
+    assert by["2F"]["selected"] and not by["2F"]["available"]
+    assert by["8F"]["available"] and not by["8F"]["selected"]
+    assert seats.EMPTY_NEIGHBOR not in by["2F"]["features"]          # 2E is taken
+    assert isinstance(by["2F"]["features"], list)
+    p.mark_moves([(0, 0, "2F", {"seat": "8E"})], missing=["8E"])     # not confirmed on the trip page: unchanged
+    assert by["2F"]["selected"]
