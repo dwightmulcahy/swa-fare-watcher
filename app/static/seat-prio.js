@@ -127,6 +127,58 @@
   });
   fillPick("");
 
+  // ---- saved travelers: name, receipt email, status and all of the above in one pick
+  const tbox = document.getElementById("travelers");
+  if (tbox) {
+    const tpick = document.getElementById("traveler-pick"), tname = document.getElementById("traveler-name"),
+          tdel = document.getElementById("traveler-delete"), tmsg = document.getElementById("traveler-msg");
+    let travelers = JSON.parse(tbox.dataset.travelers || "[]");
+    const fillT = (keep) => {
+      tpick.replaceChildren(new Option(travelers.length ? "Choose a saved traveler…" : "No saved travelers yet", ""));
+      travelers.forEach((x) => tpick.append(new Option(x.name, String(x.id))));
+      tpick.value = keep ? String(keep) : "";
+      tdel.hidden = !tpick.value;
+    };
+    const set = (n, v) => { const el = form.querySelector(`[name=${n}]`); if (el) el.value = v; };
+    tpick.addEventListener("change", () => {
+      const x = travelers.find((t) => String(t.id) === tpick.value);
+      tdel.hidden = !x;
+      if (!x) return;
+      set("booking_first", x.first); set("booking_last", x.last);
+      if (x.email) set("booking_email", x.email);
+      set("seat_status", x.status);
+      form.querySelector("[name=seat_status]")?.dispatchEvent(new Event("change", {bubbles: true}));
+      apply(x.prefs);
+      tname.value = x.name; tmsg.textContent = `Filled in ${x.name}`;
+    });
+    const tpost = async (url, extra) => {
+      const data = formData();
+      ["booking_first", "booking_last", "booking_email", "seat_status"].forEach((n) => {
+        const el = form.querySelector(`[name=${n}]`); if (el) data.append(n, el.value);
+      });
+      Object.entries(extra || {}).forEach(([k, v]) => data.append(k, v));
+      const r = await fetch(url, {method: "POST", body: data, credentials: "same-origin"});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Couldn't save the traveler");
+      travelers = j.travelers;
+      return j;
+    };
+    document.getElementById("traveler-save").addEventListener("click", async () => {
+      try {
+        const j = await tpost("/travelers", {traveler_name: tname.value.trim()});
+        fillT(travelers.find((x) => x.name === j.name)?.id); tname.value = j.name;
+        tmsg.textContent = `Saved traveler "${j.name}"`;
+      } catch (e) { tmsg.textContent = e.message; }
+    });
+    tdel.addEventListener("click", async () => {
+      const x = travelers.find((t) => String(t.id) === tpick.value);
+      if (!x) return;
+      try { await tpost(`/travelers/${x.id}/delete`); fillT(""); tname.value = ""; tmsg.textContent = `Deleted ${x.name}`; }
+      catch (e) { tmsg.textContent = e.message; }
+    });
+    fillT("");
+  }
+
   // ---- auto-save
   let timer = null;
   const schedule = () => { clearTimeout(timer); if (saveUrl) saved.textContent = "Saving…"; timer = setTimeout(save, 700); };

@@ -78,6 +78,17 @@ def _seat_presets(user_id):
 
 
 templates.env.globals["seat_presets"] = _seat_presets
+
+
+def _travelers(user_id):
+    """The user's saved travelers, for the seat watch form."""
+    return [{"id": r["id"], "name": r["name"], "first": r["first"], "last": r["last"], "email": r["email"] or "",
+             "status": r["status"] or "none",
+             "prefs": {k: v for k, v in seats.normalize(json.loads(r["prefs"])).items() if k != "migrated"}}
+            for r in db.query("SELECT * FROM travelers WHERE user_id=? ORDER BY name COLLATE NOCASE", (user_id,))]
+
+
+templates.env.globals["travelers"] = _travelers
 def _my_seats(w):
     """The seats this watch's passengers have now, from its seat checks: [{"seat", "flight"}]."""
     wid = (w.get("id") if isinstance(w, dict) else w["id"]) if w else None
@@ -785,6 +796,46 @@ def create_app(worker=None, start_worker=True):
                         "ON CONFLICT(user_id, name) DO UPDATE SET prefs=excluded.prefs",
                         (u["id"], name, seats.to_json(parse_seat_prefs(f)), db.now()))
         return JSONResponse({"ok": True, "presets": _seat_presets(u["id"])})
+
+    MAX_TRAVELERS = 30
+
+    @app.post("/travelers")
+    async def save_traveler(request: Request):
+        """Save the form's passenger, receipt email, status and seat priorities as a named traveler."""
+        u, s = require(request)
+        f = await request.form()
+        if not hmac.compare_digest(str(f.get("csrf", "")), s["csrf"]):
+            return JSONResponse({"ok": False, "error": "form expired"}, status_code=403)
+        first, last = (" ".join(str(f.get(k, "")).split())[:40] for k in ("booking_first", "booking_last"))
+        if not (first and last):
+            return JSONResponse({"ok": False, "error": "Fill in the first and last name first"}, status_code=400)
+        name = " ".join(str(f.get("traveler_name", "")).split())[:40] or f"{first} {last[0]}."
+        email = str(f.get("booking_email", "")).strip()[:120]
+        if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            return JSONResponse({"ok": False, "error": "The receipt email doesn't look right"}, status_code=400)
+        status = str(f.get("seat_status", "none"))
+        status = status if status in seats.STATUSES else "none"
+        have = db.query("SELECT name FROM travelers WHERE user_id=?", (u["id"],))
+        if name not in {r["name"] for r in have} and len(have) >= MAX_TRAVELERS:
+            return JSONResponse({"ok": False, "error": f"Up to {MAX_TRAVELERS} travelers: delete one first"},
+                                status_code=400)
+        with db.tx() as con:
+            con.execute("INSERT INTO travelers(user_id, name, first, last, email, status, prefs, created) "
+                        "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(user_id, name) DO UPDATE SET first=excluded.first, "
+                        "last=excluded.last, email=excluded.email, status=excluded.status, prefs=excluded.prefs",
+                        (u["id"], name, first, last, email or None, status, seats.to_json(parse_seat_prefs(f)),
+                         db.now()))
+        return JSONResponse({"ok": True, "name": name, "travelers": _travelers(u["id"])})
+
+    @app.post("/travelers/{tid}/delete")
+    async def delete_traveler(request: Request, tid: int):
+        u, s = require(request)
+        f = await request.form()
+        if not hmac.compare_digest(str(f.get("csrf", "")), s["csrf"]):
+            return JSONResponse({"ok": False, "error": "form expired"}, status_code=403)
+        with db.tx() as con:
+            con.execute("DELETE FROM travelers WHERE id=? AND user_id=?", (tid, u["id"]))
+        return JSONResponse({"ok": True, "travelers": _travelers(u["id"])})
 
     @app.post("/seat-presets/{pid}/delete")
     async def delete_seat_preset(request: Request, pid: int):
