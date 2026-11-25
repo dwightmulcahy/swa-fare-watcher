@@ -201,6 +201,7 @@ class SeatPicker:
                     "current": _scored(cur, self.prefs),
                     "options": [_scored(x, self.prefs) for x in options[:6]],
                     "picked": new["seat"] if seats.better(new, cur, self.prefs) else None,
+                    "best_here": seats.best_on_plane(smap, self.prefs, self.status),
                     "explanation": seats.explain(new, self.prefs) if self.prefs.get("explain", True) and new
                     and seats.better(new, cur, self.prefs) else ""})
                 if seats.better(new, cur, self.prefs):
