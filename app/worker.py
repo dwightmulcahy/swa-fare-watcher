@@ -999,8 +999,11 @@ class Worker:
         log = json.loads(job.get("log") or "[]") + [list(c) for c in changes]
         now = dt.datetime.now(dt.timezone.utc)
         best = seats.best_priority(seats.prefs_of(w))
+        # top = the best seat type this plane has (e.g. no "exit row, no seat in front" on board: Priority 2)
         perfect = bool(report) and best is not None and all(
-            (_seat_after(r) or {}).get("priority") == best for r in report)
+            (_seat_after(r) or {}).get("priority") is not None
+            and (_seat_after(r) or {}).get("priority") <= (r.get("best_here") or best) for r in report)
+        top_here = bool(report) and any((r.get("best_here") or best) != best for r in report)
         # before the window a perfect seat may still be beaten once Extra Legroom frees up
         perfect = perfect and (window or not gain)
         b = next((x for x in json.loads(w["booked"] or "[]") if x.get("leg") == job["leg"]), {})
@@ -1016,7 +1019,8 @@ class Worker:
                 f"Checking again {nxt.astimezone():%a %H:%M} for a better free seat."
         else:
             status = "failed" if stop else "done" if log else "unchanged"
-            text = stop or ("Everyone has a seat in your top priority." if perfect else
+            text = stop or (("Everyone has the best seat type this plane has." if top_here else
+                             "Everyone has a seat in your top priority.") if perfect else
                             f"Stopped {stop_before // 60} minutes before departure (Southwest closes online seat changes at 60 min, 90 min for international flights).")
             if log and not stop:
                 text = f"Done: {len(log)} seat change{'s' if len(log) != 1 else ''}. {text}"

@@ -340,6 +340,15 @@ def best_priority(prefs):
     return min(vals) if vals else None
 
 
+def best_on_plane(seat_map, prefs, status="none"):
+    """The best priority this plane has at all (taken or free) among seat types the status gets free:
+    with no "exit row, no seat in front" on board, Priority 2 is as good as it gets. None if unknown."""
+    types = allowed(status, True)
+    vals = [priority(s, prefs)[0] for s in seat_map or [] if s.get("type") in types]
+    vals = [v for v in vals if v is not None]
+    return min(vals) if vals else None
+
+
 # ---------- converting the earlier ranked wishes ----------
 def _legacy_fit(seat, old):
     """The scoring before priorities existed: each ranked wish outweighs everything below it."""

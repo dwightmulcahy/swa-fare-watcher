@@ -832,3 +832,28 @@ def test_seat_emails_go_to_the_receipt_email_copying_owner_and_admins(client, mo
     with db.tx() as con:
         con.execute("UPDATE watches SET booking_email=NULL WHERE id=?", (wid,))
     assert seat_mail_to(db.one("SELECT * FROM watches WHERE id=?", (wid,)), user) == ("owner@x.com", [])
+
+
+def test_top_priority_is_the_best_seat_type_this_plane_has(client, worker, sent):
+    from tests.conftest import future
+    prefs = seats.normalize({"priorities": {"exit_window_open": 1, "exit_window": 2, "std_window": 3}})
+    s = lambda code, typ, feats: {"seat": code, "row": int(code[:-1]), "col": code[-1], "type": typ,
+                                  "features": set(feats), "available": False, "selected": False}
+    no_open = [s("12A", "extra", {"window", "exit row"}), s("20A", "standard", {"window"})]
+    assert seats.best_on_plane(no_open, prefs, "a_list_preferred") == 2
+    assert seats.best_on_plane(no_open + [s("13A", "extra", {"window", "exit row", seats.OPEN_FRONT})], prefs) == 1
+    assert seats.best_on_plane(no_open, prefs, "plus") == 3          # can't get Extra Legroom free
+    assert seats.best_on_plane([], prefs) is None
+    # a watch whose passenger holds the plane's best (Priority 2) finishes
+    wid, db = _seat_watch(client, future(10))
+    opened = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET opens_at=? WHERE watch_id=?", (opened, wid))
+    job = worker.due_seat_jobs()[0]
+    cur = {"seat": "12A", "describe": "12A", "score": 90.0, "priority": 2, "label": "Priority 2: Exit-row window"}
+    _run_visit(worker, db.one("SELECT j.*, w.user_id FROM seat_jobs j JOIN watches w ON w.id=j.watch_id "
+                              "WHERE j.id=?", (job["id"],)), lambda u: ([], "no better"),
+               [{"passenger": "Pat Q", "current": cur, "options": [], "picked": None, "best_here": 2}])
+    j = db.one("SELECT * FROM seat_jobs WHERE id=?", (job["id"],))
+    assert j["status"] != "watching" and j["next_at"] is None
+    assert "best seat type this plane has" in db.one("SELECT note FROM seat_history WHERE event='finished'")["note"]
