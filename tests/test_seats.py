@@ -813,3 +813,22 @@ def test_remembered_map_shows_the_new_seat_after_a_move():
     assert isinstance(by["2F"]["features"], list)
     p.mark_moves([(0, 0, "2F", {"seat": "8E"})], missing=["8E"])     # not confirmed on the trip page: unchanged
     assert by["2F"]["selected"]
+
+
+def test_seat_emails_go_to_the_receipt_email_copying_owner_and_admins(client, monkeypatch):
+    from app.config import settings
+    from app.worker import seat_mail_to
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    with db.tx() as con:
+        con.execute("UPDATE users SET email='owner@x.com' WHERE username='admin'")
+        con.execute("INSERT INTO users(username, pw_hash, is_admin, active, email, created_at) "
+                    "VALUES ('boss', 'x', 1, 1, 'boss@x.com', '2026-01-01')")
+    w = db.one("SELECT * FROM watches WHERE id=?", (wid,))
+    user = db.one("SELECT * FROM users WHERE username='admin'")
+    assert seat_mail_to(w, user) == ("pat@x.com", ["owner@x.com", "boss@x.com"])
+    monkeypatch.setattr(settings, "seat_cc_admins", False)
+    assert seat_mail_to(w, user) == ("pat@x.com", ["owner@x.com"])
+    with db.tx() as con:
+        con.execute("UPDATE watches SET booking_email=NULL WHERE id=?", (wid,))
+    assert seat_mail_to(db.one("SELECT * FROM watches WHERE id=?", (wid,)), user) == ("owner@x.com", [])

@@ -115,3 +115,11 @@ def test_send_attaches_files(monkeypatch, tmp_path):
     m = message_from_string(sent["msg"])
     names = [p.get_filename() for p in m.walk() if p.get_filename()]
     assert m.is_multipart() and names == ["x.json"]
+
+
+def test_send_with_cc(smtp, monkeypatch):
+    got = {}
+    real = FakeSMTP.sendmail
+    monkeypatch.setattr(FakeSMTP, "sendmail", lambda self, frm, to, msg: got.update(to=to, msg=msg) or real(self, frm, to, msg))
+    assert mailer.send("a@b.c", "s", "<p>x</p>", cc=["c@d.e", "A@B.C", "c@d.e", ""])
+    assert got["to"] == ["a@b.c", "c@d.e"] and "Cc: c@d.e" in got["msg"]

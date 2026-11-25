@@ -268,6 +268,15 @@ def _seat_after(r):
     return r.get("current")
 
 
+def seat_mail_to(w, user):
+    """Seat watch emails: to the watch's receipt email (else its owner), copying the owner and, with
+    SWA_SEAT_CC_ADMINS, the admins. (to, [cc])"""
+    to = (dict(w).get("booking_email") or user["email"] or "").strip()
+    cc = [user["email"]] + (db.admin_emails() if settings.seat_cc_admins else [])
+    cc = [c for c in dict.fromkeys(c.strip() for c in cc if c) if c.lower() != to.lower()]
+    return (to, cc) if to else ((cc[0], cc[1:]) if cc else ("", []))
+
+
 def seat_results(report, changes):
     """What a seat check found, for the log: per passenger the seat kept or moved to, and the best other
     free seat on offer."""
@@ -1023,7 +1032,7 @@ class Worker:
         found = seat_results(report, changes)
         applog.info(f"{w['name']}: seat selection ({leg}): {status}. {found + '. ' if found else ''}{text}",
                     user_id=uid, watch_id=w["id"], source="seats")
-        if user["email"] and (changes or not nxt):
+        if (changes or not nxt) and seat_mail_to(w, user)[0]:
             url = seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"])
             if nxt:          # a change, still watching
                 subject, shown = "Seat selected", changes
@@ -1031,9 +1040,10 @@ class Worker:
                 subject = {"done": "Seat watch finished", "unchanged": "Seat watch finished, no change",
                            "failed": "Seat selection needs you"}[status]
                 shown = [tuple(c) for c in log]
-            mailer.send(user["email"], f"SWA {subject}: {w['name']} ({leg})",
+            to, cc = seat_mail_to(w, user)
+            mailer.send(to, f"SWA {subject}: {w['name']} ({leg})",
                         mailer.render_seat_result(f"{w['name']}: {leg} flight", shown, text, status != "failed",
-                                                  url, report))
+                                                  url, report), cc=cc)
         return status, changes, text
 
     @staticmethod
@@ -1066,7 +1076,7 @@ class Worker:
                         watch_id=w["id"], source="seats")
             leg = next((lg for f, lg in legs.items() if f and str(f) in str(flight)), "") or ""
             db.add_seat_history(w["id"], leg, "plane", flight=str(flight), note=f"{old} → {new}")
-        if not user or not user["email"]:
+        if not user or not seat_mail_to(w, user)[0]:
             return
         lines = [f"<b>{html.escape(f)}</b>: {html.escape(o)} → <b>{html.escape(n)}</b>" for f, o, n in changes]
         body = mailer.render_notice(
@@ -1077,7 +1087,8 @@ class Worker:
                         "Check your seat on the reservation.")],
             seat_picker.manage_url(w["booking_conf"], w["booking_first"], w["booking_last"]),
             button="Open my reservation")
-        mailer.send(user["email"], f"SWA plane change: {w['name']} ({changes[0][1]} → {changes[0][2]})", body)
+        to, cc = seat_mail_to(w, user)
+        mailer.send(to, f"SWA plane change: {w['name']} ({changes[0][1]} → {changes[0][2]})", body, cc=cc)
 
     def lookup_booking(self, watch_id, browser_factory=None):
         """Read a seat watch's flights (dates, departure times, airports, flight numbers) from its

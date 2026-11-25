@@ -55,8 +55,8 @@ def check_login():
     return False, f"can't reach {settings.gmail_host} ({'; '.join(errors)}): outgoing mail blocked?"
 
 
-def send(to, subject, body_html, attachments=()) -> bool:
-    """Email `body_html`, with optional file attachments (paths)."""
+def send(to, subject, body_html, attachments=(), cc=()) -> bool:
+    """Email `body_html`, with optional file attachments (paths) and Cc addresses."""
     if not to:
         return False
     if not (settings.gmail_user and settings.gmail_password):
@@ -76,6 +76,9 @@ def send(to, subject, body_html, attachments=()) -> bool:
             outer.attach(part)
         msg = outer
     msg["Subject"], msg["From"], msg["To"] = subject, settings.gmail_user, to
+    cc = [c for c in dict.fromkeys(cc or ()) if c and c.lower() != to.lower()]
+    if cc:
+        msg["Cc"] = ", ".join(cc)
     password = settings.gmail_password.replace(" ", "")   # app passwords are shown as "abcd efgh ..."
     errors = []
     # Port 465 (SSL) first, then 587 (STARTTLS): some networks and ISPs block or cut one of them,
@@ -84,8 +87,9 @@ def send(to, subject, body_html, attachments=()) -> bool:
         try:
             with _connect(port, 30) as s:
                 s.login(settings.gmail_user, password)
-                s.sendmail(settings.gmail_user, [to], msg.as_string())
-            applog.info(f"Email sent to {to} (port {port}): {subject}", source="mail")
+                s.sendmail(settings.gmail_user, [to, *cc], msg.as_string())
+            applog.info(f"Email sent to {to}{' (cc ' + ', '.join(cc) + ')' if cc else ''} (port {port}): {subject}",
+                        source="mail")
             return True
         except smtplib.SMTPAuthenticationError as e:
             applog.error(f"Email to {to} failed: Gmail rejected the login ({e.smtp_code}). GMAIL_USER must be the "

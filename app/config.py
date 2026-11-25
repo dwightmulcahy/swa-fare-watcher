@@ -88,6 +88,7 @@ class Settings:
         self.backup_copy_dir = _env("SWA_BACKUP_COPY_DIR", "")
         # email the admins when a Southwest page the app works on changes (see pagewatch.py)
         self.page_watch = _bool("SWA_PAGE_WATCH", True)
+        self.seat_cc_admins = _bool("SWA_SEAT_CC_ADMINS", True)
         self.backup_copy_keep = max(1, int(_env("SWA_BACKUP_COPY_KEEP", "30")))
         # Email the admins when no search run has finished for this many hours (0 = off)
         self.stale_hours = max(0.0, float(_env("SWA_STALE_HOURS", "26")))
