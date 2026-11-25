@@ -10,6 +10,14 @@
   <input type="hidden" name="kind" value="seats">
   <fieldset>
     <legend>Booking</legend>
+    <div class="travelers" id="travelers" data-travelers='{{ travelers(user.id)|tojson }}'>
+      <label>Traveler <span class="hint">fills in the name, receipt email, status and seat priorities</span>
+        <select id="traveler-pick"><option value="">Choose a saved traveler…</option></select></label>
+      <button type="button" id="traveler-delete" class="link" hidden>Delete traveler</button>
+      <span class="traveler-save"><input id="traveler-name" maxlength="40" placeholder="Save as… (e.g. Lisa F.)" aria-label="Traveler name">
+        <button type="button" id="traveler-save">Save traveler</button></span>
+      <span class="muted small" id="traveler-msg" role="status"></span>
+    </div>
     <div class="row">
       <label>Confirmation # <input name="booking_conf" value="{{ w.booking_conf or '' }}" maxlength="6" placeholder="ABC123" class="code" autocomplete="off" required></label>
       <label>First name <span class="hint">as booked</span><input name="booking_first" value="{{ w.booking_first or '' }}" autocomplete="off" required></label>

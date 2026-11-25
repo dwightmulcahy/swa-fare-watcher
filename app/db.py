@@ -140,6 +140,18 @@ CREATE TABLE IF NOT EXISTS seat_jobs(
   note TEXT,
   updated TEXT
 );
+CREATE TABLE IF NOT EXISTS travelers(      -- a user's saved travelers for seat watches
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,                        -- shown in the menu, e.g. "Lisa F."
+  first TEXT NOT NULL,
+  last TEXT NOT NULL,
+  email TEXT,
+  status TEXT,
+  prefs TEXT NOT NULL,                       -- seats.to_json(...): priorities, window/aisle, tie-breakers
+  created TEXT NOT NULL,
+  UNIQUE(user_id, name)
+);
 CREATE TABLE IF NOT EXISTS seat_presets(   -- a user's saved Seat Selection Priorities
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -273,3 +273,30 @@ def test_empty_seat_next_to_it_breaks_ties():
     off = {**prefs, "tiebreak": []}
     assert not seats.better(other, cur, off)                        # tie-breaker off: just another seat
     assert seats.normalize({})["tiebreak"][:3] == ["position", "legroom", "neighbor"]
+
+
+def test_travelers_save_list_and_delete(client):
+    import json
+
+    from app import db
+    from tests.conftest import csrf
+    from tests.test_web import admin_client
+    t = admin_client(client)
+    form = {"csrf": t, "booking_first": "Lisa", "booking_last": "Fern", "booking_email": "lisa@x.com",
+            "seat_status": "a_list_preferred", "seat_position": "aisle", "prio_exit_aisle": "1",
+            "tiebreak_order": "neighbor,legroom", "tb_neighbor": "1"}
+    r = client.post("/travelers", data=form).json()
+    assert r["ok"] and r["name"] == "Lisa F."                                 # default name: first + initial
+    x = r["travelers"][0]
+    assert (x["first"], x["last"], x["email"], x["status"]) == ("Lisa", "Fern", "lisa@x.com", "a_list_preferred")
+    assert x["prefs"]["position"] == "aisle" and x["prefs"]["tiebreak"] == ["neighbor"]
+    assert x["prefs"]["priorities"]["exit_aisle"] == 1
+    r = client.post("/travelers", data={**form, "traveler_name": "Lisa F.", "seat_status": "bogus"}).json()
+    assert len(r["travelers"]) == 1 and r["travelers"][0]["status"] == "none"   # same name: replaced
+    assert client.post("/travelers", data={**form, "booking_first": ""}).status_code == 400
+    assert client.post("/travelers", data={**form, "booking_email": "nope"}).status_code == 400
+    page = client.get("/watches/new?kind=seats").text
+    data = json.loads(page.split("data-travelers='")[1].split("'")[0].replace("&#34;", '"'))
+    assert data[0]["name"] == "Lisa F."
+    assert client.post(f"/travelers/{x['id']}/delete", data={"csrf": csrf(page)}).json()["travelers"] == []
+    assert not db.one("SELECT 1 FROM travelers")
