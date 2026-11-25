@@ -867,3 +867,16 @@ def test_top_priority_is_the_best_seat_type_this_plane_has(client, worker, sent)
     j = db.one("SELECT * FROM seat_jobs WHERE id=?", (job["id"],))
     assert j["status"] == "holding"
     assert "best seat type this plane has" in db.one("SELECT note FROM seat_history WHERE event='held'")["note"]
+
+
+def test_watch_page_says_which_tie_breaker_won(client):
+    from tests.conftest import future
+    wid, db = _seat_watch(client, future(10))
+    now = [{"passenger": "Lisa F.", "flight": "", "checked": "2026-11-25T13:55:00+00:00", "edge": "a lower seat number",
+            "seat": {"seat": "4F", "describe": "4F (Extra Legroom, Window)", "score": 100.0, "priority": 1,
+                     "label": "Priority 1: Extra-legroom window"},
+            "best": {"seat": "5A", "describe": "5A (Extra Legroom, Window)", "score": 100.0, "priority": 1,
+                     "label": "Priority 1: Extra-legroom window"}}]
+    with db.tx() as con:
+        con.execute("UPDATE seat_jobs SET seats_now=? WHERE watch_id=?", (json.dumps(now), wid))
+    assert "same priority; 4F wins on <b>a lower seat number</b>" in client.get(f"/watches/{wid}").text

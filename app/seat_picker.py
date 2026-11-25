@@ -126,6 +126,11 @@ class SeatPicker:
             for s in smap]}
         return label
 
+    def _edge(self, seat, options):
+        """The tie-breaker that puts the seat above the best other free seat of the same priority."""
+        other = next((o for o in options if seat is None or o["seat"] != seat["seat"]), None)
+        return seats.edge(seat, other, self.prefs)
+
     def mark_moves(self, plan, missing=()):
         """After a confirmed change, make the remembered maps show it (the map was read before the move):
         the new seat is yours and taken, the old one free again; empty-neighbour marks are redone."""
@@ -207,6 +212,7 @@ class SeatPicker:
                     "options": [_scored(x, self.prefs) for x in options[:6]],
                     "picked": new["seat"] if seats.better(new, cur, self.prefs) else None,
                     "best_here": top,
+                    "edge": self._edge(new if seats.better(new, cur, self.prefs) else cur, options),
                     "explanation": seats.explain(new, self.prefs) if self.prefs.get("explain", True) and new
                     and seats.better(new, cur, self.prefs) else ""})
                 if seats.better(new, cur, self.prefs):

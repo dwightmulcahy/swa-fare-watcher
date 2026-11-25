@@ -248,6 +248,26 @@ def priority(seat, prefs):
     return best
 
 
+def edge(seat, other, prefs):
+    """Why `seat` ranks above `other` when they share a priority: the tie-breaker that decided, in words
+    ("further forward in the cabin"), "a lower seat number" if they tie on all of them, else None."""
+    if seat is None or other is None or priority(seat, prefs)[0] != priority(other, prefs)[0]:
+        return None
+    mine, theirs = _tiebreak(seat, prefs), _tiebreak(other, prefs)
+    for k, x, y in zip(prefs.get("tiebreak") or [], mine, theirs):
+        if x < y:
+            return {"position": f"the {prefs.get('position')} you prefer",
+                    "legroom": "extra legroom",
+                    "forward": "further forward in the cabin",
+                    "view": "a window view",
+                    "recline": "full recline",
+                    "neighbor": "the rest of its side of the row is free" if x == 0 else "the seat next to it is free",
+                    }.get(k, TIEBREAKS.get(k, k).lower())
+        if x > y:
+            return None
+    return "a lower seat number" if (seat["row"], seat["col"]) < (other["row"], other["col"]) else None
+
+
 def _tiebreak(seat, prefs):
     a, out = attributes(seat), []
     for k in prefs.get("tiebreak") or []:
