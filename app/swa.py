@@ -70,6 +70,8 @@ FORM = {
     "points": '[role=checkbox][aria-labelledby="showFareInPoints-id"]',
     "calendar": '[role=checkbox][aria-labelledby="lowFareCalendar-id"]',
     "submit": "#flightBookingSubmit",
+    # the ⇄ between Depart and Arrive (its svg: "Click to reverse the departure and arrival airports")
+    "swap": 'button[class*="switcheroo"], button:has(svg[aria-label*="reverse the departure" i])',
 }
 COOKIE_ACCEPT = "#onetrust-accept-btn-handler"      # OneTrust cookie banner
 # The results page's "Shop in" switch: <input id="currency" role="combobox" value="Dollars">
@@ -1562,6 +1564,16 @@ class BrowserSearcher:
         # The form remembers the last search. If Arrive already holds our departure airport, typing
         # it into Depart is an "Invalid route with departure airport" (no suggestion is offered), so
         # change Arrive first, as a person would after seeing that.
+        # And the other field's airport is left out of the suggestions, so with the last search the other
+        # way round (DAL → LIR when we want LIR → DAL) neither order works: reverse them with the ⇄ button.
+        def holds(sel, code):
+            v = (page.locator(sel).first.input_value(timeout=5000) or "").strip().upper()
+            return v == code or code in re.findall(r"\b[A-Z]{3}\b", v)
+        if holds(FORM["origin"], dest) and holds(FORM["dest"], origin):
+            swap = page.locator(FORM["swap"]).first
+            if swap.count() and swap.is_visible():
+                self._click(swap)
+                self._beat(0.4, 1.0)
         held = (page.locator(FORM["dest"]).first.input_value(timeout=5000) or "").strip().upper()
         steps = [(FORM["dest"], dest), (FORM["origin"], origin)] if origin in held.split() or held == origin \
             else [(FORM["origin"], origin), (FORM["dest"], dest)]
