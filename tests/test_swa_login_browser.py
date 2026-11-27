@@ -765,6 +765,30 @@ def test_form_remembering_our_departure_in_arrive_is_filled_arrive_first(site, m
 
 
 
+
+def test_form_remembering_the_reverse_route_is_swapped_first(site, monkeypatch, tmp_path):
+    """The last search was the other way round (JAX → SJO when we want SJO → JAX): each field leaves the
+    other's airport out of its suggestions, so neither order works ("no suggestion for DAL", Nov 27).
+    A person presses the ⇄ button."""
+    from app import swa
+    from app.config import settings
+
+    monkeypatch.setattr(swa, "SEARCH_URL", site.replace("index.html", "select-depart.html"))
+    monkeypatch.setattr(settings, "home_url", site.replace("index.html", "home-menu.html"))
+    monkeypatch.setattr(settings, "book_url", site.replace("index.html", "book.html"))
+    monkeypatch.setattr(settings, "form_share", 1.0)
+    monkeypatch.setattr(settings, "debug_dir", tmp_path / "debug")
+    with swa.BrowserSearcher(profile_key="t-form-swap", human=False) as b:
+        b._warmed = True
+        _shopping_route(b, {("POINTS", "2027-01-02"): "12,000"})
+        b.page.goto(settings.home_url)
+        b.page.evaluate("localStorage.setItem('prefillOrigin', 'JAX'); localStorage.setItem('prefillDest', 'SJO')")
+        got = b.search("SJO", "JAX", "2027-01-02", 1, "POINTS")
+        url = b.page.url
+    assert got and b._form_works is True
+    assert "originationAirportCode=SJO" in url and "destinationAirportCode=JAX" in url
+
+
 def seats_700():
     from app import seats
     return seats.example_maps()["Boeing 737-700"]
