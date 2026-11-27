@@ -24,7 +24,11 @@ COPY requirements.txt ./
 # A desktop-sized font set: a near-empty font list is a common sign of a bare server.
 # pip is removed afterwards: the runtime doesn't need it, and its vendored packages trip
 # the vulnerability scan.
-RUN apt-get update \
+# APT_REFRESH (CI passes the date) re-runs this layer daily instead of reusing a cached one, so Debian
+# security fixes released since the last build are picked up.
+ARG APT_REFRESH=
+RUN echo "packages as of ${APT_REFRESH:-build time}" \
+ && apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends xvfb tzdata mesa-vulkan-drivers libvulkan1 libatomic1 \
  && pip install -r requirements.txt \
